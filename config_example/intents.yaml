@@ -1,0 +1,76 @@
+# Polyglot Assist — example intents file
+# Copy to /config/polyglot_assist/intents.yaml and adjust to your sentences.
+#
+# Each intent_name MUST already be registered as an `intent_script` entry in
+# your HA configuration (e.g. /config/packages/voice_intent_wetter.yaml).
+# Polyglot Assist matches the sentence, dispatches via intent.async_handle,
+# and the matched language is injected as the `lang` slot so your existing
+# Jinja templates can branch on it without changes.
+
+intents:
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Wetter Jetzt + Heute
+  # The matching intent_script:WetterJetztUndHeute must exist (already
+  # deployed at /config/packages/voice_intent_wetter.yaml in this setup).
+  # ─────────────────────────────────────────────────────────────────────
+  WetterJetztUndHeute:
+    description: "Current temperature + today's forecast"
+    sentences:
+      de:
+        - "[wie ist|wie wird|wie ist denn|was ist mit] [dem|das] wetter"
+        - "[wie ist|wie wird] [das] wetter heute"
+        - "[wie wird|wie ist] [es] [denn] heute"
+        - "wettervorhersage [heute]"
+        - "wetter draußen"
+        - "wetter in [uccle|brüssel|hause|zuhause]"
+        - "wie warm wird [es] [heute]"
+        - "wie kalt wird [es] [heute]"
+        - "regnet es [heute]"
+        - "scheint die sonne [heute]"
+      en:
+        - "(what is|what's|how is) the weather"
+        - "(what is|what's) the weather today"
+        - "weather today"
+        - "weather forecast"
+        - "weather outside"
+        - "is it (sunny|raining|cloudy) [today]"
+        - "(how warm|how cold) is it [today]"
+        - "(how warm|how cold) will it [be|get] [today]"
+      fr:
+        - "(quel|quelle) (est|sera) la météo"
+        - "(quel|quelle) (est|sera) la météo aujourd'hui"
+        - "météo aujourd'hui"
+        - "prévisions météo"
+        - "il fait quel temps"
+        - "fait-il (chaud|froid) [aujourd'hui]"
+        - "il (pleut|fait beau|fait soleil) [aujourd'hui]"
+        - "quel temps fait-il"
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Wetter Morgen
+  # ─────────────────────────────────────────────────────────────────────
+  WetterMorgen:
+    description: "Tomorrow's forecast"
+    sentences:
+      de:
+        - "wetter morgen"
+        - "[wie wird|wie ist] [das] wetter morgen"
+        - "wettervorhersage morgen"
+        - "wie [wird|warm|kalt] [es|ist es] morgen"
+        - "regnet es morgen"
+        - "wird es morgen [warm|kalt|regnen|schneien]"
+        - "scheint morgen die sonne"
+      en:
+        - "weather tomorrow"
+        - "(what's|what is|how is) the weather tomorrow"
+        - "weather forecast tomorrow"
+        - "(how warm|how cold) (will|is) it [going to] [be] tomorrow"
+        - "will it (rain|snow|be sunny) tomorrow"
+      fr:
+        - "météo demain"
+        - "(quel|quelle) (est|sera) la météo demain"
+        - "prévisions météo demain"
+        - "fera-t-il (chaud|froid) demain"
+        - "il (pleut|va pleuvoir|va neiger) demain"
+        - "quel temps fera-t-il demain"

@@ -1,0 +1,28 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Polyglot Assist",
+        "description": "Multi-language Tier-1 conversation agent.\n\nPick an LLM agent to receive unmatched utterances. The intents file is read from `/config/{intents_default}` and reloadable via the `polyglot_assist.reload` service.",
+        "data": {
+          "fallback_agent": "Fallback conversation agent",
+          "intents_file": "Intents file (relative to /config)"
+        }
+      }
+    },
+    "error": {
+      "intents_not_found": "Intents file not found at the given path.",
+      "intents_invalid": "Intents file failed validation. Check the log for details."
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "Reload intents",
+      "description": "Rebuild the multi-language Hassil matcher from the configured intents file."
+    },
+    "test_match": {
+      "name": "Test match",
+      "description": "Run a string through the matcher without dispatching."
+    }
+  }
+}

@@ -1,0 +1,30 @@
+reload:
+  name: Reload intents
+  description: >-
+    Rebuild the multi-language Hassil matcher from the configured intents file.
+    Use after editing /config/polyglot_assist/intents.yaml. Safe — the old
+    matcher stays active until the new one is validated.
+
+test_match:
+  name: Test match
+  description: >-
+    Run a string through the matcher without dispatching the intent. Returns
+    which intent (if any) would match and in which language. Useful for
+    sentence-tuning before deploy.
+  fields:
+    text:
+      name: Text
+      description: The utterance to test.
+      required: true
+      example: "Wettervorhersage heute"
+      selector:
+        text:
+    language:
+      name: Language hint
+      description: >-
+        Optional language hint (BCP-47 short code, e.g. ``de``, ``en``, ``fr``).
+        If omitted, languages are tried in the matcher's default order.
+      required: false
+      example: "de"
+      selector:
+        text:
