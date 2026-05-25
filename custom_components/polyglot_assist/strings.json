@@ -15,6 +15,72 @@
       "intents_invalid": "Intents file failed validation. Check the log for details."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Polyglot Assist",
+        "description": "What would you like to do?",
+        "menu_options": {
+          "change_fallback": "Change fallback agent",
+          "edit_visual": "Edit intents (visual)",
+          "edit_yaml": "Edit intents (YAML)",
+          "add_intent": "Add a new intent",
+          "reload": "Reload matcher (re-read intents.yaml)"
+        }
+      },
+      "change_fallback": {
+        "title": "Fallback conversation agent",
+        "description": "Pick the agent that receives utterances Polyglot did not match.",
+        "data": {
+          "fallback_agent": "Fallback conversation agent"
+        }
+      },
+      "edit_visual": {
+        "title": "Choose an intent to edit",
+        "description": "Pick the intent whose sentences you want to edit.",
+        "data": {
+          "intent_name": "Intent"
+        }
+      },
+      "edit_intent": {
+        "title": "Edit intent: {intent_name}",
+        "description": "Edit per-language sentences (one per line). Languages already defined: {existing_langs}. To add another language, pick its code below and save — an empty bucket appears for it.",
+        "data": {
+          "description": "Description (optional)",
+          "response_intent": "Target intent_script name (HA intent to dispatch to)",
+          "add_language": "Add another language (BCP-47, e.g. 'es')"
+        }
+      },
+      "edit_yaml": {
+        "title": "Edit intents.yaml",
+        "description": "Edit the raw YAML for /config/polyglot_assist/intents.yaml. Validated on save — if YAML is malformed, no write happens.",
+        "data": {
+          "yaml_content": "YAML"
+        }
+      },
+      "add_intent": {
+        "title": "Add a new intent",
+        "description": "Create a new intent. After save, you can add sentences in the visual editor.",
+        "data": {
+          "new_intent_name": "Intent name (alphanumeric + underscore, e.g. 'EnergieZusammenfassung')",
+          "description": "Description (optional)",
+          "initial_language": "Initial language to start with"
+        }
+      },
+      "reload": {
+        "title": "Reload matcher",
+        "description": "Rebuild the Hassil matcher from the on-disk intents.yaml. Useful after editing the file externally."
+      }
+    },
+    "error": {
+      "invalid_yaml": "YAML failed to parse: {err}. Fix the syntax and save again.",
+      "invalid_name": "Intent name must be alphanumeric with optional underscores.",
+      "name_exists": "An intent with that name already exists."
+    },
+    "abort": {
+      "no_intents": "No intents found in the file. Use 'Add a new intent' to create one."
+    }
+  },
   "services": {
     "reload": {
       "name": "Reload intents",

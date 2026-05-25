@@ -1,24 +1,26 @@
-# Polyglot Assist — example intents file
-# Copy to /config/polyglot_assist/intents.yaml and adjust to your sentences.
+# Polyglot Assist — Tier-1 Intent Definitions
 #
-# Each intent_name MUST already be registered as an `intent_script` entry in
-# your HA configuration (e.g. /config/packages/voice_intent_wetter.yaml).
-# Polyglot Assist matches the sentence, dispatches via intent.async_handle,
-# and the matched language is injected as the `lang` slot so your existing
-# Jinja templates can branch on it without changes.
+# All Tier-1 intents in one file, per-language sentence-buckets.
+# Each intent dispatches to a registered HA intent_script of the same name
+# via intent.async_handle (lang slot is injected automatically by Polyglot
+# Assist so user's existing per-language Jinja templates can branch).
+#
+# Pattern strategy applied uniformly:
+#   • Canonical short forms
+#   • Longer realistic phrasings ("was kannst du mir über X sagen")
+#   • Imperative variants ("zeig mir X", "give me X", "donne-moi X")
+#   • Typo-/STT-tolerant alternatives where they cause real-world misses
 
 intents:
 
-  # ─────────────────────────────────────────────────────────────────────
-  # Wetter Jetzt + Heute
-  # The matching intent_script:WetterJetztUndHeute must exist (already
-  # deployed at /config/packages/voice_intent_wetter.yaml in this setup).
-  # ─────────────────────────────────────────────────────────────────────
+  # ═════════════════════════════════════════════════════════════════════
+  # WETTER
+  # ═════════════════════════════════════════════════════════════════════
+
   WetterJetztUndHeute:
     description: "Current temperature + today's forecast"
     sentences:
       de:
-        # Klassische Kurzformen
         - "[wie ist|wie wird|wie ist denn|was ist mit] [dem|das] wetter"
         - "[wie ist|wie wird] [das] wetter heute"
         - "[wie wird|wie ist] [es] [denn] heute"
@@ -29,12 +31,12 @@ intents:
         - "wie kalt wird [es] [heute]"
         - "regnet es [heute]"
         - "scheint die sonne [heute]"
-        # Längere realistische Tipp-Formen
         - "was [kannst du|sagst du|weisst du|hast du] [mir] über (das|den) wetter [heute] [sagen|erzählen]"
         - "[erzähl|sag|gib] mir [bitte] [etwas|was] über (das|den) wetter [heute]"
         - "[wie ist|wie sind] die [aktuelle|aktuellen] [wetter|temperaturen|wetterbedingungen]"
-        - "[gib mir|zeig mir|sag mir] [den|das] wetter[bericht]? [heute]?"
+        - "[gib mir|zeig mir|sag mir] [den|das] wetter[bericht] [heute]"
         - "[das|den] wetterbericht [heute]"
+        - "(wetter|temperatur) [bitte]"
       en:
         - "(what is|what's|how is) the weather"
         - "(what is|what's) the weather today"
@@ -44,11 +46,11 @@ intents:
         - "is it (sunny|raining|cloudy) [today]"
         - "(how warm|how cold) is it [today]"
         - "(how warm|how cold) will it [be|get] [today]"
-        - "[can you] tell me [about] the weather [today]?"
+        - "[can you] tell me [about] the weather [today]"
         - "[give me|show me] the (weather|forecast) [today]"
         - "what (are|is) the [current] weather conditions"
+        - "(weather|temperature) [please]"
       fr:
-        # Korrekte Formen
         - "(quel|quelle) (est|sera) la météo"
         - "(quel|quelle) (est|sera) la météo aujourd'hui"
         - "météo aujourd'hui"
@@ -57,15 +59,13 @@ intents:
         - "fait-il (chaud|froid) [aujourd'hui]"
         - "il (pleut|fait beau|fait soleil) [aujourd'hui]"
         - "quel temps fait-il"
-        # Tipp-/STT-Variants ("Quelle" statt "Quel", "fait-ils" Plural-Typo)
-        - "(quel|quelle) temps [fait-il|fait-ils|fait il|fait ils|fait-elle]"
-        - "(quel|quelle) (tempe|temp|temps|temps) (fait-il|fait-ils|fait il|fait ils)"
+        - "quelle temps fait-il"
+        - "(quel|quelle) temps (fait-il|fait-ils|fait il|fait ils|fait-elle)"
+        - "(quel|quelle) (tempe|temp|temps) (fait-il|fait-ils|fait il|fait ils)"
         - "[dis-moi|donne-moi|montre-moi] (la|le) météo [aujourd'hui]"
         - "que peux-tu (me|m') (dire|raconter) (sur|au sujet de) (la|le) (météo|temps)"
+        - "(météo|metto|meteo) [s'il te plaît]"
 
-  # ─────────────────────────────────────────────────────────────────────
-  # Wetter Morgen
-  # ─────────────────────────────────────────────────────────────────────
   WetterMorgen:
     description: "Tomorrow's forecast"
     sentences:
@@ -77,11 +77,10 @@ intents:
         - "regnet es morgen"
         - "wird es morgen [warm|kalt|regnen|schneien]"
         - "scheint morgen die sonne"
-        # Lange Tipp-Formen
         - "was [kannst du|sagst du|weisst du|hast du] [mir] über (das|den) wetter morgen [sagen|erzählen]"
         - "[erzähl|sag|gib] mir [bitte] [etwas|was] über (das|den) wetter morgen"
-        - "[gib mir|zeig mir|sag mir] [den|das] wetter[bericht]? [für|von|am]? morgen"
-        - "[das|den] wetterbericht [für|von|am]? morgen"
+        - "[gib mir|zeig mir|sag mir] [den|das] wetter[bericht] [für|von|am] morgen"
+        - "[das|den] wetterbericht [für|von|am] morgen"
       en:
         - "weather tomorrow"
         - "(what's|what is|how is) the weather tomorrow"
@@ -89,7 +88,7 @@ intents:
         - "(how warm|how cold) (will|is) it [going to] [be] tomorrow"
         - "will it (rain|snow|be sunny) tomorrow"
         - "[can you] tell me [about] the weather tomorrow"
-        - "[give me|show me] [the] (weather|forecast) (for|of)? tomorrow"
+        - "[give me|show me] [the] (weather|forecast) [for|of] tomorrow"
       fr:
         - "météo demain"
         - "(quel|quelle) (est|sera) la météo demain"
@@ -97,12 +96,294 @@ intents:
         - "fera-t-il (chaud|froid) demain"
         - "il (pleut|va pleuvoir|va neiger) demain"
         - "quel temps fera-t-il demain"
-        # STT/Tipp-Variants für demain ("de ma", "de main", "deux mains")
         - "(quel|quelle) temps (fera-t-il|fera-t-ils|fera t il) demain"
-        - "(quel|quelle) (tempe|temp|temps|temps) (fera-t-il|fera-t-ils) demain"
         - "[dis-moi|donne-moi|montre-moi] (la|le) météo demain"
         - "que peux-tu (me|m') (dire|raconter) (sur|au sujet de) (la|le) (météo|temps) demain"
-        # STT-Häufige Fehler
+        # STT-Häufige Parakeet-FR-Fehler
         - "metto (de ma|de main|deux mains)"
         - "(mettez|mets) (au|aux) deux mains"
         - "(météo|metto|meteo) (de ma|de main|demain|deux mains)"
+
+  # ═════════════════════════════════════════════════════════════════════
+  # ENERGIE — PV, Verbrauch, Netz, Batterie
+  # ═════════════════════════════════════════════════════════════════════
+
+  EnergieZusammenfassung:
+    description: "Full energy summary: PV + house + grid + battery + daily totals"
+    sentences:
+      de:
+        - "[wie ist|was ist|gib mir] [die] energie[zusammenfassung|bilanz|status|bericht]"
+        - "energiezusammenfassung"
+        - "energiebericht"
+        - "energiestatus"
+        - "stromzusammenfassung"
+        - "wie sieht die energie aus"
+        - "wie ist [unsere|meine] strombilanz"
+        - "hausenergie"
+        - "energieuebersicht"
+        - "energieübersicht"
+        - "was [kannst du|sagst du] [mir] über (die|unsere) energie [sagen|erzählen]"
+        - "[gib mir|zeig mir|sag mir] [die] energie[zusammenfassung|bilanz|status]"
+        - "(energie|strom) [bitte]"
+      en:
+        - "[how is|what is|give me] [the] energy (summary|status|report|balance)"
+        - "energy summary"
+        - "energy status"
+        - "energy report"
+        - "house energy"
+        - "power summary"
+        - "[can you] tell me [about] (the energy|our energy|power)"
+        - "[give me|show me] [the] energy (overview|summary|status)"
+      fr:
+        - "(résumé|bilan|état|rapport) (d|de l|énergétique) [énergétique]"
+        - "résumé énergie"
+        - "bilan énergétique"
+        - "état énergétique"
+        - "[comment va] l(a|') énergie"
+        - "(énergie|électricité) [s'il te plaît]"
+
+  EnergieAktuell:
+    description: "Live snapshot: PV, consumption, grid balance, battery SOC"
+    sentences:
+      de:
+        - "wie ist [die|der] [aktuelle] [strom|energie] [gerade]"
+        - "[was|wie viel] [strom|energie] [gerade|aktuell|momentan]"
+        - "[wie viel|wieviel] [strom] [verbraucht das haus|verbrauchen wir]"
+        - "strom aktuell"
+        - "energie aktuell"
+        - "[live|aktuelle] energie"
+        - "[aktueller|momentaner] strom[verbrauch]"
+        - "was verbrauchen wir gerade"
+      en:
+        - "[how much] power [right now|currently|at the moment]"
+        - "current power"
+        - "live power"
+        - "what is the power [right now]"
+        - "[how much|what's] our current (power|consumption|energy)"
+      fr:
+        - "(énergie|consommation|puissance) (actuelle|en ce moment|maintenant)"
+        - "[combien d'|quelle] (énergie|électricité) consommons-nous"
+        - "consommation actuelle"
+        - "puissance actuelle"
+
+  BatterieStatus:
+    description: "House battery state of charge + power flow"
+    sentences:
+      de:
+        - "[wie ist|wie voll ist] [die|der] [haus]batterie"
+        - "[wie ist|wie voll ist] [der] [haus]speicher"
+        - "batteriestatus"
+        - "speicherstatus"
+        - "wie ist der akku"
+        - "wie geladen ist [die] batterie"
+        - "soc [der batterie]"
+        - "ladezustand [batterie|speicher|akku]"
+        - "[wie viel|wieviel] prozent [hat] [die] batterie"
+        - "[wie viel|wieviel] [ist] [die] batterie geladen"
+      en:
+        - "[how is|how full is] the [house] battery"
+        - "battery status"
+        - "battery state"
+        - "[how much|how is] the battery charge"
+        - "[house] battery [soc|status|level]"
+        - "(state of charge|charge level)"
+      fr:
+        - "(état|niveau) [de la] batterie"
+        - "[combien] (de) charge [de la] batterie"
+        - "batterie [s'il te plaît|stp]"
+        - "(soc|state of charge)"
+
+  PVStatus:
+    description: "Photovoltaic production current + today + tomorrow forecast"
+    sentences:
+      de:
+        - "[wie ist|was macht|wie viel liefert] [die] [pv|photovoltaik|solar|solaranlage]"
+        - "pv status"
+        - "solar status"
+        - "[wie viel|wieviel] [solar|pv] [heute]"
+        - "[was|wie viel] erzeugt die pv"
+        - "pv prognose"
+        - "[wieviel|wie viel] solar [morgen]"
+        - "solaranlage [heute|status]"
+        - "[wie viel|wieviel] strom [produziert|erzeugt] [die] (pv|solar|solaranlage)"
+      en:
+        - "[how is|how much] [the] solar [today]"
+        - "[how is|how much] [the] pv [today]"
+        - "solar status"
+        - "pv status"
+        - "solar forecast [tomorrow]"
+        - "solar production"
+        - "[how much] (solar|pv) (power|production) [today|tomorrow]"
+      fr:
+        - "(état|production) [du] (solaire|pv|photovoltaïque)"
+        - "(combien) (de) (solaire|photovoltaïque) [aujourd'hui|demain]"
+        - "(pv|solaire) [status|aujourd'hui]"
+        - "prévision (solaire|photovoltaïque) [demain]"
+
+  # ═════════════════════════════════════════════════════════════════════
+  # WÄSCHE — Waschmaschine, Trockner
+  # ═════════════════════════════════════════════════════════════════════
+
+  WaescheStatus:
+    description: "Both washing machine + dryer status in one response"
+    sentences:
+      de:
+        - "[wie ist|was macht] [die] waesche"
+        - "[wie ist|was macht] [die] wäsche"
+        - "waeschestatus"
+        - "wäschestatus"
+        - "[status|stand] [der] waesche"
+        - "[status|stand] [der] wäsche"
+        - "waesche [und] trockner"
+        - "wäsche [und] trockner"
+        - "waschmaschine und [waesche]trockner"
+        - "waschmaschine und [wäsche]trockner"
+        - "[wie steht es um|wie ist es mit] [der] waesche"
+        - "[wie steht es um|wie ist es mit] [der] wäsche"
+      en:
+        - "[how is|what about] the laundry"
+        - "laundry status"
+        - "washing machine and dryer"
+        - "[give me] [the] laundry status"
+        - "[how are|what about] the (washer|washing machine) and (dryer|tumble dryer)"
+      fr:
+        - "(comment va|état|statut|état du|statut du) [la|le|du] (linge|lessive)"
+        - "statut du linge"
+        - "état du linge"
+        - "(lave-linge|machine à laver) et (sèche-linge|sécheuse)"
+        - "(linge|lessive) [s'il te plaît]"
+
+  WaschmaschineStatus:
+    description: "Detailed washing-machine status (program + phase + remaining time)"
+    sentences:
+      de:
+        - "[wie ist|was macht|status der|stand der] waschmaschine"
+        - "waschmaschinenstatus"
+        - "laeuft die waschmaschine"
+        - "läuft die waschmaschine"
+        - "ist die waschmaschine [an|aus|fertig]"
+        - "was macht die wm"
+      en:
+        - "[how is|what is] the washing machine [doing]"
+        - "washing machine status"
+        - "is the washing machine [on|off|done|running]"
+        - "is the washer [running|done|finished]"
+      fr:
+        - "(état|statut|comment va) (du|le|la) (lave-linge|machine à laver)"
+        - "(lave-linge|machine à laver) [status|état]"
+
+  TrocknerStatus:
+    description: "Detailed dryer status"
+    sentences:
+      de:
+        - "[wie ist|was macht|status [vom|des]] [waesche]trockner"
+        - "[wie ist|was macht|status [vom|des]] [wäsche]trockner"
+        - "trocknerstatus"
+        - "laeuft der trockner"
+        - "läuft der trockner"
+        - "ist der [waesche|wäsche]trockner [an|aus|fertig]"
+      en:
+        - "[how is|what is] the dryer [doing]"
+        - "dryer status"
+        - "is the dryer [on|off|done|running]"
+        - "is the (tumble dryer|dryer) (running|finished)"
+      fr:
+        - "(état|statut|comment va) (du|le) sèche-linge"
+        - "le sèche-linge (tourne|marche|est en marche)"
+
+  WaescheFertig:
+    description: "Quick check: is laundry done? With remaining time if running"
+    sentences:
+      de:
+        - "ist die waesche fertig"
+        - "ist die wäsche fertig"
+        - "[ist] [die] waschmaschine fertig"
+        - "[hat] [die] waschmaschine fertig"
+        - "[ist] [der] trockner fertig"
+        - "[ist] die waesche schon fertig"
+        - "[ist] die wäsche schon fertig"
+        - "muss [ich] [die] waesche [raus|ausraeumen|ausräumen]"
+        - "muss [ich] [die] wäsche [raus|ausraeumen|ausräumen]"
+        - "[wie lang|wie lange] [noch|noch waesche|noch wäsche|braucht die waesche|braucht die wäsche]"
+        - "[wie viel|wieviel] zeit [hat] [die] waesche"
+        - "[wie viel|wieviel] zeit [hat] [die] wäsche"
+      en:
+        - "is the laundry [done|ready|finished]"
+        - "is the washing [done|ready|finished]"
+        - "is the dryer done"
+        - "how long [for the] laundry"
+        - "how much time [for the|left on] [washing machine|dryer|laundry]"
+        - "do I need to (empty|take out) the (washer|laundry)"
+      fr:
+        - "[est-ce que] le linge est [prêt|fini|terminé]"
+        - "[est-ce que] le lave-linge est fini"
+        - "[est-ce que] le sèche-linge est fini"
+        - "combien de temps [pour le|reste sur le] (lave-linge|sèche-linge|linge)"
+        - "(dois-je|faut-il) (sortir|vider) le linge"
+
+  # ═════════════════════════════════════════════════════════════════════
+  # LICHT — Status-Queries (Steuerung via HA Built-in HassTurnOn/Off)
+  # ═════════════════════════════════════════════════════════════════════
+
+  LichtStatusAlle:
+    description: "Which lights are currently on (house-wide, voice-exposed only)"
+    sentences:
+      de:
+        - "[welche|wie viele|wieviele] lichter sind an"
+        - "welches licht ist an"
+        - "wie viele lampen sind an"
+        - "sind [denn|noch] [welche] lichter an"
+        - "lichter status"
+        - "lichtstatus"
+        - "[wo brennt|wo ist] [noch] licht"
+        - "ist [denn] [irgendwo] [noch] licht an"
+        - "[gib mir|zeig mir|sag mir] [den] lichtstatus"
+      en:
+        - "(which|how many) lights are on"
+        - "which light is on"
+        - "(any|are any) lights [still] on"
+        - "lights status"
+        - "(give me|show me) the lights status"
+      fr:
+        - "(quelles|combien de) lumières sont allumées"
+        - "(des|y a-t-il des) lumières [encore] allumées"
+        - "statut [des] lumières"
+
+  LichtStatusBereich:
+    description: "Which lights are on in a specific area"
+    sentences:
+      de:
+        - "welches licht ist [im|in der|in dem|in] {area} an"
+        - "welche lichter sind [im|in der|in dem|in] {area} an"
+        - "wie viele lichter sind [im|in der|in dem|in] {area} an"
+        - "[ist] [denn] [noch] [ein] licht [im|in der|in dem|in] {area} an"
+        - "licht status [im|in der|in dem|in] {area}"
+        - "lichtstatus {area}"
+        - "welche lampen sind [im|in der|in dem|in] {area} an"
+      en:
+        - "(which|how many) lights are on in [the] {area}"
+        - "(any|are any) lights on in [the] {area}"
+        - "lights status [in] [the] {area}"
+      fr:
+        - "(quelles|combien de) lumières sont allumées (dans|à) (la|le|l') {area}"
+        - "statut [des] lumières (dans|à) [la|le|l'] {area}"
+
+  LichtAllesAus:
+    description: "Turn all voice-exposed lights off + speak count of how many were on"
+    sentences:
+      de:
+        - "alle lichter [komplett] aus"
+        - "[mach|schalte] alle lichter [komplett] aus"
+        - "alles licht aus"
+        - "alle lampen aus"
+        - "schalt[e] [bitte] alle lichter aus"
+        - "lichter ausschalten"
+      en:
+        - "[turn] all lights off"
+        - "[switch] all lights off"
+        - "lights off"
+        - "[please] turn off all the lights"
+      fr:
+        - "[éteins|éteignez] [toutes] les lumières"
+        - "toutes les lumières (éteintes|off)"
+        - "(éteignez|éteins) tout"
