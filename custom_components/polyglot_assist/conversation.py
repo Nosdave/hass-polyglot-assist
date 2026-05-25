@@ -134,6 +134,10 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
 
         # Miss → proxy to fallback agent.
         t_miss_ms = (time.perf_counter() - t0) * 1000.0
+        _LOGGER.debug(
+            "Polyglot miss after %.1f ms — text=%r (lang_hint=%s) → proxy to %s",
+            t_miss_ms, user_input.text, user_input.language, self._fallback_agent_id,
+        )
         return await self._proxy_to_fallback(user_input, t_miss_ms)
 
     async def _handle_match(

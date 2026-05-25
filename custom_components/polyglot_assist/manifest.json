@@ -9,7 +9,6 @@
   "integration_type": "service",
   "config_flow": true,
   "min_ha_version": "2026.1.0",
-  "requirements": ["hassil>=2.0,<3"],
   "after_dependencies": [
     "assist_pipeline",
     "intent",
