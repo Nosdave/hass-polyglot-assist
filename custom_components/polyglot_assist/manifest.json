@@ -1,7 +1,7 @@
 {
   "domain": "polyglot_assist",
   "name": "Polyglot Assist",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "documentation": "https://github.com/Nosdave/hass-polyglot-assist",
   "issue_tracker": "https://github.com/Nosdave/hass-polyglot-assist/issues",
   "codeowners": ["@Nosdave"],
