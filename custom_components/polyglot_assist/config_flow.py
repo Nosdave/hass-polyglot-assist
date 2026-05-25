@@ -47,8 +47,8 @@ class PolyglotAssistConfigFlow(ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_FALLBACK_AGENT): selector.ConversationAgentSelector(
-                    selector.ConversationAgentSelectorConfig()
+                vol.Required(CONF_FALLBACK_AGENT): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="conversation")
                 ),
                 vol.Required(
                     CONF_INTENTS_FILE, default=DEFAULT_INTENTS_FILE
