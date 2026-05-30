@@ -51,7 +51,7 @@ Polyglot Assist fixes that by being **the** selected agent (not a
 local-fallback companion) and owning its own per-language matcher.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full stack: STT polyglot
-(Parakeet on Spark) → polyglot_assist → LLM fallback → TTS polyglot
+(Parakeet on a GPU host) → polyglot_assist → LLM fallback → TTS polyglot
 (Wyoming pocket-tts with Lingua-LID).
 
 ## Companion project
