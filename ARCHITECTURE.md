@@ -42,7 +42,7 @@ and replaceable.
   │ Layer 5 — TTS (polyglot)                                      │
   │   Wyoming pocket-tts v1.6.0                                   │
   │   ├─ text_norm.py preprocess (numbers→words, units, markdown) │
-  │   ├─ Lingua-LID on text → pick voice state (david_de/en/fr)   │
+  │   ├─ Lingua-LID on text → pick voice state (eve_de/en/fr)     │
   │   └─ Kyutai Mimi decoder + FlowLM → 24 kHz PCM                │
   └─────────────────────────────┬────────────────────────────────┘
                                 ▼
@@ -158,7 +158,7 @@ transformer) at `dnest/wyoming-pocket-tts-multi:0.5-cuda-streaming-ha`.
    - Numbers → words via `num2words` (de/en/fr)
    - Whitespace collapse
 2. **Lingua-LID** detects the language of the (now-normalized) text.
-3. **Voice state lookup**: `david_<lang>` voice-state encoded from a
+3. **Voice state lookup**: `eve_<lang>` voice-state encoded from a
    per-language WAV reference.
 4. **FlowLM** generates Mimi codes (8 streams, ~12.5 Hz frame rate).
 5. **Mimi decoder** generates 24 kHz PCM.
@@ -167,7 +167,7 @@ transformer) at `dnest/wyoming-pocket-tts-multi:0.5-cuda-streaming-ha`.
 **Why this works for polyglot**: Lingua detects "Hallo Welt" as `de` and
 "Hello world" as `en` from the text alone — the matched intent's
 `{% if lang == 'fr' %}…{% endif %}` produces French speech, Lingua sees
-French, pocket-tts switches to `french_24l` + `david_fr` voice. The
+French, pocket-tts switches to `french_24l` + `eve_fr` voice. The
 French Mimi-decoder produces native French intonation, not French-text-
 in-German-voice.
 
