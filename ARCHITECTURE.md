@@ -12,7 +12,7 @@ and replaceable.
                                        ▼
   ┌──────────────────────────────────────────────────────────────┐
   │ Layer 1 — STT (polyglot)                                      │
-  │   NVIDIA Parakeet on DGX Spark                                │
+  │   NVIDIA Parakeet (or Whisper) on a GPU host                  │
   │   + Whisper-API-compatible wrapper                            │
   │   → text, optional detected_language                          │
   └─────────────────────────────┬────────────────────────────────┘
@@ -53,7 +53,7 @@ and replaceable.
 
 ### Layer 1 — STT polyglot (Parakeet)
 
-**Engine**: NVIDIA Parakeet (NeMo) on DGX Spark.
+**Engine**: NVIDIA Parakeet (NeMo) or any Whisper-compatible STT on a GPU host.
 **Wrapper**: a Whisper-API-compatible bridge so HA's `stt.openai_2`
 integration can talk to it without modification.
 
@@ -68,7 +68,7 @@ the languages we care about (DE/EN/FR). Compared to Whisper:
 | Language detection | Native | Variant-specific; some variants need hint |
 | Streaming-friendly | Limited | Yes (RNN-T is naturally streaming) |
 
-**Why Parakeet on Spark**: latency benefit + we already have the GPU,
+**Why Parakeet**: latency benefit on whatever GPU you have available —
 running Whisper on the same GPU is wasteful when Parakeet does the same
 job faster.
 
@@ -148,7 +148,9 @@ Future features that belong on this layer (not on Polyglot Assist):
 ### Layer 5 — TTS polyglot (Wyoming pocket-tts)
 
 Wyoming protocol server using Kyutai's Pocket-TTS (Mimi decoder + FlowLM
-transformer) at `dnest/wyoming-pocket-tts-multi:0.5-cuda-streaming-ha`.
+transformer). For a same-philosophy multi-language voice clone TTS server
+that exposes both Wyoming and OpenAI-Speech endpoints, see the companion
+project [Polyglot TTS](https://github.com/Nosdave/polyglot-tts).
 
 **Pipeline**:
 1. **text_norm.py** preprocesses the speech text:
@@ -190,7 +192,7 @@ These don't have to agree. Example:
 - User says "Quel temps fait-il" → Parakeet returns FR text (or DE; either works)
 - Polyglot tries languages in `[de, en, fr]` order — DE misses, EN misses,
   FR matches → matched_language = `fr`
-- intent_script renders "À Uccle…" (French text)
+- intent_script renders "Il fait beau aujourd'hui…" (French text)
 - pocket-tts receives the French text, Lingua sees `fr`, picks french_24l
   voice → native French speech
 
@@ -200,14 +202,15 @@ and matches there.
 
 ## Latency budget
 
-Measured on the user's HA Green (4 GB ARM) + Spark for compute layers:
+Measured on a 4 GB ARM HA-host with STT/LLM/TTS offloaded to a separate
+GPU host (consumer-grade NVIDIA GPU). Numbers are indicative:
 
 | Layer | Median | p99 | Notes |
 |---|---|---|---|
-| Wake-word + STT (Parakeet) | ~400 ms | ~700 ms | Spark + Whisper-wrapper |
+| Wake-word + STT (Parakeet) | ~400 ms | ~700 ms | GPU + Whisper-wrapper |
 | Polyglot match (hit, 3 langs × 20 patterns) | <30 ms | <60 ms | Hassil in executor |
 | Polyglot proxy (miss → fallback) | <5 ms overhead | <10 ms | Just async_get_agent + delegate |
-| LLM fallback (Qwen3 80B on Spark, first token) | ~600 ms | ~1500 ms | depends on prompt+context |
+| LLM fallback (local large model, first token) | ~600 ms | ~1500 ms | depends on prompt+context |
 | TTS pocket-tts (first audio frame) | ~150 ms | ~250 ms | streaming, ~10× realtime decode |
 
 **Total Tier-1 round-trip (mic → first audio)**: ~600 ms median.
