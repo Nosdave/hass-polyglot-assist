@@ -5,7 +5,7 @@
   "documentation": "https://github.com/Nosdave/hass-polyglot-assist",
   "issue_tracker": "https://github.com/Nosdave/hass-polyglot-assist/issues",
   "codeowners": ["@Nosdave"],
-  "iot_class": "local_push",
+  "iot_class": "calculated",
   "integration_type": "service",
   "config_flow": true,
   "min_ha_version": "2026.1.0",
