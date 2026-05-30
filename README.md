@@ -54,6 +54,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full stack: STT polyglot
 (Parakeet on Spark) → polyglot_assist → LLM fallback → TTS polyglot
 (Wyoming pocket-tts with Lingua-LID).
 
+## Companion project
+
+Polyglot Assist pairs naturally with [**Polyglot TTS**](https://github.com/Nosdave/polyglot-tts) —
+a multi-language streaming TTS server with voice cloning, exposing both
+Wyoming (for HA) and OpenAI-Speech-compatible HTTP (for OpenClaw and
+other consumers). Same multi-language philosophy, opposite end of the
+voice pipeline.
+
 ## Installation
 
 ### Via HACS (custom repository)
