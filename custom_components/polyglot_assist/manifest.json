@@ -1,17 +1,16 @@
 {
   "domain": "polyglot_assist",
   "name": "Polyglot Assist",
-  "version": "0.2.0",
-  "documentation": "https://github.com/Nosdave/hass-polyglot-assist",
-  "issue_tracker": "https://github.com/Nosdave/hass-polyglot-assist/issues",
-  "codeowners": ["@Nosdave"],
-  "iot_class": "calculated",
-  "integration_type": "service",
-  "config_flow": true,
-  "min_ha_version": "2026.1.0",
   "after_dependencies": [
     "assist_pipeline",
     "intent",
     "conversation"
-  ]
+  ],
+  "codeowners": ["@Nosdave"],
+  "config_flow": true,
+  "documentation": "https://github.com/Nosdave/hass-polyglot-assist",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/Nosdave/hass-polyglot-assist/issues",
+  "version": "0.2.0"
 }
