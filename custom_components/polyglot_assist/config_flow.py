@@ -41,7 +41,8 @@ from .const import (
     SOURCE_CATALOG,
     SOURCE_YAML,
 )
-from .guard import GuardError, async_guarded_update
+from .corpus import validate
+from .guard import GuardError, async_guarded_update, write_lock
 from .loader import MatcherLoader
 from .source import IntentSource, SourceError
 
@@ -216,41 +217,55 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
         """Switch YAML ↔ catalog without ever losing edits of the other side."""
         errors: dict[str, str] = {}
         placeholders = {"err": ""}
+        if user_input is not None and self._runtime is not None:
+            async with write_lock(self._runtime):
+                return await self._source_switch(user_input, errors, placeholders)
         if user_input is not None:
-            wanted = user_input[CONF_SOURCE]
-            choice = user_input.get("when_different", "ask")
-            src = self._source
-            try:
+            return await self._source_switch(user_input, errors, placeholders)
+        return self._source_form(errors, placeholders)
+
+    async def _source_switch(self, user_input, errors, placeholders) -> ConfigFlowResult:
+        wanted = user_input[CONF_SOURCE]
+        choice = user_input.get("when_different", "ask")
+        src = self._source
+        current = src.kind
+        try:
+            if wanted == current:
+                target = await src.async_load()
+            elif wanted == SOURCE_CATALOG:
                 yaml_data = await src.async_load_yaml()
                 catalog = await src.async_load_catalog()
-                if wanted == SOURCE_CATALOG:
-                    if catalog is None or (catalog != yaml_data and choice == "use_yaml"):
-                        if catalog is not None:
-                            await src.async_export_yaml()  # keep the replaced catalog as a file
-                        await src.async_save_catalog(yaml_data)  # verified write
-                        catalog = await src.async_load_catalog()
-                    elif catalog != yaml_data and choice != "keep_other":
+                if catalog is None or (catalog != yaml_data and choice == "use_yaml"):
+                    if catalog is not None:
+                        await src.async_export_yaml()  # keep the replaced catalog as a file
+                    await src.async_save_catalog(yaml_data)  # verified write
+                    catalog = await src.async_load_catalog()
+                elif catalog != yaml_data and choice != "keep_other":
+                    errors["base"] = "sources_differ"
+                target = catalog
+            else:  # catalog → yaml
+                catalog = await src.async_load_catalog()
+                yaml_data = await src.async_load_yaml()
+                if catalog is not None and catalog != yaml_data:
+                    if choice == "ask":
                         errors["base"] = "sources_differ"
-                    target = catalog
-                else:
-                    if catalog is not None and catalog != yaml_data:
-                        if choice != "keep_other":
-                            errors["base"] = "sources_differ"
-                        else:
-                            await src.async_export_yaml()  # keep the catalog edits as a file
-                    target = yaml_data
-                if not errors:
-                    await MatcherLoader.load_data(self.hass, target, "switch-test")
-            except (SourceError, ValueError) as err:
-                _LOGGER.error("Switching source failed: %s", err)
-                errors["base"] = "import_failed"
-                placeholders["err"] = str(err)[:200]
+                    else:
+                        await src.async_export_yaml()  # keep the catalog edits as a file
+                target = yaml_data
             if not errors:
-                new_options = {**self._entry.options, CONF_SOURCE: wanted}
-                self.hass.config_entries.async_update_entry(self._entry, options=new_options)
-                await self.hass.config_entries.async_reload(self._entry.entry_id)
-                return self.async_create_entry(title="", data=new_options)
+                await MatcherLoader.load_data(self.hass, target, "switch-test")
+        except (SourceError, ValueError, yaml.YAMLError) as err:
+            _LOGGER.error("Switching source failed: %s", err)
+            errors["base"] = "import_failed"
+            placeholders["err"] = str(err)[:200]
+        if not errors:
+            new_options = {**self._entry.options, CONF_SOURCE: wanted}
+            self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+            await self.hass.config_entries.async_reload(self._entry.entry_id)
+            return self.async_create_entry(title="", data=new_options)
+        return self._source_form(errors, placeholders)
 
+    def _source_form(self, errors, placeholders) -> ConfigFlowResult:
         schema = vol.Schema(
             {
                 vol.Required(
@@ -340,6 +355,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
 
         if user_input is not None:
             self._current_intent_name = user_input["intent_name"]
+            self._original_intent_name = self._current_intent_name
             self._current_intent_data = (
                 self._intents_data["intents"].get(self._current_intent_name, {}) or {}
             )
@@ -560,8 +576,15 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
         try:
             if runtime is None:
                 # Entry not loaded: plain write, then let the entry load again
-                data = await self._source.async_load() if self._loaded else {"intents": {}}
+                try:
+                    data = await self._source.async_load()
+                except SourceError:
+                    data = {"intents": {}}
+                before = set(validate(data))
                 mutate(data)
+                new = [p for p in validate(data) if p not in before]
+                if new:
+                    return "the change has errors: " + "; ".join(new[:5])
                 await self._source.async_save(data)
                 await self.hass.config_entries.async_reload(self._entry.entry_id)
                 return None

@@ -45,7 +45,7 @@ def revision(data: dict[str, Any]) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-def _lock(runtime: dict[str, Any]) -> asyncio.Lock:
+def write_lock(runtime: dict[str, Any]) -> asyncio.Lock:
     lock = runtime.get("write_lock")
     if lock is None:
         lock = runtime["write_lock"] = asyncio.Lock()
@@ -93,7 +93,8 @@ async def async_guarded_update(
     "reloaded"}; raises GuardError when refused.
     """
     source = runtime["source"]
-    async with _lock(runtime):
+    async with write_lock(runtime):
+        kind = source.kind
         current = await source.async_load()
         if base_rev is not None and base_rev != revision(current):
             raise GuardError("conflict", "the intents changed meanwhile — reload and try again")
@@ -125,11 +126,15 @@ async def async_guarded_update(
                 {"regressions": regressions[:50]},
             )
 
+        if source.kind != kind:
+            raise GuardError("conflict", "the intents source was switched meanwhile — try again")
         await source.async_save(candidate)
         old_matcher = runtime["matcher"]
-        from . import async_reload_entry_matcher  # noqa: PLC0415 — avoid import cycle
+        from . import DOMAIN, async_reload_entry_matcher  # noqa: PLC0415 — avoid import cycle
 
-        await async_reload_entry_matcher(hass, runtime)
+        # after an entry reload this runtime is orphaned: don't start lists on it
+        if hass.data.get(DOMAIN, {}).get(runtime["entry"].entry_id) is runtime:
+            await async_reload_entry_matcher(hass, runtime)
         return {
             "saved": True,
             "regressions": regressions[:50],

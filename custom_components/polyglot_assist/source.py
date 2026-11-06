@@ -188,13 +188,13 @@ class IntentSource:
                 "(dates, sets, NaN or non-text keys) — nothing was changed"
             )
         previous = await self.async_load_catalog()
-        if previous is not None and self.kind == SOURCE_CATALOG:
-            if not overwrite:
-                raise SourceError(
-                    "the catalog is the active source — importing would replace its "
-                    "edits; use overwrite (the catalog is exported first)"
-                )
-            await self.async_export_yaml()
+        if previous is not None and self.kind == SOURCE_CATALOG and not overwrite:
+            raise SourceError(
+                "the catalog is the active source — importing would replace its "
+                "edits; use overwrite (the catalog is exported first)"
+            )
+        if previous is not None and previous != data:
+            await self.async_export_yaml()  # never lose a differing catalog
         try:
             await self.async_save_catalog(data)
         except SourceError:

@@ -268,6 +268,7 @@ async def async_reload_entry_matcher(hass: HomeAssistant, data: dict) -> bool:
     """Rebuild matcher + lists of one entry from its source. True on success."""
     entry = data["entry"]
     source: IntentSource = data["source"]
+    generation = data["generation"] = data.get("generation", 0) + 1
     try:
         new_matcher = await MatcherLoader.load_data(
             hass, await source.async_load(), f"{source.kind}:{entry.title}"
@@ -275,6 +276,8 @@ async def async_reload_entry_matcher(hass: HomeAssistant, data: dict) -> bool:
     except Exception:  # noqa: BLE001
         _LOGGER.exception("Reload failed for %s — keeping previous matcher", entry.entry_id)
         return False
+    if data.get("generation") != generation:
+        return False  # a newer reload started meanwhile; it wins
     new_lists = DynamicLists(hass, new_matcher.config)
     new_lists.async_start()
     data["lists"].async_stop()
