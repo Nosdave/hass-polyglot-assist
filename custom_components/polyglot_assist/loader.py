@@ -27,6 +27,7 @@ import yaml
 from hassil.intents import Intents  # pylint: disable=import-error
 from homeassistant.core import HomeAssistant
 
+from .corpus import bucket_by_language, validate
 from .matcher import MultilangMatcher
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,36 +47,26 @@ class MatcherLoader:
 
         raw = await hass.async_add_executor_job(path.read_text, "utf-8")
         data = yaml.safe_load(raw) or {}
-        intents_section = data.get("intents", {})
-        # Optional slot lists shared by all languages, e.g. wildcards:
-        #   lists: {wunsch: {wildcard: true}}
-        lists_section = data.get("lists") or {}
-        if not intents_section:
+        if not data.get("intents"):
             raise ValueError(f"No intents in {path}")
 
-        # Bucket sentences by language
-        per_lang: dict[str, dict[str, Any]] = {}
-        for intent_name, intent_cfg in intents_section.items():
-            sentences = intent_cfg.get("sentences", {}) or {}
-            if not isinstance(sentences, dict):
-                _LOGGER.warning(
-                    "Intent %s: 'sentences' must be a dict keyed by language",
-                    intent_name,
-                )
-                continue
-            for lang, sent_list in sentences.items():
-                bucket = per_lang.setdefault(lang, {})
-                # Hassil shape per intent: { data: [ { sentences: [...] } ] }
-                bucket[intent_name] = {
-                    "data": [{"sentences": list(sent_list)}],
-                }
+        # Problems hassil would only raise lazily while matching (e.g. a
+        # sentence referencing an undefined {list}) silently disable matching
+        # for that language. Surface them at load time.
+        for problem in validate(data):
+            _LOGGER.warning("Polyglot Assist: %s (%s)", problem, path.name)
 
-        # Build one Intents object per language by injecting language at the top
+        lists_section = data.get("lists") or {}
+        rules_section = data.get("expansion_rules") or {}
+
+        # One Intents object per language; a broken language is skipped.
         result: dict[str, Intents] = {}
-        for lang, intents_dict in per_lang.items():
+        for lang, intents_dict in bucket_by_language(data).items():
             payload = {"language": lang, "intents": intents_dict}
             if lists_section:
                 payload["lists"] = lists_section
+            if rules_section:
+                payload["expansion_rules"] = rules_section
             try:
                 result[lang] = await hass.async_add_executor_job(
                     Intents.from_dict, payload

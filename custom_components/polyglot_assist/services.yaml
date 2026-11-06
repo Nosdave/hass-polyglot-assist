@@ -28,3 +28,20 @@ test_match:
       example: "de"
       selector:
         text:
+
+run_tests:
+  name: Run regression corpus
+  description: >-
+    Match every sentence of a corpus file against the loaded intents and
+    report failures (expected vs. got). Nothing is executed — matching only.
+    Use before and after editing intents.yaml.
+  fields:
+    file:
+      name: Corpus file
+      description: >-
+        Path relative to the config directory (default
+        polyglot_assist/tests.yaml). Format see README.
+      required: false
+      example: "polyglot_assist/tests.yaml"
+      selector:
+        text:

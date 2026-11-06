@@ -96,7 +96,27 @@
     },
     "test_match": {
       "name": "Test match",
-      "description": "Run a string through the matcher without dispatching."
+      "description": "Run a string through the matcher without dispatching.",
+      "fields": {
+        "text": {
+          "name": "Text",
+          "description": "The utterance to test."
+        },
+        "language": {
+          "name": "Language hint",
+          "description": "Optional language hint (de, en, fr)."
+        }
+      }
+    },
+    "run_tests": {
+      "name": "Run regression corpus",
+      "description": "Match every sentence of a corpus file and report failures. Nothing is executed.",
+      "fields": {
+        "file": {
+          "name": "Corpus file",
+          "description": "Path relative to the config directory (default polyglot_assist/tests.yaml)."
+        }
+      }
     }
   }
 }

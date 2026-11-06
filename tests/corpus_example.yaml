@@ -1,0 +1,66 @@
+# Synthetic regression corpus for config_example/intents.yaml.
+# intent: null = must NOT match (falls through to the fallback agent).
+# Regenerate a baseline with: scripts/polyglot_test.py snapshot <intents> <sentences.txt>
+cases:
+- text: wie ist das wetter
+  intent: WetterJetztUndHeute
+  lang: de
+- text: wettervorhersage heute
+  intent: WetterJetztUndHeute
+  lang: de
+- text: what's the weather
+  intent: WetterJetztUndHeute
+  lang: en
+- text: quel temps fait-il
+  intent: WetterJetztUndHeute
+  lang: fr
+- text: wie wird das wetter morgen
+  intent: WetterMorgen
+  lang: de
+- text: what's the weather tomorrow
+  intent: WetterMorgen
+  lang: en
+- text: quel temps fera-t-il demain
+  intent: WetterMorgen
+  lang: fr
+- text: wie voll ist die batterie
+  intent: BatterieStatus
+  lang: de
+- text: battery status
+  intent: BatterieStatus
+  lang: en
+- text: pv status
+  intent: PVStatus
+  lang: de
+- text: ist die waschmaschine fertig
+  intent: WaschmaschineStatus
+  lang: de
+- text: is the washing machine done
+  intent: WaschmaschineStatus
+  lang: en
+- text: ist der trockner fertig
+  intent: TrocknerStatus
+  lang: de
+- text: welche lichter sind an
+  intent: LichtStatusAlle
+  lang: de
+- text: which lights are on
+  intent: LichtStatusAlle
+  lang: en
+- text: quelles lumières sont allumées
+  intent: LichtStatusAlle
+  lang: fr
+- text: alle lichter aus
+  intent: LichtAllesAus
+  lang: de
+- text: éteins toutes les lumières
+  intent: LichtAllesAus
+  lang: fr
+- text: schalte das licht im wohnzimmer an
+  intent: null
+- text: erzähl mir einen witz
+  intent: null
+- text: what time is it
+  intent: null
+- text: quelle heure est-il
+  intent: null

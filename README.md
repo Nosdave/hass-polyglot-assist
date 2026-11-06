@@ -133,6 +133,41 @@ Every Tier-1 match gets two extra slots in addition to the matched ones:
 |---|---|
 | `polyglot_assist.reload` | Rebuilds the matcher from `intents.yaml` without restart. Safe — keeps old matcher if reload fails. |
 | `polyglot_assist.test_match` | Returns which intent (if any) would match a given text, without dispatching. Useful for sentence tuning. Response service. |
+| `polyglot_assist.run_tests` | Matches every sentence of a corpus file (default `polyglot_assist/tests.yaml`, must live inside the config directory) and returns `total`, `passed` and the `failed` cases (expected vs. got). Nothing is executed. Response service. |
+
+## Regression testing (no regressions when editing sentences)
+
+A corpus file lists sentences with the expected outcome:
+
+```yaml
+cases:
+  - text: "turn on the couch"
+    intent: LightZoneOnOff      # expected intent
+    lang: en                    # optional
+    slots: {target: light.couch} # optional, subset check
+  - text: "tell me a joke"
+    intent: null                # must NOT match (goes to the fallback agent)
+```
+
+Workflow for every edit of `intents.yaml`:
+
+1. Before the edit, snapshot the current behaviour for your real sentences
+   (one per line, e.g. exported from your voice logs):
+   `python scripts/polyglot_test.py snapshot intents.yaml sentences.txt > tests.yaml`
+2. Edit, then `python scripts/polyglot_test.py validate intents.yaml`
+   (flags `{lists}`/`<rules>` that are referenced but not defined — hassil only
+   raises those while matching, which silently disables matching for that
+   language) and `python scripts/polyglot_test.py run intents.yaml tests.yaml`.
+3. Every failure is either a regression (fix the sentences) or an intended
+   change (update the case). Then reload and run `polyglot_assist.run_tests`
+   against the live matcher.
+
+The CLI uses the integration's own matcher code and needs only
+`pip install -r requirements_test.txt` (hassil pinned to the version shipped
+with Home Assistant). CI runs the same on every pull request with the
+synthetic corpus in `tests/corpus_example.yaml`. Keep real household sentences
+(names, places) out of the repository — they belong in your local
+`tests.yaml`.
 
 ## Events
 

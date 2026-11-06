@@ -15,10 +15,12 @@ CONF_LANGUAGE_HINT: Final = "fallback_language_hint"
 # Defaults
 DEFAULT_INTENTS_FILE: Final = "polyglot_assist/intents.yaml"
 DEFAULT_LANGUAGES: Final = ["de", "en", "fr"]
+DEFAULT_TESTS_FILE: Final = "polyglot_assist/tests.yaml"
 
 # Service names
 SERVICE_RELOAD: Final = "reload"
 SERVICE_TEST_MATCH: Final = "test_match"
+SERVICE_RUN_TESTS: Final = "run_tests"
 
 # Event names (for observability)
 EVENT_MATCH: Final = "polyglot_assist_match"

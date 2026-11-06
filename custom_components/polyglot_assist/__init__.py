@@ -13,19 +13,26 @@ scope-creep red lines.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+
+import yaml
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import service as service_helper
 
 from .const import (
     CONF_FALLBACK_AGENT,
     CONF_INTENTS_FILE,
     DOMAIN,
+    DEFAULT_TESTS_FILE,
     SERVICE_RELOAD,
+    SERVICE_RUN_TESTS,
     SERVICE_TEST_MATCH,
 )
+from .corpus import parse_corpus, run_corpus
 from .loader import MatcherLoader
 from .matcher import MultilangMatcher
 
@@ -84,6 +91,52 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             DOMAIN, SERVICE_TEST_MATCH, _test_match, supports_response=True
         )
 
+    # Regression corpus (no intent is dispatched — matching only)
+    if not hass.services.has_service(DOMAIN, SERVICE_RUN_TESTS):
+        async def _run_tests(call: ServiceCall) -> dict:
+            path = Path(call.data.get("file") or DEFAULT_TESTS_FILE)
+            if not path.is_absolute():
+                path = Path(hass.config.path(str(path)))
+            config_dir = Path(hass.config.config_dir).resolve()
+            resolved = path.resolve()
+            if config_dir not in resolved.parents:
+                raise ServiceValidationError(
+                    f"Corpus file must be inside the config directory: {path}"
+                )
+            if not resolved.is_file():
+                raise ServiceValidationError(f"Corpus file not found: {path}")
+
+            def _load() -> list:
+                return parse_corpus(yaml.safe_load(resolved.read_text("utf-8")) or {})
+
+            try:
+                cases = await hass.async_add_executor_job(_load)
+            except (ValueError, yaml.YAMLError) as err:
+                raise ServiceValidationError(f"Invalid corpus file {path}: {err}") from err
+
+            results = {}
+            for entry_id, data in hass.data[DOMAIN].items():
+                m: MultilangMatcher = data["matcher"]
+
+                def _match(text: str, m: MultilangMatcher = m):
+                    res = m.match(text, None)
+                    if res is None:
+                        return None
+                    return (
+                        res.intent_name,
+                        res.lang,
+                        {k: v.get("value") for k, v in res.slots.items()},
+                    )
+
+                results[entry_id] = await hass.async_add_executor_job(
+                    run_corpus, _match, cases
+                )
+            return results
+
+        hass.services.async_register(
+            DOMAIN, SERVICE_RUN_TESTS, _run_tests, supports_response=True
+        )
+
     return True
 
 
@@ -110,4 +163,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not hass.data[DOMAIN]:
             hass.services.async_remove(DOMAIN, SERVICE_RELOAD)
             hass.services.async_remove(DOMAIN, SERVICE_TEST_MATCH)
+            hass.services.async_remove(DOMAIN, SERVICE_RUN_TESTS)
     return unload_ok
