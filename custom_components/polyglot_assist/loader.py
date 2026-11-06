@@ -38,26 +38,31 @@ class MatcherLoader:
 
     @staticmethod
     async def load(hass: HomeAssistant, intents_file: str) -> MultilangMatcher:
+        """Load from a YAML file (kept for callers outside a config entry)."""
         path = Path(intents_file)
         if not path.is_absolute():
             path = Path(hass.config.path(intents_file))
-
         if not path.is_file():
             raise FileNotFoundError(f"Polyglot intents file not found: {path}")
-
         raw = await hass.async_add_executor_job(path.read_text, "utf-8")
-        data = yaml.safe_load(raw) or {}
+        return await MatcherLoader.load_data(hass, yaml.safe_load(raw) or {}, path.name)
+
+    @staticmethod
+    async def load_data(
+        hass: HomeAssistant, data: dict, origin: str
+    ) -> MultilangMatcher:
+        """Build the matcher from parsed intents data (YAML file or catalog)."""
         if not data.get("intents"):
-            raise ValueError(f"No intents in {path}")
+            raise ValueError(f"No intents in {origin}")
 
         # Problems hassil would only raise lazily while matching (e.g. a
         # sentence referencing an undefined {list}) silently disable matching
         # for that language. Surface them at load time.
         try:
             for problem in validate(data):
-                _LOGGER.warning("Polyglot Assist: %s (%s)", problem, path.name)
+                _LOGGER.warning("Polyglot Assist: %s (%s)", problem, origin)
         except Exception:  # noqa: BLE001 — diagnostics must never block loading
-            _LOGGER.exception("Polyglot Assist: validation of %s failed", path.name)
+            _LOGGER.exception("Polyglot Assist: validation of %s failed", origin)
 
         lists_section = static_lists(data)
         rules_section = string_rules(data)
@@ -83,7 +88,7 @@ class MatcherLoader:
                 _LOGGER.exception("Failed to build Hassil Intents for lang=%s", lang)
 
         if not result:
-            raise ValueError(f"No language groups successfully loaded from {path}")
+            raise ValueError(f"No language groups successfully loaded from {origin}")
 
         matcher = MultilangMatcher(result)
         matcher.config = data

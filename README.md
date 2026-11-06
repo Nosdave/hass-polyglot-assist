@@ -169,6 +169,37 @@ recorded as plain assistant text: in tests with a local model that made the
 LLM claim success for follow-ups without calling any tool, and bare intent
 names that are not offered tools were copied into invalid tool calls.
 
+### Catalog (intents in Home Assistant's storage)
+
+Intents can live in `intents.yaml` (default) or in a catalog in
+`.storage/polyglot_assist.catalog.<entry>` — same schema, identical
+behaviour. Switch in the options (*Intents source*): the first switch copies
+`intents.yaml` 1:1 into the catalog and verifies the round-trip; the YAML file
+is kept. `polyglot_assist.export_yaml` writes the catalog to
+`polyglot_assist/export/`. Writing to the YAML source rewrites the file
+(comments are lost; the previous file is kept as `intents.yaml.bak`).
+
+Per-intent safety level:
+
+```yaml
+intents:
+  FrontDoorOpen:
+    safety: disabled    # normal (default) | sensitive | disabled
+```
+
+`disabled` takes the intent out of matching (it stays in the catalog);
+`sensitive` only marks it (UI warning, translation proposals are never
+applied automatically).
+
+The diagnostic sensor *Intents* shows the number of active intents and, as
+attributes, sentences per language, lists, disabled/sensitive intents,
+validation problems, the source and hit/miss counters since start.
+
+Admin WebSocket API (backend of the panel): `polyglot_assist/stats`, `/get`,
+`/test`, `/save_intent`, `/delete_intent`. Saves are guarded: the candidate is
+matched against `polyglot_assist/tests.yaml` first and refused if a previously
+passing case would fail (unless `force: true`).
+
 ### Injected slots
 
 Every Tier-1 match gets two extra slots in addition to the matched ones:
@@ -191,6 +222,8 @@ Every Tier-1 match gets two extra slots in addition to the matched ones:
 |---|---|
 | `polyglot_assist.reload` | Rebuilds the matcher from `intents.yaml` without restart. Safe — keeps old matcher if reload fails. |
 | `polyglot_assist.test_match` | Returns which intent (if any) would match a given text, without dispatching. Useful for sentence tuning. Response service. |
+| `polyglot_assist.import_yaml` | Copies `intents.yaml` 1:1 into the catalog (verified). Admin only. |
+| `polyglot_assist.export_yaml` | Writes the catalog to `polyglot_assist/export/intents-<time>.yaml`. Admin only. |
 | `polyglot_assist.run_tests` | Matches every sentence of a corpus file (default `polyglot_assist/tests.yaml`; only `.yaml` files below `<config>/polyglot_assist/`) and returns `total`, `passed` and the `failed` cases (expected vs. got). Optional `language` = pipeline language hint, as at runtime. Nothing is executed. Admin-only response service. |
 
 ## Regression testing (no regressions when editing sentences)

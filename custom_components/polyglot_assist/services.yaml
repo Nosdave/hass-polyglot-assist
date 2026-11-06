@@ -54,3 +54,14 @@ run_tests:
       example: "de"
       selector:
         text:
+
+import_yaml:
+  name: Import intents.yaml into the catalog
+  description: >-
+    Copies the YAML file 1:1 into the catalog (.storage) and verifies the
+    round-trip. Does not switch the source (options → Intents source).
+
+export_yaml:
+  name: Export catalog to YAML
+  description: >-
+    Writes the catalog to polyglot_assist/export/intents-<time>.yaml.

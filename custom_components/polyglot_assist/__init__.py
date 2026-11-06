@@ -24,12 +24,15 @@ from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import service as service_helper
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
     CONF_FALLBACK_AGENT,
-    CONF_INTENTS_FILE,
     DEFAULT_TESTS_FILE,
     DOMAIN,
+    SERVICE_EXPORT_YAML,
+    SERVICE_IMPORT_YAML,
+    SIGNAL_LOADED,
     SERVICE_RELOAD,
     SERVICE_RUN_TESTS,
     SERVICE_TEST_MATCH,
@@ -38,6 +41,8 @@ from .corpus import Case, parse_corpus, run_corpus
 from .chatlog import clear_tool_cache
 from .dynlists import DynamicLists
 from .loader import MatcherLoader
+from . import websocket
+from .source import IntentSource, SourceError
 from .matcher import MultilangMatcher
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,24 +55,27 @@ class _CorpusError(Exception):
     """Corpus file problem (message is safe to return to the caller)."""
 
 
-PLATFORMS: list[Platform] = [Platform.CONVERSATION]
+PLATFORMS: list[Platform] = [Platform.CONVERSATION, Platform.SENSOR]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Polyglot Assist domain (no YAML config, ConfigEntry only)."""
     hass.data.setdefault(DOMAIN, {})
+    websocket.async_register(hass)
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Polyglot Assist from a config entry."""
-    intents_file = entry.data[CONF_INTENTS_FILE]
+    source = IntentSource(hass, entry)
 
-    # Build matcher
+    # Build matcher from the active source (YAML file or catalog)
     try:
-        matcher = await MatcherLoader.load(hass, intents_file)
+        matcher = await MatcherLoader.load_data(
+            hass, await source.async_load(), f"{source.kind}:{entry.title}"
+        )
     except Exception:  # noqa: BLE001 — surface broadly to user
-        _LOGGER.exception("Failed to load Polyglot intents from %s", intents_file)
+        _LOGGER.exception("Failed to load Polyglot intents (%s)", source.kind)
         return False
 
     lists = DynamicLists(hass, matcher.config)
@@ -75,6 +83,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = {
         "matcher": matcher,
         "lists": lists,
+        "source": source,
         "fallback_agent": entry.data[CONF_FALLBACK_AGENT],
     }
 
@@ -195,6 +204,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             supports_response=SupportsResponse.ONLY,
         )
 
+    # Catalog migration (admin): YAML → catalog (verified), catalog → YAML export
+    if not hass.services.has_service(DOMAIN, SERVICE_IMPORT_YAML):
+        async def _import_yaml(call: ServiceCall) -> dict:  # noqa: ARG001
+            out = {}
+            for entry_id, data in list(hass.data[DOMAIN].items()):
+                try:
+                    imported = await data["source"].async_import_yaml()
+                except SourceError as err:
+                    raise ServiceValidationError(str(err)) from None
+                out[entry_id] = {"intents": len(imported.get("intents") or {})}
+            return out
+
+        async def _export_yaml(call: ServiceCall) -> dict:  # noqa: ARG001
+            out = {}
+            for entry_id, data in list(hass.data[DOMAIN].items()):
+                try:
+                    path = await data["source"].async_export_yaml()
+                except SourceError as err:
+                    raise ServiceValidationError(str(err)) from None
+                out[entry_id] = {"file": str(path)}
+            return out
+
+        service_helper.async_register_admin_service(
+            hass, DOMAIN, SERVICE_IMPORT_YAML, _import_yaml,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+        service_helper.async_register_admin_service(
+            hass, DOMAIN, SERVICE_EXPORT_YAML, _export_yaml,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
     return True
 
 
@@ -206,12 +246,16 @@ async def _async_reload_all(hass: HomeAssistant) -> None:
         if entry is None:
             continue
         try:
-            new_matcher = await MatcherLoader.load(hass, entry.data[CONF_INTENTS_FILE])
+            source: IntentSource = data["source"]
+            new_matcher = await MatcherLoader.load_data(
+                hass, await source.async_load(), f"{source.kind}:{entry.title}"
+            )
             new_lists = DynamicLists(hass, new_matcher.config)
             new_lists.async_start()
             data["lists"].async_stop()
             data["matcher"] = new_matcher
             data["lists"] = new_lists
+            async_dispatcher_send(hass, f"{SIGNAL_LOADED}_{entry_id}")
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Reload failed for %s — keeping previous matcher", entry_id)
 
@@ -228,4 +272,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.services.async_remove(DOMAIN, SERVICE_RELOAD)
             hass.services.async_remove(DOMAIN, SERVICE_TEST_MATCH)
             hass.services.async_remove(DOMAIN, SERVICE_RUN_TESTS)
+            hass.services.async_remove(DOMAIN, SERVICE_IMPORT_YAML)
+            hass.services.async_remove(DOMAIN, SERVICE_EXPORT_YAML)
     return unload_ok

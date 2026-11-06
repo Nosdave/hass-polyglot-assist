@@ -224,3 +224,18 @@ def test_referenced_lists_and_spec_validation():
     assert any("entities.exclude must be" in p for p in problems)
     assert any("list t: template must be a string" in p for p in problems)
     assert any("list both: use exactly one" in p for p in problems)
+
+
+def test_safety_disabled_takes_no_part_in_matching():
+    data = {"intents": {
+        "Door": {"safety": "disabled", "sentences": {"en": ["open the door"]}},
+        "Lamp": {"safety": "sensitive", "sentences": {"en": ["lamp on"]}},
+        "Bad": {"safety": "maybe", "sentences": {"en": ["x"]}},
+    }}
+    fn = _matcher(data)
+    assert fn("open the door") is None
+    assert fn("lamp on")[0] == "Lamp"
+    s = corpus.count_summary(data)
+    assert s["intents"] == 3 and s["active"] == 2
+    assert s["disabled"] == ["Door"] and s["sensitive"] == ["Lamp"]
+    assert any("unknown safety level" in p for p in corpus.validate(data))

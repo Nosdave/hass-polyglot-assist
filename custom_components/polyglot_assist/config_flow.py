@@ -16,7 +16,6 @@ integration:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
@@ -36,9 +35,14 @@ from .const import (
     CONF_FALLBACK_AGENT,
     CONF_LANGUAGE_HINT,
     CONF_INTENTS_FILE,
+    CONF_LLM_APIS,
+    CONF_SOURCE,
     DEFAULT_INTENTS_FILE,
     DOMAIN,
+    SOURCE_CATALOG,
+    SOURCE_YAML,
 )
+from .source import IntentSource, SourceError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -104,7 +108,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
         # we don't store it explicitly to remain forward-compatible.
         self._entry = config_entry
         self._intents_data: dict[str, Any] = {}
-        self._intents_path: Path | None = None
+        self._loaded = False
         self._current_intent_name: str | None = None
         self._current_intent_data: dict[str, Any] = {}
 
@@ -121,6 +125,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                 "change_fallback": "Change fallback agent",
                 "language_hint": "Fallback language hint",
                 "chat_log": "Hits in conversation history",
+                "source": "Intents source (YAML file or catalog)",
                 "edit_visual": "Edit intents (visual)",
                 "edit_yaml": "Edit intents (YAML)",
                 "add_intent": "Add a new intent",
@@ -200,15 +205,49 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
         return self.async_show_form(step_id="chat_log", data_schema=schema)
 
     # ─────────────────────────────────────────────────────────────────
+    # Intents source: YAML file or catalog (.storage)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def async_step_source(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            wanted = user_input[CONF_SOURCE]
+            try:
+                if wanted == SOURCE_CATALOG and await self._source.async_load_catalog() is None:
+                    # first switch: copy intents.yaml 1:1 (verified round-trip)
+                    await self._source.async_import_yaml()
+            except SourceError as err:
+                _LOGGER.error("Switching source failed: %s", err)
+                errors["base"] = "import_failed"
+            if not errors:
+                new_options = {**self._entry.options, CONF_SOURCE: wanted}
+                self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+                await self.hass.config_entries.async_reload(self._entry.entry_id)
+                return self.async_create_entry(title="", data=new_options)
+
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_SOURCE, default=self._entry.options.get(CONF_SOURCE, SOURCE_YAML)
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[SOURCE_YAML, SOURCE_CATALOG],
+                        translation_key="source",
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(step_id="source", data_schema=schema, errors=errors)
+
+    # ─────────────────────────────────────────────────────────────────
     # Edit YAML (raw view)
     # ─────────────────────────────────────────────────────────────────
 
     async def async_step_edit_yaml(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        await self._ensure_loaded()
-        assert self._intents_path is not None
-
         if user_input is not None:
             new_yaml = user_input["yaml_content"]
             # Validate
@@ -224,16 +263,12 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                     errors={"base": "invalid_yaml"},
                     description_placeholders={"err": str(err)[:200]},
                 )
-            # Write
-            await self.hass.async_add_executor_job(
-                self._intents_path.write_text, new_yaml, "utf-8"
-            )
+            # Write to the active source (YAML file or catalog)
+            await self._source.async_save_text(new_yaml)
             await self._reload_matcher()
             return self.async_create_entry(title="", data=dict(self._entry.options))
 
-        current_yaml = await self.hass.async_add_executor_job(
-            self._intents_path.read_text, "utf-8"
-        )
+        current_yaml = await self._source.async_load_text()
         return self.async_show_form(
             step_id="edit_yaml",
             data_schema=self._yaml_schema(current_yaml),
@@ -442,34 +477,22 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
     # Helpers
     # ─────────────────────────────────────────────────────────────────
 
+    @property
+    def _source(self) -> IntentSource:
+        return self.hass.data[DOMAIN][self._entry.entry_id]["source"]
+
     async def _ensure_loaded(self) -> None:
-        if self._intents_path is not None:
+        if self._loaded:
             return
-        intents_file = self._entry.data.get(CONF_INTENTS_FILE, DEFAULT_INTENTS_FILE)
-        path = Path(intents_file)
-        if not path.is_absolute():
-            path = Path(self.hass.config.path(intents_file))
-        self._intents_path = path
-        if path.is_file():
-            raw = await self.hass.async_add_executor_job(path.read_text, "utf-8")
-            self._intents_data = yaml.safe_load(raw) or {"intents": {}}
-        else:
+        try:
+            self._intents_data = await self._source.async_load()
+        except SourceError:
             self._intents_data = {"intents": {}}
+        self._intents_data.setdefault("intents", {})
+        self._loaded = True
 
     async def _save_intents(self) -> None:
-        assert self._intents_path is not None
-
-        def _do_save(path: Path, data: dict) -> None:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            new_yaml = yaml.safe_dump(
-                data, allow_unicode=True, sort_keys=False, indent=2
-            )
-            path.write_text(new_yaml, "utf-8")
-
-        await self.hass.async_add_executor_job(
-            _do_save, self._intents_path, self._intents_data
-        )
-        return
+        await self._source.async_save(self._intents_data)
 
     async def _reload_matcher(self) -> None:
         await self.hass.services.async_call(

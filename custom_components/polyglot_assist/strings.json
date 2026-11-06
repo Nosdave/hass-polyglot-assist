@@ -27,7 +27,8 @@
           "edit_yaml": "Edit intents (YAML)",
           "add_intent": "Add a new intent",
           "reload": "Reload matcher (re-read intents.yaml)",
-          "chat_log": "Hits in conversation history"
+          "chat_log": "Hits in conversation history",
+          "source": "Intents source (YAML file or catalog)"
         }
       },
       "change_fallback": {
@@ -86,12 +87,20 @@
         "data": {
           "chat_log_tools": "Record hits as tool calls"
         }
+      },
+      "source": {
+        "title": "Intents source",
+        "description": "YAML file (default) or catalog in Home Assistant's storage. The first switch to the catalog copies intents.yaml 1:1 (verified); the YAML file is kept. Export the catalog any time with the export_yaml action.",
+        "data": {
+          "source": "Source"
+        }
       }
     },
     "error": {
       "invalid_yaml": "YAML failed to parse: {err}. Fix the syntax and save again.",
       "invalid_name": "Intent name must be alphanumeric with optional underscores.",
-      "name_exists": "An intent with that name already exists."
+      "name_exists": "An intent with that name already exists.",
+      "import_failed": "Could not import intents.yaml into the catalog (see log)."
     },
     "abort": {
       "no_intents": "No intents found in the file. Use 'Add a new intent' to create one."
@@ -128,6 +137,29 @@
           "name": "Language hint",
           "description": "Pipeline language passed to the matcher like at runtime."
         }
+      }
+    },
+    "import_yaml": {
+      "name": "Import intents.yaml into the catalog",
+      "description": "Copies the YAML file 1:1 into the catalog (.storage) and verifies the round-trip. Does not switch the source. Admin only."
+    },
+    "export_yaml": {
+      "name": "Export catalog to YAML",
+      "description": "Writes the catalog to polyglot_assist/export/intents-<time>.yaml. Admin only."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "intents": {
+        "name": "Intents"
+      }
+    }
+  },
+  "selector": {
+    "source": {
+      "options": {
+        "yaml": "YAML file (intents.yaml)",
+        "catalog": "Catalog (.storage)"
       }
     }
   }

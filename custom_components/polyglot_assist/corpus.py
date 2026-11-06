@@ -80,10 +80,13 @@ def slot_lists_from_fixture(raw: dict[str, Any] | None) -> dict[str, SlotList]:
 
 
 def bucket_by_language(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Split the user-facing ``intents:`` section into hassil dicts per language."""
+    """Split the user-facing ``intents:`` section into hassil dicts per language.
+
+    Intents with ``safety: disabled`` take no part in matching.
+    """
     per_lang: dict[str, dict[str, Any]] = {}
     for intent_name, intent_cfg in (data.get("intents") or {}).items():
-        if not isinstance(intent_cfg, dict):
+        if not isinstance(intent_cfg, dict) or intent_cfg.get("safety") == "disabled":
             continue
         sentences = intent_cfg.get("sentences") or {}
         if not isinstance(sentences, dict):
@@ -182,6 +185,9 @@ def validate(
         if cfg is not None and not isinstance(cfg, dict):
             problems.append(f"{name}: intent must be a mapping")
             continue
+        safety = (cfg or {}).get("safety")
+        if safety is not None and safety not in ("normal", "sensitive", "disabled"):
+            problems.append(f"{name}: unknown safety level {safety!r}")
         sentences = (cfg or {}).get("sentences")
         if sentences is not None and not isinstance(sentences, dict):
             problems.append(f"{name}: 'sentences' must be a mapping keyed by language")
@@ -217,13 +223,22 @@ def _check_refs(where: str, text: str, lists: set[str], rules: set[str]) -> list
 
 def count_summary(data: dict[str, Any]) -> dict[str, Any]:
     """Intent and sentence counts per language (for diagnostics/sensors)."""
+    intents = data.get("intents") or {}
     per_lang = bucket_by_language(data)
+
+    def _with(level: str) -> list[str]:
+        return sorted(n for n, c in intents.items() if isinstance(c, dict) and c.get("safety") == level)
+
     return {
-        "intents": len(data.get("intents") or {}),
+        "intents": len(intents),
+        "active": len({n for lang in per_lang.values() for n in lang}),
+        "disabled": _with("disabled"),
+        "sensitive": _with("sensitive"),
         "lists": len(data.get("lists") or {}),
+        "dynamic_lists": sorted(dynamic_lists(data)),
         "sentences": {
-            lang: sum(len(v["data"][0]["sentences"]) for v in intents.values())
-            for lang, intents in per_lang.items()
+            lang: sum(len(v["data"][0]["sentences"]) for v in lang_intents.values())
+            for lang, lang_intents in per_lang.items()
         },
     }
 
