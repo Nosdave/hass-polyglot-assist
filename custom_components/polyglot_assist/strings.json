@@ -110,11 +110,15 @@
     },
     "run_tests": {
       "name": "Run regression corpus",
-      "description": "Match every sentence of a corpus file and report failures. Nothing is executed.",
+      "description": "Match every sentence of a corpus file and report failures. Nothing is executed. Admin only.",
       "fields": {
         "file": {
           "name": "Corpus file",
-          "description": "Path relative to the config directory (default polyglot_assist/tests.yaml)."
+          "description": "YAML file below the polyglot_assist folder of the config directory (default polyglot_assist/tests.yaml)."
+        },
+        "language": {
+          "name": "Language hint",
+          "description": "Pipeline language passed to the matcher like at runtime."
         }
       }
     }

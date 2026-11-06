@@ -27,8 +27,8 @@ matcher_mod = _load("matcher")
 def _matcher(data: dict):
     m = matcher_mod.MultilangMatcher(corpus.build_intents(data))
 
-    def fn(text: str):
-        res = m.match(text, None)
+    def fn(text: str, hint: str | None = None):
+        res = m.match(text, hint)
         if res is None:
             return None
         return res.intent_name, res.lang, {k: v.get("value") for k, v in res.slots.items()}
@@ -114,3 +114,46 @@ def test_count_summary(example_data):
     s = corpus.count_summary(example_data)
     assert s["intents"] == len(example_data["intents"])
     assert set(s["sentences"]) == {"de", "en", "fr"}
+
+
+def test_parse_corpus_is_strict():
+    with pytest.raises(ValueError):
+        corpus.parse_corpus({"case": []})
+    with pytest.raises(ValueError):
+        corpus.parse_corpus({"cases": []})
+    with pytest.raises(ValueError, match="explicit 'intent'"):
+        corpus.parse_corpus({"cases": [{"text": "hi"}]})
+    with pytest.raises(ValueError, match="slots"):
+        corpus.parse_corpus({"cases": [{"text": "hi", "intent": None, "slots": ["a"]}]})
+
+
+def test_missing_expected_slot_fails():
+    data = {"intents": {"On": {"sentences": {"en": ["light on"]}}}}
+    cases = corpus.parse_corpus({"cases": [{"text": "light on", "intent": "On", "slots": {"x": None}}]})
+    assert corpus.run_corpus(_matcher(data), cases)["failed"]
+
+
+def test_hint_changes_language_like_runtime():
+    data = {"intents": {"S": {"sentences": {"de": ["status"], "en": ["status"]}}}}
+    fn = _matcher(data)
+    assert fn("status", None)[1] == "de"
+    assert fn("status", "en")[1] == "en"
+    cases = corpus.parse_corpus({"cases": [{"text": "status", "intent": "S", "lang": "en", "hint": "en"}]})
+    assert corpus.run_corpus(fn, cases)["failed"] == []
+
+
+def test_non_string_sentences_do_not_break_language():
+    data = {"intents": {"A": {"sentences": {"en": [True, "light on"], "de": "licht an"}}}}
+    problems = corpus.validate(data)
+    assert any("not a string" in p for p in problems)
+    assert any("must be a list" in p for p in problems)
+    assert _matcher(data)("light on")[0] == "A"
+
+
+def test_invalid_expansion_rules_are_ignored_not_fatal():
+    data = {
+        "expansion_rules": {"bad": ["x"], "verb": "(turn|switch) on"},
+        "intents": {"On": {"sentences": {"en": ["<verb> it"]}}},
+    }
+    assert any("<bad>" in p for p in corpus.validate(data))
+    assert _matcher(data)("turn on it")[0] == "On"

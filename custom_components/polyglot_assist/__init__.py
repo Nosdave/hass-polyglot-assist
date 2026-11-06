@@ -15,28 +15,37 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import voluptuous as vol
 import yaml
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import service as service_helper
 
 from .const import (
     CONF_FALLBACK_AGENT,
     CONF_INTENTS_FILE,
-    DOMAIN,
     DEFAULT_TESTS_FILE,
+    DOMAIN,
     SERVICE_RELOAD,
     SERVICE_RUN_TESTS,
     SERVICE_TEST_MATCH,
 )
-from .corpus import parse_corpus, run_corpus
+from .corpus import Case, parse_corpus, run_corpus
 from .loader import MatcherLoader
 from .matcher import MultilangMatcher
 
 _LOGGER = logging.getLogger(__name__)
+
+ATTR_FILE = "file"
+ATTR_LANGUAGE = "language"
+
+
+class _CorpusError(Exception):
+    """Corpus file problem (message is safe to return to the caller)."""
 
 PLATFORMS: list[Platform] = [Platform.CONVERSATION]
 
@@ -78,7 +87,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             text = call.data["text"]
             language_hint = call.data.get("language")
             results = {}
-            for entry_id, data in hass.data[DOMAIN].items():
+            for entry_id, data in list(hass.data[DOMAIN].items()):
                 m: MultilangMatcher = data["matcher"]
                 match = await hass.async_add_executor_job(m.match, text, language_hint)
                 results[entry_id] = (
@@ -91,35 +100,51 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             DOMAIN, SERVICE_TEST_MATCH, _test_match, supports_response=True
         )
 
-    # Regression corpus (no intent is dispatched — matching only)
+    # Regression corpus (no intent is dispatched — matching only).
+    # Admin-only, and only YAML files below <config>/polyglot_assist/ — error
+    # messages never echo file content.
     if not hass.services.has_service(DOMAIN, SERVICE_RUN_TESTS):
         async def _run_tests(call: ServiceCall) -> dict:
-            path = Path(call.data.get("file") or DEFAULT_TESTS_FILE)
-            if not path.is_absolute():
-                path = Path(hass.config.path(str(path)))
-            config_dir = Path(hass.config.config_dir).resolve()
-            resolved = path.resolve()
-            if config_dir not in resolved.parents:
-                raise ServiceValidationError(
-                    f"Corpus file must be inside the config directory: {path}"
-                )
-            if not resolved.is_file():
-                raise ServiceValidationError(f"Corpus file not found: {path}")
+            base = Path(hass.config.path(DOMAIN))
+            rel = call.data.get(ATTR_FILE) or DEFAULT_TESTS_FILE
 
-            def _load() -> list:
-                return parse_corpus(yaml.safe_load(resolved.read_text("utf-8")) or {})
+            def _load() -> list[Case]:
+                path = Path(rel)
+                if not path.is_absolute():
+                    path = Path(hass.config.path(rel))
+                resolved = path.resolve()
+                if base.resolve() not in resolved.parents or resolved.suffix not in (
+                    ".yaml",
+                    ".yml",
+                ):
+                    raise _CorpusError(
+                        f"corpus must be a .yaml file inside {base}: {rel}"
+                    )
+                if not resolved.is_file():
+                    raise _CorpusError(f"corpus file not found: {rel}")
+                try:
+                    raw = yaml.safe_load(resolved.read_text("utf-8"))
+                except yaml.YAMLError as err:
+                    mark = getattr(err, "problem_mark", None)
+                    where = f" (line {mark.line + 1})" if mark else ""
+                    raise _CorpusError(f"corpus is not valid YAML{where}") from None
+                try:
+                    return parse_corpus(raw or {})
+                except ValueError as err:  # messages carry indexes only
+                    raise _CorpusError(f"invalid corpus: {err}") from None
 
             try:
                 cases = await hass.async_add_executor_job(_load)
-            except (ValueError, yaml.YAMLError) as err:
-                raise ServiceValidationError(f"Invalid corpus file {path}: {err}") from err
+            except _CorpusError as err:
+                raise ServiceValidationError(str(err)) from None
 
+            hint = call.data.get(ATTR_LANGUAGE)
             results = {}
-            for entry_id, data in hass.data[DOMAIN].items():
+            for entry_id, data in list(hass.data[DOMAIN].items()):
                 m: MultilangMatcher = data["matcher"]
 
-                def _match(text: str, m: MultilangMatcher = m):
-                    res = m.match(text, None)
+                def _match(text: str, lang_hint: str | None, m: MultilangMatcher = m):
+                    res = m.match(text, lang_hint)
                     if res is None:
                         return None
                     return (
@@ -129,12 +154,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     )
 
                 results[entry_id] = await hass.async_add_executor_job(
-                    run_corpus, _match, cases
+                    run_corpus, _match, cases, hint
                 )
             return results
 
-        hass.services.async_register(
-            DOMAIN, SERVICE_RUN_TESTS, _run_tests, supports_response=True
+        service_helper.async_register_admin_service(
+            hass,
+            DOMAIN,
+            SERVICE_RUN_TESTS,
+            _run_tests,
+            vol.Schema(
+                {
+                    vol.Optional(ATTR_FILE): cv.string,
+                    vol.Optional(ATTR_LANGUAGE): cv.string,
+                }
+            ),
+            supports_response=SupportsResponse.ONLY,
         )
 
     return True

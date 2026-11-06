@@ -27,7 +27,7 @@ import yaml
 from hassil.intents import Intents  # pylint: disable=import-error
 from homeassistant.core import HomeAssistant
 
-from .corpus import bucket_by_language, validate
+from .corpus import bucket_by_language, string_rules, validate
 from .matcher import MultilangMatcher
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,11 +53,14 @@ class MatcherLoader:
         # Problems hassil would only raise lazily while matching (e.g. a
         # sentence referencing an undefined {list}) silently disable matching
         # for that language. Surface them at load time.
-        for problem in validate(data):
-            _LOGGER.warning("Polyglot Assist: %s (%s)", problem, path.name)
+        try:
+            for problem in validate(data):
+                _LOGGER.warning("Polyglot Assist: %s (%s)", problem, path.name)
+        except Exception:  # noqa: BLE001 — diagnostics must never block loading
+            _LOGGER.exception("Polyglot Assist: validation of %s failed", path.name)
 
         lists_section = data.get("lists") or {}
-        rules_section = data.get("expansion_rules") or {}
+        rules_section = string_rules(data)
 
         # One Intents object per language; a broken language is skipped.
         result: dict[str, Intents] = {}

@@ -13,6 +13,10 @@ needed, only ``hassil`` and ``PyYAML``), so results equal the runtime matcher.
   # write a corpus snapshot of the current behaviour for a list of sentences
   # (one per line) — the baseline for "no regression" before an edit
   polyglot_test.py snapshot intents.yaml sentences.txt > tests.yaml
+
+Pass --hint <lang> to mirror the pipeline language (the runtime tries that
+language first). Unlike the runtime, which skips a language hassil cannot
+parse, the CLI fails on it — on purpose, so broken files are noticed.
 """
 from __future__ import annotations
 
@@ -45,8 +49,8 @@ def build_matcher(intents_path: str):
 
 
 def match_fn(matcher):
-    def _fn(text: str):
-        res = matcher.match(text, None)
+    def _fn(text: str, hint: str | None = None):
+        res = matcher.match(text, hint)
         if res is None:
             return None
         return res.intent_name, res.lang, {k: v.get("value") for k, v in res.slots.items()}
@@ -59,18 +63,22 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     v = sub.add_parser("validate")
     v.add_argument("intents")
+    v.add_argument("--extra-lists", default="", help="comma-separated lists supplied at runtime (e.g. area,name)")
     r = sub.add_parser("run")
     r.add_argument("intents")
     r.add_argument("corpus")
     r.add_argument("--json", action="store_true")
+    r.add_argument("--hint", help="pipeline language passed to the matcher (runtime: user_input.language)")
     s = sub.add_parser("snapshot")
     s.add_argument("intents")
     s.add_argument("sentences")
+    s.add_argument("--hint", help="pipeline language passed to the matcher")
     args = ap.parse_args()
 
     if args.cmd == "validate":
         data = yaml.safe_load(Path(args.intents).read_text("utf-8")) or {}
-        problems = corpus.validate(data)
+        extra = {x for x in args.extra_lists.split(",") if x}
+        problems = corpus.validate(data, extra_lists=extra)
         print(json.dumps(corpus.count_summary(data), ensure_ascii=False))
         for p in problems:
             print("WARN", p)
@@ -85,7 +93,7 @@ def main() -> int:
             text = line.strip()
             if not text:
                 continue
-            got = fn(text)
+            got = fn(text, args.hint)
             case = {"text": text, "intent": got[0] if got else None}
             if got:
                 case["lang"] = got[1]
@@ -96,7 +104,7 @@ def main() -> int:
         return 0
 
     cases = corpus.parse_corpus(yaml.safe_load(Path(args.corpus).read_text("utf-8")) or {})
-    report = corpus.run_corpus(fn, cases)
+    report = corpus.run_corpus(fn, cases, args.hint)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=1))
     else:

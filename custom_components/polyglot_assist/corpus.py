@@ -22,23 +22,37 @@ from typing import Any, Callable
 from hassil.intents import Intents
 
 # {list} or {list:slot}
-_LIST_REF = re.compile(r"\{([A-Za-z0-9_]+)(?::[A-Za-z0-9_]+)?\}")
+_LIST_REF = re.compile(r"(?<!\{)\{\s*([^{}:\s]+)\s*(?::\s*[^{}\s]+\s*)?\}(?!\})")
 # <rule>
-_RULE_REF = re.compile(r"<([A-Za-z0-9_]+)>")
+_RULE_REF = re.compile(r"<([^<>\s]*[^<>\s\d][^<>\s]*)>")
 
 
 def bucket_by_language(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Split the user-facing ``intents:`` section into hassil dicts per language."""
     per_lang: dict[str, dict[str, Any]] = {}
     for intent_name, intent_cfg in (data.get("intents") or {}).items():
-        sentences = (intent_cfg or {}).get("sentences", {}) or {}
+        if not isinstance(intent_cfg, dict):
+            continue
+        sentences = intent_cfg.get("sentences") or {}
         if not isinstance(sentences, dict):
             continue
         for lang, sent_list in sentences.items():
+            if isinstance(sent_list, str):
+                continue  # list("abc") would split into letters; validate() reports it
             per_lang.setdefault(lang, {})[intent_name] = {
-                "data": [{"sentences": list(sent_list or [])}],
+                # non-strings (YAML `- yes` → True) would break the whole
+                # language at match time; validate() reports them
+                "data": [{"sentences": [x for x in (sent_list or []) if isinstance(x, str)]}],
             }
     return per_lang
+
+
+def string_rules(data: dict[str, Any]) -> dict[str, str]:
+    """Only string-valued expansion rules (anything else breaks every language)."""
+    rules = data.get("expansion_rules") or {}
+    if not isinstance(rules, dict):
+        return {}
+    return {k: v for k, v in rules.items() if isinstance(v, str)}
 
 
 def build_intents(data: dict[str, Any]) -> dict[str, Intents]:
@@ -48,7 +62,7 @@ def build_intents(data: dict[str, Any]) -> dict[str, Intents]:
     whether to log-and-skip (runtime) or fail (tests/CI).
     """
     lists_section = data.get("lists") or {}
-    rules_section = data.get("expansion_rules") or {}
+    rules_section = string_rules(data)
     result: dict[str, Intents] = {}
     for lang, intents_dict in bucket_by_language(data).items():
         payload: dict[str, Any] = {"language": lang, "intents": intents_dict}
@@ -73,21 +87,51 @@ def validate(data: dict[str, Any], extra_lists: set[str] | None = None) -> list[
     if not intents:
         problems.append("no intents defined")
     known_lists = set((data.get("lists") or {}).keys()) | (extra_lists or set())
-    known_rules = set((data.get("expansion_rules") or {}).keys())
+    known_rules = set(string_rules(data))
+    raw_rules = data.get("expansion_rules") or {}
+    if not isinstance(raw_rules, dict):
+        problems.append("expansion_rules must be a mapping")
+        raw_rules = {}
+    for rule_name, rule in raw_rules.items():
+        if not isinstance(rule, str):
+            problems.append(f"expansion rule <{rule_name}> is not a string (ignored)")
+            continue
+        problems.extend(_check_refs(f"expansion rule <{rule_name}>", rule, known_lists, known_rules))
     for name, cfg in intents.items():
+        if cfg is not None and not isinstance(cfg, dict):
+            problems.append(f"{name}: intent must be a mapping")
+            continue
         sentences = (cfg or {}).get("sentences")
-        if not isinstance(sentences, dict) or not sentences:
+        if sentences is not None and not isinstance(sentences, dict):
+            problems.append(f"{name}: 'sentences' must be a mapping keyed by language")
+            continue
+        if not sentences:
             problems.append(f"{name}: no sentences")
             continue
         for lang, sent_list in sentences.items():
+            if isinstance(sent_list, str):
+                problems.append(f"{name}/{lang}: sentences must be a list, not a string")
+                continue
             for sentence in sent_list or []:
-                for ref in _LIST_REF.findall(sentence):
-                    if ref not in known_lists:
-                        problems.append(f"{name}/{lang}: unknown list {{{ref}}} in \"{sentence}\"")
-                for ref in _RULE_REF.findall(sentence):
-                    if ref not in known_rules:
-                        problems.append(f"{name}/{lang}: unknown rule <{ref}> in \"{sentence}\"")
+                if not isinstance(sentence, str):
+                    problems.append(f"{name}/{lang}: sentence is not a string: {sentence!r}")
+                    continue
+                problems.extend(_check_refs(f"{name}/{lang}", sentence, known_lists, known_rules))
     return problems
+
+
+def _check_refs(where: str, text: str, lists: set[str], rules: set[str]) -> list[str]:
+    out = [
+        f"{where}: unknown list {{{ref}}} in \"{text}\""
+        for ref in _LIST_REF.findall(text)
+        if ref not in lists
+    ]
+    out += [
+        f"{where}: unknown rule <{ref}> in \"{text}\""
+        for ref in _RULE_REF.findall(text)
+        if ref not in rules
+    ]
+    return out
 
 
 def count_summary(data: dict[str, Any]) -> dict[str, Any]:
@@ -111,42 +155,62 @@ class Case:
     intent: str | None
     lang: str | None = None
     slots: dict[str, Any] = field(default_factory=dict)
+    hint: str | None = None  # pipeline language used as matcher hint
 
 
 def parse_corpus(raw: Any) -> list[Case]:
-    """Parse a corpus document (already YAML-decoded)."""
+    """Parse a corpus document (already YAML-decoded).
+
+    Strict on purpose: an empty corpus or a case without an explicit
+    ``intent`` key would otherwise pass silently. Error messages carry the
+    case index only, never file content.
+    """
     items = raw.get("cases") if isinstance(raw, dict) else raw
+    if not isinstance(items, list) or not items:
+        raise ValueError("corpus has no 'cases' list or it is empty")
     cases: list[Case] = []
-    for item in items or []:
-        if not isinstance(item, dict) or "text" not in item:
-            raise ValueError(f"invalid corpus entry: {item!r}")
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+            raise ValueError(f"case #{idx}: needs a 'text' string")
+        if "intent" not in item:
+            raise ValueError(f"case #{idx}: needs an explicit 'intent' (use null for no match)")
+        slots = item.get("slots") or {}
+        if not isinstance(slots, dict):
+            raise ValueError(f"case #{idx}: 'slots' must be a mapping")
         cases.append(
             Case(
-                text=str(item["text"]),
-                intent=item.get("intent"),
+                text=item["text"],
+                intent=item["intent"],
                 lang=item.get("lang"),
-                slots=dict(item.get("slots") or {}),
+                slots=dict(slots),
+                hint=item.get("hint"),
             )
         )
     return cases
 
 
-# match_fn(text) -> (intent_name, lang, {slot: value}) or None
-MatchFn = Callable[[str], "tuple[str, str, dict[str, Any]] | None"]
+# match_fn(text, hint) -> (intent_name, lang, {slot: value}) or None
+MatchFn = Callable[[str, "str | None"], "tuple[str, str, dict[str, Any]] | None"]
 
 
-def run_corpus(match_fn: MatchFn, cases: list[Case]) -> dict[str, Any]:
-    """Run every case and report failures (expected vs. got)."""
+def run_corpus(
+    match_fn: MatchFn, cases: list[Case], default_hint: str | None = None
+) -> dict[str, Any]:
+    """Run every case and report failures (expected vs. got).
+
+    ``default_hint`` mirrors the pipeline language the runtime passes to the
+    matcher (it is tried first); a case's own ``hint`` overrides it.
+    """
     failed: list[dict[str, Any]] = []
     for case in cases:
-        got = match_fn(case.text)
+        got = match_fn(case.text, case.hint or default_hint)
         got_intent = got[0] if got else None
         ok = got_intent == case.intent
         if ok and got and case.lang and got[1] != case.lang:
             ok = False
         if ok and got and case.slots:
             got_slots = got[2]
-            ok = all(str(got_slots.get(k)) == str(v) for k, v in case.slots.items())
+            ok = all(k in got_slots and str(got_slots[k]) == str(v) for k, v in case.slots.items())
         if not ok:
             failed.append(
                 {

@@ -133,7 +133,7 @@ Every Tier-1 match gets two extra slots in addition to the matched ones:
 |---|---|
 | `polyglot_assist.reload` | Rebuilds the matcher from `intents.yaml` without restart. Safe — keeps old matcher if reload fails. |
 | `polyglot_assist.test_match` | Returns which intent (if any) would match a given text, without dispatching. Useful for sentence tuning. Response service. |
-| `polyglot_assist.run_tests` | Matches every sentence of a corpus file (default `polyglot_assist/tests.yaml`, must live inside the config directory) and returns `total`, `passed` and the `failed` cases (expected vs. got). Nothing is executed. Response service. |
+| `polyglot_assist.run_tests` | Matches every sentence of a corpus file (default `polyglot_assist/tests.yaml`; only `.yaml` files below `<config>/polyglot_assist/`) and returns `total`, `passed` and the `failed` cases (expected vs. got). Optional `language` = pipeline language hint, as at runtime. Nothing is executed. Admin-only response service. |
 
 ## Regression testing (no regressions when editing sentences)
 
@@ -144,7 +144,8 @@ cases:
   - text: "turn on the couch"
     intent: LightZoneOnOff      # expected intent
     lang: en                    # optional
-    slots: {target: light.couch} # optional, subset check
+    slots: {target: light.couch} # optional; every listed slot must be present
+    hint: en                    # optional: pipeline language (tried first, like at runtime)
   - text: "tell me a joke"
     intent: null                # must NOT match (goes to the fallback agent)
 ```

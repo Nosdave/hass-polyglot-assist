@@ -10,14 +10,14 @@ jobs:
     name: Corpus + matcher
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - name: Install (hassil pinned to the version shipped with Home Assistant)
         run: pip install -r requirements_test.txt
       - name: Validate example intents
-        run: python scripts/polyglot_test.py validate config_example/intents.yaml || true
+        run: python scripts/polyglot_test.py validate config_example/intents.yaml --extra-lists area
       - name: Run example corpus
         run: python scripts/polyglot_test.py run config_example/intents.yaml tests/corpus_example.yaml
       - name: pytest
