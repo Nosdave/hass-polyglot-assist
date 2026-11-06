@@ -185,8 +185,10 @@ class DynamicLists:
             self._cache = self._build_static({})
             self._dirty = False
         out = {**self._cache, **self._templates}
-        for name in self._specs:
-            if name not in out:  # template not rendered yet / failed
+        # Every runtime list name must exist (also ones only referenced from
+        # inside static list values): a missing list kills the language.
+        for name in self._declared:
+            if name not in out:  # not referenced, template not rendered yet / failed
                 out[name] = _slot_list(name, [])
         return out
 

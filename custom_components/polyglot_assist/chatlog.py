@@ -78,10 +78,14 @@ def fallback_llm_apis(hass: HomeAssistant, agent_id: str) -> list[str]:
     if entry.config_subentry_id and entry.config_subentry_id in config_entry.subentries:
         sources.append(config_entry.subentries[entry.config_subentry_id].data)
     sources += [config_entry.options, config_entry.data]
+    existing = {api.id for api in llm.async_get_apis(hass)}
     for src in sources:
         apis = src.get(CONF_LLM_HASS_API)
         if apis:
-            return [apis] if isinstance(apis, str) else [str(a) for a in apis]
+            ids = [apis] if isinstance(apis, str) else [str(a) for a in apis]
+            # like the conversation integrations: drop APIs that no longer exist
+            # (this also changes whether tool names carry a namespace)
+            return [a for a in ids if a in existing]
     return []
 
 
