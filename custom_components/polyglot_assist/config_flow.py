@@ -29,11 +29,13 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import callback
-from homeassistant.helpers import selector
+from homeassistant.helpers import llm, selector
 
 from .const import (
+    CONF_CHAT_LOG_TOOLS,
     CONF_FALLBACK_AGENT,
     CONF_LANGUAGE_HINT,
+    CONF_LLM_APIS,
     CONF_INTENTS_FILE,
     DEFAULT_INTENTS_FILE,
     DOMAIN,
@@ -119,6 +121,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
             menu_options={
                 "change_fallback": "Change fallback agent",
                 "language_hint": "Fallback language hint",
+                "chat_log": "Hits in conversation history",
                 "edit_visual": "Edit intents (visual)",
                 "edit_yaml": "Edit intents (YAML)",
                 "add_intent": "Add a new intent",
@@ -170,6 +173,43 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="language_hint", data_schema=schema)
+
+    # ─────────────────────────────────────────────────────────────────
+    # ChatLog recording of hits (opt-in)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def async_step_chat_log(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            new_options = {
+                **self._entry.options,
+                CONF_CHAT_LOG_TOOLS: user_input[CONF_CHAT_LOG_TOOLS],
+                CONF_LLM_APIS: list(user_input.get(CONF_LLM_APIS) or []),
+            }
+            self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+            await self.hass.config_entries.async_reload(self._entry.entry_id)
+            return self.async_create_entry(title="", data=new_options)
+
+        apis = [
+            selector.SelectOptionDict(value=api.id, label=api.name)
+            for api in llm.async_get_apis(self.hass)
+        ]
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_CHAT_LOG_TOOLS,
+                    default=self._entry.options.get(CONF_CHAT_LOG_TOOLS, False),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_LLM_APIS,
+                    default=list(self._entry.options.get(CONF_LLM_APIS) or []),
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=apis, multiple=True)
+                ),
+            }
+        )
+        return self.async_show_form(step_id="chat_log", data_schema=schema)
 
     # ─────────────────────────────────────────────────────────────────
     # Edit YAML (raw view)

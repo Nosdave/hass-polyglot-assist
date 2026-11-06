@@ -19,12 +19,53 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from hassil.intents import Intents
+from hassil.intents import Intents, SlotList, TextSlotList
 
 # {list} or {list:slot}
 _LIST_REF = re.compile(r"(?<!\{)\{([^{}:]+)(?::[^{}]+)?\}(?!\})")
 # <rule>
 _RULE_REF = re.compile(r"<([^<>\s]*[^<>\s\d][^<>\s]*)>")
+
+
+# A list with one of these keys is resolved at runtime (see dynlists.py)
+DYNAMIC_KEYS = ("entities", "areas", "template")
+# Lists every installation gets at runtime unless intents.yaml defines them
+BUILTIN_LISTS = ("area", "name")
+
+
+def dynamic_lists(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Lists declared with ``entities``/``areas``/``template``."""
+    return {
+        name: spec
+        for name, spec in (data.get("lists") or {}).items()
+        if isinstance(spec, dict) and any(k in spec for k in DYNAMIC_KEYS)
+    }
+
+
+def static_lists(data: dict[str, Any]) -> dict[str, Any]:
+    """Lists hassil can build itself (values / range / wildcard)."""
+    dyn = dynamic_lists(data)
+    return {k: v for k, v in (data.get("lists") or {}).items() if k not in dyn}
+
+
+def runtime_list_names(data: dict[str, Any]) -> set[str]:
+    """Names supplied at runtime: built-ins not overridden + dynamic lists."""
+    static = set(static_lists(data))
+    return {b for b in BUILTIN_LISTS if b not in static} | set(dynamic_lists(data))
+
+
+def slot_lists_from_fixture(raw: dict[str, Any] | None) -> dict[str, SlotList]:
+    """Simulated runtime lists for offline tests: {list: [str | {in, out}]}."""
+    out: dict[str, SlotList] = {}
+    for name, items in (raw or {}).items():
+        tuples = []
+        for item in items or []:
+            if isinstance(item, dict):
+                tuples.append((str(item["in"]), item.get("out", item["in"])))
+            else:
+                tuples.append((str(item), str(item)))
+        out[name] = TextSlotList.from_tuples(tuples, allow_template=False, name=name)
+    return out
 
 
 def bucket_by_language(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -61,7 +102,7 @@ def build_intents(data: dict[str, Any]) -> dict[str, Intents]:
     Raises on the first language that hassil cannot parse, so callers decide
     whether to log-and-skip (runtime) or fail (tests/CI).
     """
-    lists_section = data.get("lists") or {}
+    lists_section = static_lists(data)
     rules_section = string_rules(data)
     result: dict[str, Intents] = {}
     for lang, intents_dict in bucket_by_language(data).items():
@@ -74,19 +115,29 @@ def build_intents(data: dict[str, Any]) -> dict[str, Intents]:
     return result
 
 
-def validate(data: dict[str, Any], extra_lists: set[str] | None = None) -> list[str]:
+def validate(
+    data: dict[str, Any], extra_lists: set[str] | None = None, builtins: bool = True
+) -> list[str]:
     """Return human-readable problems that hassil only reports at match time.
 
     hassil raises ``MissingListError`` lazily, *while matching*. The runtime
     matcher swallows that per language, which silently disables matching for
     every utterance that reaches the broken template. Catch it up front.
-    ``extra_lists`` names lists that are supplied at runtime (e.g. ``area``).
+    ``extra_lists`` names further lists supplied at runtime; the built-in
+    ``area``/``name`` lists count as known unless ``builtins`` is False.
     """
     problems: list[str] = []
     intents = data.get("intents") or {}
     if not intents:
         problems.append("no intents defined")
-    known_lists = set((data.get("lists") or {}).keys()) | (extra_lists or set())
+    known_lists = (
+        set((data.get("lists") or {}).keys())
+        | (extra_lists or set())
+        | (set(BUILTIN_LISTS) if builtins else set())
+    )
+    for list_name, spec in dynamic_lists(data).items():
+        if sum(k in spec for k in DYNAMIC_KEYS) != 1:
+            problems.append(f"list {list_name}: use exactly one of {', '.join(DYNAMIC_KEYS)}")
     known_rules = set(string_rules(data))
     raw_rules = data.get("expansion_rules") or {}
     if not isinstance(raw_rules, dict):

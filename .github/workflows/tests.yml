@@ -17,8 +17,8 @@ jobs:
       - name: Install (hassil pinned to the version shipped with Home Assistant)
         run: pip install -r requirements_test.txt
       - name: Validate example intents
-        run: python scripts/polyglot_test.py validate config_example/intents.yaml --extra-lists area
+        run: python scripts/polyglot_test.py validate config_example/intents.yaml
       - name: Run example corpus
-        run: python scripts/polyglot_test.py run config_example/intents.yaml tests/corpus_example.yaml
+        run: python scripts/polyglot_test.py run config_example/intents.yaml tests/corpus_example.yaml --lists tests/fixture_example.yaml
       - name: pytest
         run: pytest -q tests

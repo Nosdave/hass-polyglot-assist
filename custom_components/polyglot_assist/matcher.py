@@ -12,7 +12,7 @@ from typing import Any
 
 # hassil API is sync; we always call match() inside hass.async_add_executor_job
 # pylint: disable=import-error
-from hassil.intents import Intents
+from hassil.intents import Intents, SlotList
 from hassil.recognize import recognize_all
 
 
@@ -31,6 +31,8 @@ class MultilangMatcher:
 
     def __init__(self, intents_by_lang: dict[str, Intents]) -> None:
         self._by_lang: dict[str, Intents] = intents_by_lang
+        # Parsed intents file (set by the loader; used for runtime lists)
+        self.config: dict[str, Any] = {}
 
     @property
     def languages(self) -> list[str]:
@@ -43,7 +45,12 @@ class MultilangMatcher:
             return [hint, *rest]
         return list(self._by_lang.keys())
 
-    def match(self, text: str, hint_lang: str | None) -> MatchResult | None:
+    def match(
+        self,
+        text: str,
+        hint_lang: str | None,
+        slot_lists: dict[str, SlotList] | None = None,
+    ) -> MatchResult | None:
         """Match ``text`` against all loaded languages, hint-language first.
 
         Returns the first ``MatchResult`` or ``None`` on miss.
@@ -57,7 +64,7 @@ class MultilangMatcher:
                 continue
 
             try:
-                for result in recognize_all(text, intents):
+                for result in recognize_all(text, intents, slot_lists=slot_lists):
                     # Tag with the source language; convert slot entities into a
                     # simple {name: {"value": v, "text": t}} dict for downstream.
                     slots: dict[str, dict[str, Any]] = {}

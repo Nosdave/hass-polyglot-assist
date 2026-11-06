@@ -48,9 +48,9 @@ def build_matcher(intents_path: str):
     return data, matcher_mod.MultilangMatcher(corpus.build_intents(data))
 
 
-def match_fn(matcher):
+def match_fn(matcher, slot_lists=None):
     def _fn(text: str, hint: str | None = None):
-        res = matcher.match(text, hint)
+        res = matcher.match(text, hint, slot_lists)
         if res is None:
             return None
         return res.intent_name, res.lang, {k: v.get("value") for k, v in res.slots.items()}
@@ -68,10 +68,12 @@ def main() -> int:
     r.add_argument("intents")
     r.add_argument("corpus")
     r.add_argument("--json", action="store_true")
+    r.add_argument("--lists", help="YAML fixture simulating runtime lists (area, name, entities/areas/template lists)")
     r.add_argument("--hint", help="pipeline language passed to the matcher (runtime: user_input.language)")
     s = sub.add_parser("snapshot")
     s.add_argument("intents")
     s.add_argument("sentences")
+    s.add_argument("--lists", help="YAML fixture simulating runtime lists (area, name, entities/areas/template lists)")
     s.add_argument("--hint", help="pipeline language passed to the matcher")
     args = ap.parse_args()
 
@@ -85,7 +87,8 @@ def main() -> int:
         return 1 if problems else 0
 
     _, matcher = build_matcher(args.intents)
-    fn = match_fn(matcher)
+    fixture = yaml.safe_load(Path(args.lists).read_text("utf-8")) if args.lists else None
+    fn = match_fn(matcher, corpus.slot_lists_from_fixture(fixture))
 
     if args.cmd == "snapshot":
         cases = []

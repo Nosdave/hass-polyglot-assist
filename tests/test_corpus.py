@@ -24,11 +24,12 @@ corpus = _load("corpus")
 matcher_mod = _load("matcher")
 
 
-def _matcher(data: dict):
+def _matcher(data: dict, fixture: dict | None = None):
     m = matcher_mod.MultilangMatcher(corpus.build_intents(data))
+    slot_lists = corpus.slot_lists_from_fixture(fixture)
 
     def fn(text: str, hint: str | None = None):
-        res = m.match(text, hint)
+        res = m.match(text, hint, slot_lists)
         if res is None:
             return None
         return res.intent_name, res.lang, {k: v.get("value") for k, v in res.slots.items()}
@@ -45,9 +46,10 @@ def test_example_corpus_passes(example_data):
     cases = corpus.parse_corpus(
         yaml.safe_load((ROOT / "tests" / "corpus_example.yaml").read_text("utf-8"))
     )
-    report = corpus.run_corpus(_matcher(example_data), cases)
+    fixture = yaml.safe_load((ROOT / "tests" / "fixture_example.yaml").read_text("utf-8"))
+    report = corpus.run_corpus(_matcher(example_data, fixture), cases)
     assert report["failed"] == [], report["failed"]
-    assert report["total"] >= 20
+    assert report["total"] >= 25
 
 
 def test_example_builds_all_languages(example_data):
@@ -63,13 +65,15 @@ def test_validate_flags_unknown_list_and_rule():
             "B": {"sentences": {}},
         },
     }
-    problems = corpus.validate(data)
+    problems = corpus.validate(data, builtins=False)
     assert any("unknown list {area}" in p for p in problems)
     assert any("unknown rule <verb>" in p for p in problems)
     assert any(p.startswith("B: no sentences") for p in problems)
     assert not any("{room}" in p for p in problems)
     # lists supplied at runtime are not reported
-    assert not any("{area}" in p for p in corpus.validate(data, extra_lists={"area"}))
+    assert not any("{area}" in p for p in corpus.validate(data, extra_lists={"area"}, builtins=False))
+    # built-in runtime lists (area, name) are known by default
+    assert not any("{area}" in p for p in corpus.validate(data))
 
 
 def test_list_slot_alias_and_values():
@@ -157,3 +161,54 @@ def test_invalid_expansion_rules_are_ignored_not_fatal():
     }
     assert any("<bad>" in p for p in corpus.validate(data))
     assert _matcher(data)("turn on it")[0] == "On"
+
+
+DYN = {
+    "lists": {
+        "static_zone": {"values": [{"in": "couch", "out": "light.couch"}]},
+        "lamps": {"entities": {"domain": "light"}},
+        "rooms": {"areas": {}},
+        "kids": {"template": "{{ ['anna'] }}"},
+    },
+    "intents": {
+        "AreaStatus": {"sentences": {"en": ["which lights are on in [the] {area}"],
+                                     "fr": ["quelles lumières sont allumées dans [la|le] {area}"]}},
+        "LampOn": {"sentences": {"en": ["turn on [the] {lamps}"]}},
+        "ZoneOn": {"sentences": {"en": ["zone {static_zone} on"]}},
+    },
+}
+
+
+def test_static_and_dynamic_lists_are_split():
+    assert set(corpus.dynamic_lists(DYN)) == {"lamps", "rooms", "kids"}
+    assert set(corpus.static_lists(DYN)) == {"static_zone"}
+    assert corpus.runtime_list_names(DYN) == {"area", "name", "lamps", "rooms", "kids"}
+    # dynamic specs must not reach hassil (it cannot build them)
+    corpus.build_intents(DYN)
+    assert corpus.validate(DYN) == []
+
+
+def test_runtime_lists_match_with_fixture():
+    fixture = {
+        "area": [{"in": "Küche", "out": "Küche"}, {"in": "kitchen", "out": "Küche"}, {"in": "cuisine", "out": "Küche"}],
+        "lamps": [{"in": "Stehlampe", "out": "light.stehlampe"}],
+    }
+    fn = _matcher(DYN, fixture)
+    assert fn("which lights are on in the kitchen") == ("AreaStatus", "en", {"area": "Küche"})
+    assert fn("quelles lumières sont allumées dans la cuisine") == ("AreaStatus", "fr", {"area": "Küche"})
+    assert fn("turn on the stehlampe") == ("LampOn", "en", {"lamps": "light.stehlampe"})
+    assert fn("zone couch on")[0] == "ZoneOn"
+    # without runtime lists the sentence does not match (and does not crash)
+    assert _matcher(DYN)("which lights are on in the kitchen") is None
+
+
+def test_static_list_overrides_builtin_name():
+    data = {"lists": {"area": {"values": [{"in": "garden", "out": "Garten"}]}},
+            "intents": {"S": {"sentences": {"en": ["status {area}"]}}}}
+    assert "area" not in corpus.runtime_list_names(data)
+    assert _matcher(data)("status garden") == ("S", "en", {"area": "Garten"})
+
+
+def test_dynamic_list_needs_exactly_one_kind():
+    data = {"lists": {"x": {"entities": {}, "areas": {}}}, "intents": {"S": {"sentences": {"en": ["{x}"]}}}}
+    assert any("exactly one" in p for p in corpus.validate(data))

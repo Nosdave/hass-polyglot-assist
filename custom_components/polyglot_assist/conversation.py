@@ -38,7 +38,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import intent
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .chatlog import async_record_hit
 from .const import (
+    CONF_CHAT_LOG_TOOLS,
+    CONF_LLM_APIS,
     CONF_FALLBACK_AGENT,
     CONF_LANGUAGE_HINT,
     DOMAIN,
@@ -60,13 +63,11 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Polyglot Assist conversation entity from a config entry."""
     data = hass.data[DOMAIN][entry.entry_id]
-    matcher: MultilangMatcher = data["matcher"]
     fallback_agent_id: str = data[CONF_FALLBACK_AGENT]
 
     agent = PolyglotAssistAgent(
         hass=hass,
         entry=entry,
-        matcher=matcher,
         fallback_agent_id=fallback_agent_id,
     )
     async_add_entities([agent])
@@ -85,16 +86,23 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
-        matcher: MultilangMatcher,
         fallback_agent_id: str,
     ) -> None:
         self.hass = hass
         self._entry = entry
-        self._matcher = matcher
         self._fallback_agent_id = fallback_agent_id
 
         self._attr_name = entry.title or "Polyglot Assist"
         self._attr_unique_id = entry.entry_id
+
+    @property
+    def _runtime(self) -> dict[str, Any]:
+        # Read on every call: the reload service swaps matcher and lists.
+        return self.hass.data[DOMAIN][self._entry.entry_id]
+
+    @property
+    def _matcher(self) -> MultilangMatcher:
+        return self._runtime["matcher"]
 
     @property
     def supported_languages(self) -> list[str]:
@@ -112,10 +120,12 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         t0 = time.perf_counter()
 
         # Hassil is sync-CPU — run in executor.
+        slot_lists = self._runtime["lists"].async_get()
         match = await self.hass.async_add_executor_job(
             self._matcher.match,
             user_input.text,
             user_input.language,
+            slot_lists,
         )
 
         if match is not None:
@@ -134,7 +144,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                     "matched_sentence": match.matched_sentence,
                 },
             )
-            return await self._handle_match(match, user_input)
+            return await self._handle_match(match, user_input, chat_log)
 
         # Miss → proxy to fallback agent.
         t_miss_ms = (time.perf_counter() - t0) * 1000.0
@@ -148,6 +158,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         self,
         match: MatchResult,
         user_input: ConversationInput,
+        chat_log: ChatLog,
     ) -> ConversationResult:
         """Dispatch the matched intent to HA's intent system."""
         # Inject the matched language as a slot so existing user-side
@@ -201,6 +212,19 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         # If the handler didn't set speech (rare), fall back to a generic OK.
         if not response.speech:
             response.async_set_speech("OK")
+
+        if self._entry.options.get(CONF_CHAT_LOG_TOOLS, False):
+            intent_cfg = (self._matcher.config.get("intents") or {}).get(match.intent_name)
+            if isinstance(intent_cfg, dict):
+                await async_record_hit(
+                    self.hass,
+                    user_input=user_input,
+                    chat_log=chat_log,
+                    intent_cfg=intent_cfg,
+                    slots=slots,
+                    response=response,
+                    api_ids=list(self._entry.options.get(CONF_LLM_APIS) or []),
+                )
 
         return ConversationResult(
             response=response,

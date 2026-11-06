@@ -64,3 +64,15 @@ cases:
   intent: null
 - text: quelle heure est-il
   intent: null
+- text: welche lichter sind im wohnzimmer an
+  intent: LichtStatusBereich
+  lang: de
+  slots: {area: Wohnzimmer}
+- text: which lights are on in the kitchen
+  intent: LichtStatusBereich
+  lang: en
+  slots: {area: Küche}
+- text: quelles lumières sont allumées dans le salon
+  intent: LichtStatusBereich
+  lang: fr
+  slots: {area: Wohnzimmer}

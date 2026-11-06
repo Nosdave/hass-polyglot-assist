@@ -27,7 +27,7 @@ import yaml
 from hassil.intents import Intents  # pylint: disable=import-error
 from homeassistant.core import HomeAssistant
 
-from .corpus import bucket_by_language, string_rules, validate
+from .corpus import bucket_by_language, static_lists, string_rules, validate
 from .matcher import MultilangMatcher
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ class MatcherLoader:
         except Exception:  # noqa: BLE001 — diagnostics must never block loading
             _LOGGER.exception("Polyglot Assist: validation of %s failed", path.name)
 
-        lists_section = data.get("lists") or {}
+        lists_section = static_lists(data)
         rules_section = string_rules(data)
 
         # One Intents object per language; a broken language is skipped.
@@ -85,4 +85,6 @@ class MatcherLoader:
         if not result:
             raise ValueError(f"No language groups successfully loaded from {path}")
 
-        return MultilangMatcher(result)
+        matcher = MultilangMatcher(result)
+        matcher.config = data
+        return matcher

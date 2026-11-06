@@ -112,6 +112,61 @@ intents:
 
 Matched slot values reach the `intent_script` as template variables.
 
+### Runtime lists (no manual upkeep)
+
+Two lists are always available at runtime, like in Home Assistant's own
+sentences (unless `intents.yaml` defines a list with the same name):
+
+| List | Contains | Value |
+|---|---|---|
+| `{area}` | every area name and alias | area name (same as the default agent) |
+| `{name}` | every entity exposed to Assist, name and aliases | entity name |
+
+Declarative lists are resolved from your installation and refreshed
+automatically (registry/area/expose changes; at the latest every 5 minutes,
+templates every 60 s):
+
+```yaml
+lists:
+  lamps:
+    entities:
+      domain: light          # one or a list
+      area: [kitchen]        # optional, area ids (entity or device area)
+      exposed: true          # default: only entities exposed to Assist
+      exclude: [light.test]  # optional
+    # in = name + aliases, out = entity_id
+  rooms:
+    areas: {}                # in = name + aliases, out = area_id
+  kids:
+    template: "{{ ['Anna', 'Ben'] }}"   # strings or {in, out} mappings
+```
+
+Offline, simulate runtime lists with a fixture file:
+`polyglot_test.py run intents.yaml tests.yaml --lists fixture.yaml`
+(`{area: [{in: kitchen, out: Kitchen}], lamps: [...]}`).
+
+### Hits in the conversation history (opt-in)
+
+After a Polyglot hit the fallback LLM normally sees nothing of it, so a
+follow-up like "and the piano too" lacks context. With the option
+*Hits in conversation history* a hit is added to the shared conversation
+history as a **tool call of a tool the fallback LLM really has**, declared per
+intent:
+
+```yaml
+intents:
+  LightZoneOnOff:
+    llm_equivalent:
+      tool: HassTurnOn                  # resolved against the selected LLM APIs
+      args: {name: "{{ zone_text }}"}   # templates: slot values and <slot>_text
+```
+
+The tool name must resolve uniquely to an offered tool (exact, or the single
+tool ending in `__HassTurnOn`); otherwise nothing is recorded. Hits are never
+recorded as plain assistant text: in tests with a local model that made the
+LLM claim success for follow-ups without calling any tool, and bare intent
+names that are not offered tools were copied into invalid tool calls.
+
 ### Injected slots
 
 Every Tier-1 match gets two extra slots in addition to the matched ones:
@@ -125,6 +180,7 @@ Every Tier-1 match gets two extra slots in addition to the matched ones:
 
 | Option | Default | What it does |
 |---|---|---|
+| Hits in conversation history | off | See above; select the LLM APIs your fallback agent uses. |
 | Fallback language hint | off | On a miss, if the utterance is clearly in another configured language (small de/en/fr word lists), a short "reply in <language>" note is appended to `extra_system_prompt` for the fallback agent. Pipelines run with one fixed language, so LLMs otherwise tend to answer in the language of (German) tool results. Otherwise the input is passed on unchanged. |
 
 ## Services

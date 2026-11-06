@@ -1,0 +1,8 @@
+# Simulated runtime lists for the example corpus (generic names only).
+area:
+  - {in: Wohnzimmer, out: Wohnzimmer}
+  - {in: living room, out: Wohnzimmer}
+  - {in: salon, out: Wohnzimmer}
+  - {in: Küche, out: Küche}
+  - {in: kitchen, out: Küche}
+  - {in: cuisine, out: Küche}

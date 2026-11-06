@@ -35,6 +35,7 @@ from .const import (
     SERVICE_TEST_MATCH,
 )
 from .corpus import Case, parse_corpus, run_corpus
+from .dynlists import DynamicLists
 from .loader import MatcherLoader
 from .matcher import MultilangMatcher
 
@@ -68,8 +69,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.exception("Failed to load Polyglot intents from %s", intents_file)
         return False
 
+    lists = DynamicLists(hass, matcher.config)
+    lists.async_start()
     hass.data[DOMAIN][entry.entry_id] = {
         "matcher": matcher,
+        "lists": lists,
         "fallback_agent": entry.data[CONF_FALLBACK_AGENT],
     }
 
@@ -90,7 +94,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             results = {}
             for entry_id, data in list(hass.data[DOMAIN].items()):
                 m: MultilangMatcher = data["matcher"]
-                match = await hass.async_add_executor_job(m.match, text, language_hint)
+                slot_lists = data["lists"].async_get()
+                match = await hass.async_add_executor_job(
+                    m.match, text, language_hint, slot_lists
+                )
                 results[entry_id] = (
                     {"intent": match.intent_name, "lang": match.lang, "slots": match.slots}
                     if match else None
@@ -145,9 +152,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             results = {}
             for entry_id, data in list(hass.data[DOMAIN].items()):
                 m: MultilangMatcher = data["matcher"]
+                slot_lists = data["lists"].async_get()
 
-                def _match(text: str, lang_hint: str | None, m: MultilangMatcher = m):
-                    res = m.match(text, lang_hint)
+                def _match(
+                    text: str,
+                    lang_hint: str | None,
+                    m: MultilangMatcher = m,
+                    slot_lists: dict = slot_lists,
+                ):
+                    res = m.match(text, lang_hint, slot_lists)
                     if res is None:
                         return None
                     return (
@@ -187,7 +200,11 @@ async def _async_reload_all(hass: HomeAssistant) -> None:
             continue
         try:
             new_matcher = await MatcherLoader.load(hass, entry.data[CONF_INTENTS_FILE])
+            new_lists = DynamicLists(hass, new_matcher.config)
+            new_lists.async_start()
+            data["lists"].async_stop()
             data["matcher"] = new_matcher
+            data["lists"] = new_lists
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Reload failed for %s — keeping previous matcher", entry_id)
 
@@ -196,7 +213,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
+        data = hass.data[DOMAIN].pop(entry.entry_id, None)
+        if data is not None:
+            data["lists"].async_stop()
         # Last entry → unregister services
         if not hass.data[DOMAIN]:
             hass.services.async_remove(DOMAIN, SERVICE_RELOAD)

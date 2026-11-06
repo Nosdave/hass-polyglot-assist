@@ -26,7 +26,8 @@
           "edit_visual": "Edit intents (visual)",
           "edit_yaml": "Edit intents (YAML)",
           "add_intent": "Add a new intent",
-          "reload": "Reload matcher (re-read intents.yaml)"
+          "reload": "Reload matcher (re-read intents.yaml)",
+          "chat_log": "Hits in conversation history"
         }
       },
       "change_fallback": {
@@ -78,6 +79,14 @@
       "reload": {
         "title": "Reload matcher",
         "description": "Rebuild the Hassil matcher from the on-disk intents.yaml. Useful after editing the file externally."
+      },
+      "chat_log": {
+        "title": "Hits in conversation history",
+        "description": "When on, a Polyglot hit whose intent declares `llm_equivalent` is added to the conversation history as a tool call of a tool the fallback LLM really has (e.g. HassTurnOn), so follow-ups like \"and the piano too\" work. Intents without a resolvable equivalent are never recorded. Select the LLM APIs your fallback agent uses.",
+        "data": {
+          "chat_log_tools": "Record hits as tool calls",
+          "fallback_llm_apis": "LLM APIs of the fallback agent"
+        }
       }
     },
     "error": {
