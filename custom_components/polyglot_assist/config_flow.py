@@ -33,6 +33,7 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_FALLBACK_AGENT,
+    CONF_LANGUAGE_HINT,
     CONF_INTENTS_FILE,
     DEFAULT_INTENTS_FILE,
     DOMAIN,
@@ -117,6 +118,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
             step_id="init",
             menu_options={
                 "change_fallback": "Change fallback agent",
+                "language_hint": "Fallback language hint",
                 "edit_visual": "Edit intents (visual)",
                 "edit_yaml": "Edit intents (YAML)",
                 "add_intent": "Add a new intent",
@@ -135,7 +137,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
             new_data = {**self._entry.data, CONF_FALLBACK_AGENT: user_input[CONF_FALLBACK_AGENT]}
             self.hass.config_entries.async_update_entry(self._entry, data=new_data)
             await self.hass.config_entries.async_reload(self._entry.entry_id)
-            return self.async_create_entry(title="", data={})
+            return self.async_create_entry(title="", data=dict(self._entry.options))
 
         current = self._entry.data.get(CONF_FALLBACK_AGENT, "")
         schema = vol.Schema(
@@ -146,6 +148,28 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="change_fallback", data_schema=schema)
+
+    # ─────────────────────────────────────────────────────────────────
+    # Fallback language hint (opt-in)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def async_step_language_hint(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            new_options = {**self._entry.options, CONF_LANGUAGE_HINT: user_input[CONF_LANGUAGE_HINT]}
+            self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+            await self.hass.config_entries.async_reload(self._entry.entry_id)
+            # An OptionsFlow result's data REPLACES entry.options.
+            return self.async_create_entry(title="", data=new_options)
+
+        current = self._entry.options.get(CONF_LANGUAGE_HINT, False)
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_LANGUAGE_HINT, default=current): selector.BooleanSelector(),
+            }
+        )
+        return self.async_show_form(step_id="language_hint", data_schema=schema)
 
     # ─────────────────────────────────────────────────────────────────
     # Edit YAML (raw view)
@@ -177,7 +201,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                 self._intents_path.write_text, new_yaml, "utf-8"
             )
             await self._reload_matcher()
-            return self.async_create_entry(title="", data={})
+            return self.async_create_entry(title="", data=dict(self._entry.options))
 
         current_yaml = await self.hass.async_add_executor_job(
             self._intents_path.read_text, "utf-8"
@@ -283,7 +307,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
 
             await self._save_intents()
             await self._reload_matcher()
-            return self.async_create_entry(title="", data={})
+            return self.async_create_entry(title="", data=dict(self._entry.options))
 
         # Build dynamic schema with one textarea per existing language
         schema_dict: dict = {}
@@ -384,7 +408,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         await self._reload_matcher()
-        return self.async_create_entry(title="", data={})
+        return self.async_create_entry(title="", data=dict(self._entry.options))
 
     # ─────────────────────────────────────────────────────────────────
     # Helpers

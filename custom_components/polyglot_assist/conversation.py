@@ -19,6 +19,7 @@ companion to one.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 import time
 from typing import Any
@@ -39,11 +40,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     CONF_FALLBACK_AGENT,
+    CONF_LANGUAGE_HINT,
     DOMAIN,
     EVENT_MATCH,
     EVENT_MISS_PROXIED,
     SLOT_LANG,
+    SLOT_UTTERANCE,
 )
+from .langguess import HINT_MARKER, build_extra_prompt
 from .matcher import MatchResult, MultilangMatcher
 
 _LOGGER = logging.getLogger(__name__)
@@ -138,7 +142,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             "Polyglot miss after %.1f ms — text=%r (lang_hint=%s) → proxy to %s",
             t_miss_ms, user_input.text, user_input.language, self._fallback_agent_id,
         )
-        return await self._proxy_to_fallback(user_input, t_miss_ms)
+        return await self._proxy_to_fallback(user_input, t_miss_ms, chat_log)
 
     async def _handle_match(
         self,
@@ -150,6 +154,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         # intent_script Jinja templates can branch on `lang`.
         slots: dict[str, dict[str, Any]] = dict(match.slots)
         slots[SLOT_LANG] = {"value": match.lang}
+        slots[SLOT_UTTERANCE] = {"value": user_input.text}
 
         try:
             response = await intent.async_handle(
@@ -206,8 +211,26 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         self,
         user_input: ConversationInput,
         miss_took_ms: float,
+        chat_log: ChatLog,
     ) -> ConversationResult:
-        """Forward the unmodified ConversationInput to the configured fallback."""
+        """Forward the ConversationInput to the configured fallback.
+
+        Unmodified, unless the opt-in language hint is enabled: then a short
+        "reply in <detected language>" instruction is appended to
+        ``extra_system_prompt`` (pipelines run with one fixed language, so the
+        fallback LLM otherwise tends to answer in the language of German tool
+        results instead of the user's).
+        """
+        if self._entry.options.get(CONF_LANGUAGE_HINT, False):
+            extra = build_extra_prompt(
+                user_input.text,
+                user_input.language,
+                self._matcher.languages,
+                user_input.extra_system_prompt,
+                chat_log.extra_system_prompt,
+            )
+            if extra is not None:
+                user_input = dataclasses.replace(user_input, extra_system_prompt=extra)
         fallback_agent = conversation.async_get_agent(
             self.hass, self._fallback_agent_id
         )
@@ -217,6 +240,8 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             {
                 "input": user_input.text,
                 "language": user_input.language,
+                "language_hint": user_input.extra_system_prompt is not None
+                and HINT_MARKER in user_input.extra_system_prompt,
                 "fallback_agent": self._fallback_agent_id,
                 "fallback_available": fallback_agent is not None,
                 "match_took_ms": round(miss_took_ms, 1),
@@ -239,6 +264,6 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
 
         # IMPORTANT: call async_process, NOT _async_handle_message.
         # The base method sets up a fresh ChatLog session for the fallback.
-        # Pass user_input UNCHANGED — preserves satellite_id, extra_system_prompt,
-        # and any future ConversationInput fields HA adds.
+        # Pass user_input otherwise UNCHANGED — preserves satellite_id,
+        # extra_system_prompt and any future ConversationInput fields HA adds.
         return await fallback_agent.async_process(user_input)

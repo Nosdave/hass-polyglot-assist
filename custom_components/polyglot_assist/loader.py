@@ -47,6 +47,9 @@ class MatcherLoader:
         raw = await hass.async_add_executor_job(path.read_text, "utf-8")
         data = yaml.safe_load(raw) or {}
         intents_section = data.get("intents", {})
+        # Optional slot lists shared by all languages, e.g. wildcards:
+        #   lists: {wunsch: {wildcard: true}}
+        lists_section = data.get("lists") or {}
         if not intents_section:
             raise ValueError(f"No intents in {path}")
 
@@ -71,6 +74,8 @@ class MatcherLoader:
         result: dict[str, Intents] = {}
         for lang, intents_dict in per_lang.items():
             payload = {"language": lang, "intents": intents_dict}
+            if lists_section:
+                payload["lists"] = lists_section
             try:
                 result[lang] = await hass.async_add_executor_job(
                     Intents.from_dict, payload

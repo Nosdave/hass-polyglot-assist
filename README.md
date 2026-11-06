@@ -88,6 +88,45 @@ name must already be registered as an `intent_script` entry — Polyglot
 Assist only adds the language-aware matching layer; speech rendering stays
 in your existing `intent_script:` templates with `{{ lang }}` branching.
 
+### Shared slot lists
+
+An optional top-level `lists:` section in `intents.yaml` is passed to
+hassil for every language, so sentences can use `{slot}` placeholders:
+
+```yaml
+lists:
+  room:
+    values:
+      - {in: kitchen, out: light.kitchen}
+      - {in: küche, out: light.kitchen}
+  percent:
+    range: {from: 1, to: 100}
+  wish:
+    wildcard: true
+intents:
+  LightSet:
+    sentences:
+      en: ["set [the] {room} to {percent} percent"]
+      de: ["{room} auf {percent} prozent"]
+```
+
+Matched slot values reach the `intent_script` as template variables.
+
+### Injected slots
+
+Every Tier-1 match gets two extra slots in addition to the matched ones:
+
+| Slot | Content |
+|---|---|
+| `lang` | Language code of the matched sentence (`de`, `en`, `fr`, …) |
+| `utterance` | The full original sentence, e.g. to pass a wildcard request on unchanged |
+
+### Options
+
+| Option | Default | What it does |
+|---|---|---|
+| Fallback language hint | off | On a miss, if the utterance is clearly in another configured language (small de/en/fr word lists), a short "reply in <language>" note is appended to `extra_system_prompt` for the fallback agent. Pipelines run with one fixed language, so LLMs otherwise tend to answer in the language of (German) tool results. Otherwise the input is passed on unchanged. |
+
 ## Services
 
 | Service | What it does |
@@ -100,7 +139,7 @@ in your existing `intent_script:` templates with `{{ lang }}` branching.
 | Event | When | Payload |
 |---|---|---|
 | `polyglot_assist_match` | Successful Tier-1 match | `intent`, `lang`, `input`, `took_ms`, `matched_sentence` |
-| `polyglot_assist_miss_proxied` | Miss → forwarded to fallback | `input`, `language`, `fallback_agent`, `match_took_ms` |
+| `polyglot_assist_miss_proxied` | Miss → forwarded to fallback | `input`, `language`, `language_hint`, `fallback_agent`, `match_took_ms` |
 
 Use these to track your Tier-1 hit-rate in the HA logbook.
 

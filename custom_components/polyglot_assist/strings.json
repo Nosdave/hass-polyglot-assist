@@ -22,6 +22,7 @@
         "description": "What would you like to do?",
         "menu_options": {
           "change_fallback": "Change fallback agent",
+          "language_hint": "Fallback language hint",
           "edit_visual": "Edit intents (visual)",
           "edit_yaml": "Edit intents (YAML)",
           "add_intent": "Add a new intent",
@@ -33,6 +34,13 @@
         "description": "Pick the agent that receives utterances Polyglot did not match.",
         "data": {
           "fallback_agent": "Fallback conversation agent"
+        }
+      },
+      "language_hint": {
+        "title": "Fallback language hint",
+        "description": "When on, unmatched utterances that are clearly in another configured language (de/en/fr word lists) get a short instruction for the fallback agent to reply in that language. Off by default; the input is otherwise passed on unchanged.",
+        "data": {
+          "fallback_language_hint": "Ask the fallback agent to reply in the detected language"
         }
       },
       "edit_visual": {
