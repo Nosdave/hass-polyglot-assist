@@ -36,6 +36,7 @@ from .const import (
     CONF_LANGUAGE_HINT,
     CONF_INTENTS_FILE,
     CONF_SOURCE,
+    CONF_TRANSLATION_AI_TASK,
     DEFAULT_INTENTS_FILE,
     DOMAIN,
     SOURCE_CATALOG,
@@ -129,6 +130,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                 "language_hint": "Fallback language hint",
                 "chat_log": "Hits in conversation history",
                 "source": "Intents source (YAML file or catalog)",
+                "translation": "Translation proposals (AI task)",
                 "edit_visual": "Edit intents (visual)",
                 "edit_yaml": "Edit intents (YAML)",
                 "add_intent": "Add a new intent",
@@ -286,6 +288,33 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="source", data_schema=schema, errors=errors, description_placeholders=placeholders
         )
+
+    # ─────────────────────────────────────────────────────────────────
+    # Translation proposals: which AI Task entity to use
+    # ─────────────────────────────────────────────────────────────────
+
+    async def async_step_translation(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            new_options = {**self._entry.options}
+            if user_input.get(CONF_TRANSLATION_AI_TASK):
+                new_options[CONF_TRANSLATION_AI_TASK] = user_input[CONF_TRANSLATION_AI_TASK]
+            else:
+                new_options.pop(CONF_TRANSLATION_AI_TASK, None)
+            self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+            return self.async_create_entry(title="", data=new_options)
+
+        current = self._entry.options.get(CONF_TRANSLATION_AI_TASK)
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_TRANSLATION_AI_TASK,
+                    description={"suggested_value": current} if current else None,
+                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="ai_task")),
+            }
+        )
+        return self.async_show_form(step_id="translation", data_schema=schema)
 
     # ─────────────────────────────────────────────────────────────────
     # Edit YAML (raw view)

@@ -28,7 +28,8 @@
           "add_intent": "Add a new intent",
           "reload": "Reload matcher (re-read intents.yaml)",
           "chat_log": "Hits in conversation history",
-          "source": "Intents source (YAML file or catalog)"
+          "source": "Intents source (YAML file or catalog)",
+          "translation": "Translation proposals (AI task)"
         }
       },
       "change_fallback": {
@@ -94,6 +95,13 @@
         "data": {
           "source": "Source",
           "when_different": "If YAML file and catalog differ"
+        }
+      },
+      "translation": {
+        "title": "Translation proposals",
+        "description": "AI Task entity that proposes sentences and names for other languages. Proposals are validated and only applied when you accept them. Prefer an AI task without tools.",
+        "data": {
+          "translation_ai_task": "AI Task entity"
         }
       }
     },

@@ -34,6 +34,12 @@ class MultilangMatcher:
         # Parsed intents file (set by the loader; used for runtime lists)
         self.config: dict[str, Any] = {}
 
+    def static_slot_lists(self) -> dict[str, SlotList]:
+        """Lists defined in the intents file (identical for every language)."""
+        for intents in self._by_lang.values():
+            return dict(intents.slot_lists)
+        return {}
+
     @property
     def languages(self) -> list[str]:
         return list(self._by_lang.keys())

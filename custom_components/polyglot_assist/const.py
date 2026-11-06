@@ -17,6 +17,8 @@ CONF_LANGUAGES: Final = "languages"
 CONF_LANGUAGE_HINT: Final = "fallback_language_hint"
 # Record hits in the ChatLog as tool calls (needs llm_equivalent per intent)
 CONF_CHAT_LOG_TOOLS: Final = "chat_log_tools"
+# AI Task entity used for translation/name PROPOSALS (pick one without tools)
+CONF_TRANSLATION_AI_TASK: Final = "translation_ai_task"
 
 # Intents source: YAML file (default) or catalog in .storage
 CONF_SOURCE: Final = "source"

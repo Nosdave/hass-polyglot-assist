@@ -54,6 +54,7 @@ from homeassistant.helpers.template import Template
 from .corpus import (
     BUILTIN_LISTS,
     dynamic_lists,
+    names_table,
     referenced_lists,
     static_lists,
 )
@@ -101,6 +102,7 @@ class DynamicLists:
         self._builtins = [b for b in BUILTIN_LISTS if b not in static and b in used]
         self._specs = {k: v for k, v in dynamic_lists(data).items() if k in used}
         self._declared = set(dynamic_lists(data)) | {b for b in BUILTIN_LISTS if b not in static}
+        self._names = names_table(data)
         self._cache: dict[str, SlotList] | None = None
         self._templates: dict[str, SlotList] = {}
         self._dirty = False
@@ -220,7 +222,8 @@ class DynamicLists:
         tuples: list[tuple[str, Any, dict[str, Any]]] = []
         for area in ar.async_get(self.hass).async_list_areas():
             out = area.name if value == "name" else area.id
-            for text in dict.fromkeys([area.name, *(area.aliases or [])]):
+            extra = self._names.get(f"area.{area.id}", [])
+            for text in dict.fromkeys([area.name, *(area.aliases or []), *extra]):
                 if isinstance(text, str) and _text_in(text):
                     tuples.append((_text_in(text), out, {"area_id": area.id}))
         return _slot_list(name, tuples)
@@ -230,6 +233,7 @@ class DynamicLists:
             names = intent.async_get_entity_aliases(self.hass, entry, state=state)
         except Exception:  # noqa: BLE001 — older cores
             names = [state.name, *((entry.aliases or []) if entry else [])]
+        names = [*names, *self._names.get(state.entity_id, [])]
         return [t for t in dict.fromkeys(_text_in(n) for n in names if isinstance(n, str)) if t]
 
     @callback

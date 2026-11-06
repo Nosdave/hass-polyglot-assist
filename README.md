@@ -210,6 +210,29 @@ Unknown safety levels count as `disabled` (fail closed). If the active source
 cannot be loaded, Home Assistant shows a repair issue — Polyglot never falls
 back to the other source on its own.
 
+### Translation proposals and the name table
+
+With an AI Task entity selected in the options (*Translation proposals*;
+prefer one without tools), the panel/WebSocket command
+`polyglot_assist/translate` proposes sentence templates for other languages.
+Every proposal is validated before you see it: parsable by hassil, the same
+slots as a source sentence, and sample expansions must not match another
+intent (collision) — already covered variants are flagged. **Nothing is saved
+automatically**; accepting a proposal is a normal, regression-guarded save.
+
+Spoken names per language live in a `names:` table instead of Home Assistant
+aliases (the LLM never sees them); they extend `{name}`, `{area}` and all
+`entities:`/`areas:` lists:
+
+```yaml
+names:
+  light.couch: {en: [sofa], fr: [canapé]}
+  area.living_room: {de: [wohnzimmer], fr: [salon]}
+```
+
+`polyglot_assist/suggest_names` proposes names the same way.
+
+
 ### Injected slots
 
 Every Tier-1 match gets two extra slots in addition to the matched ones:
@@ -223,6 +246,7 @@ Every Tier-1 match gets two extra slots in addition to the matched ones:
 
 | Option | Default | What it does |
 |---|---|---|
+| Translation proposals | – | AI Task entity for sentence/name proposals. |
 | Hits in conversation history | off | See above; the tools are read from the fallback agent's own settings. |
 | Fallback language hint | off | On a miss, if the utterance is clearly in another configured language (small de/en/fr word lists), a short "reply in <language>" note is appended to `extra_system_prompt` for the fallback agent. Pipelines run with one fixed language, so LLMs otherwise tend to answer in the language of (German) tool results. Otherwise the input is passed on unchanged. |
 

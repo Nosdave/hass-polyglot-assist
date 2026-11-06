@@ -259,3 +259,42 @@ def test_run_corpus_reports_case_index():
     data = {"intents": {"A": {"sentences": {"en": ["a"]}}}}
     cases = corpus.parse_corpus({"cases": [{"text": "a", "intent": "A"}, {"text": "a", "intent": None}]})
     assert [f["index"] for f in corpus.run_corpus(_matcher(data), cases)["failed"]] == [1]
+
+
+def test_check_proposal_statuses():
+    data = {
+        "lists": {"zone": {"values": [{"in": "couch", "out": "light.couch"}, {"in": "bar", "out": "light.bar"}]}},
+        "intents": {
+            "ZoneOn": {"sentences": {"de": ["{zone} an"], "en": ["turn on [the] {zone}"]}},
+            "AllOff": {"sentences": {"en": ["all lights off"]}},
+        },
+    }
+    m = matcher_mod.MultilangMatcher(corpus.build_intents(data))
+    lists = corpus.build_intents(data)["en"].slot_lists
+
+    def fn(text):
+        r = m.match(text, None)
+        return r and (r.intent_name, r.lang, {})
+
+    src = data["intents"]["ZoneOn"]["sentences"]["de"] + data["intents"]["ZoneOn"]["sentences"]["en"]
+    ok = corpus.check_proposal("ZoneOn", "allume [le|la] {zone}", src, fn, lists, language="fr")
+    assert ok["status"] == "ok", ok
+    assert corpus.check_proposal("ZoneOn", "allume (le|la", src, fn, lists)["status"] == "error"
+    assert "slots" in corpus.check_proposal("ZoneOn", "allume tout", src, fn, lists)["notes"][0]
+    coll = corpus.check_proposal("ZoneOn", "all lights off", [], fn, lists)
+    assert coll["status"] == "error" and coll["collisions"][0]["intent"] == "AllOff"
+    assert corpus.check_proposal("ZoneOn", "turn on {zone}", src, fn, lists)["status"] == "warn"
+    assert corpus.capture_lists("x {a} {b:c}") == frozenset({"a", "c"})
+
+
+def test_names_table_and_validation():
+    data = {"names": {"light.couch": {"en": ["sofa", "couch"], "fr": "canapé"},
+                      "area.wohnzimmer": {"fr": ["salon"]},
+                      "light.bar": {"en": ["Sofa"]},
+                      "bad": ["x"]},
+            "intents": {"S": {"sentences": {"en": ["x"]}}}}
+    t = corpus.names_table(data)
+    assert t["light.couch"] == ["sofa", "couch", "canapé"]
+    problems = corpus.validate(data)
+    assert any("'Sofa' is used for light.couch and light.bar" in p for p in problems)
+    assert any(p.startswith("names.bad") for p in problems)
