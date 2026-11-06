@@ -22,7 +22,7 @@ from typing import Any, Callable
 from hassil.intents import Intents
 
 # {list} or {list:slot}
-_LIST_REF = re.compile(r"(?<!\{)\{\s*([^{}:\s]+)\s*(?::\s*[^{}\s]+\s*)?\}(?!\})")
+_LIST_REF = re.compile(r"(?<!\{)\{([^{}:]+)(?::[^{}]+)?\}(?!\})")
 # <rule>
 _RULE_REF = re.compile(r"<([^<>\s]*[^<>\s\d][^<>\s]*)>")
 

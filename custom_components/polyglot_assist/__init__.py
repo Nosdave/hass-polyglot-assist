@@ -47,6 +47,7 @@ ATTR_LANGUAGE = "language"
 class _CorpusError(Exception):
     """Corpus file problem (message is safe to return to the caller)."""
 
+
 PLATFORMS: list[Platform] = [Platform.CONVERSATION]
 
 
@@ -124,6 +125,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     raise _CorpusError(f"corpus file not found: {rel}")
                 try:
                     raw = yaml.safe_load(resolved.read_text("utf-8"))
+                except UnicodeDecodeError:
+                    raise _CorpusError("corpus is not UTF-8") from None
                 except yaml.YAMLError as err:
                     mark = getattr(err, "problem_mark", None)
                     where = f" (line {mark.line + 1})" if mark else ""

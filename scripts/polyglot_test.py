@@ -95,6 +95,8 @@ def main() -> int:
                 continue
             got = fn(text, args.hint)
             case = {"text": text, "intent": got[0] if got else None}
+            if args.hint:
+                case["hint"] = args.hint
             if got:
                 case["lang"] = got[1]
                 if got[2]:
