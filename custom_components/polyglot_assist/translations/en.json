@@ -28,7 +28,8 @@
           "add_intent": "Add a new intent",
           "reload": "Reload matcher (re-read intents.yaml)",
           "chat_log": "Hits in conversation history",
-          "source": "Intents source (YAML file or catalog)"
+          "source": "Intents source (YAML file or catalog)",
+          "translation": "Translation proposals (AI task)"
         }
       },
       "change_fallback": {
@@ -95,6 +96,13 @@
           "source": "Source",
           "when_different": "If YAML file and catalog differ"
         }
+      },
+      "translation": {
+        "title": "Translation proposals",
+        "description": "AI Task entity that proposes sentences and names for other languages. Proposals are checked and only applied when you accept them. AI tasks with tools (an LLM API) are not allowed: sentences and device names are untrusted text for the model. Sentences and names are sent to this AI task — with a cloud provider they leave your home.",
+        "data": {
+          "translation_ai_task": "AI Task entity"
+        }
       }
     },
     "error": {
@@ -103,7 +111,8 @@
       "name_exists": "An intent with that name already exists.",
       "import_failed": "Could not switch the source: {err}",
       "refused": "Not saved: {err}",
-      "sources_differ": "YAML file and catalog differ. Choose what to do with the differences below."
+      "sources_differ": "YAML file and catalog differ. Choose what to do with the differences below.",
+      "ai_task_has_tools": "This AI task has tools (an LLM API). Choose one without tools."
     },
     "abort": {
       "no_intents": "No intents found in the file. Use 'Add a new intent' to create one."

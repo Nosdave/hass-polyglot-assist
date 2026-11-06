@@ -230,7 +230,13 @@ names:
   area.living_room: {de: [wohnzimmer], fr: [salon]}
 ```
 
-`polyglot_assist/suggest_names` proposes names the same way.
+`polyglot_assist/suggest_names` proposes names the same way. Names apply in
+every language (a French name also works in a German sentence).
+
+Privacy: proposals send the command's sentences and device/room names to the
+selected AI task — with a cloud provider they leave your home. AI tasks with
+tools (an LLM API) are refused, because sentences and device names are
+untrusted text for the model.
 
 
 ### Injected slots

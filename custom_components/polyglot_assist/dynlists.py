@@ -103,6 +103,7 @@ class DynamicLists:
         self._specs = {k: v for k, v in dynamic_lists(data).items() if k in used}
         self._declared = set(dynamic_lists(data)) | {b for b in BUILTIN_LISTS if b not in static}
         self._names = names_table(data)
+        self._logged_clashes: list[str] = []
         self._cache: dict[str, SlotList] | None = None
         self._templates: dict[str, SlotList] = {}
         self._dirty = False
@@ -248,6 +249,16 @@ class DynamicLists:
             ctx = {"domain": state.domain, "entity_id": state.entity_id}
             for text in self._entity_names(state, entry):
                 tuples.append((text, primary, ctx))
+        owners: dict[str, set[str]] = {}
+        for text, _primary, ctx in tuples:
+            owners.setdefault(text.casefold(), set()).add(ctx["entity_id"])
+        clashes = sorted(k for k, v in owners.items() if len(v) > 1)
+        if clashes and clashes != self._logged_clashes:
+            self._logged_clashes = clashes
+            _LOGGER.warning(
+                "Polyglot Assist: names used by several entities in {name} (first match wins): %s",
+                ", ".join(clashes[:20]),
+            )
         return _slot_list("name", tuples)
 
     @callback

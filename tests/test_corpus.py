@@ -21,6 +21,7 @@ def _load(name: str):
 
 
 corpus = _load("corpus")
+proposals = _load("proposals")
 matcher_mod = _load("matcher")
 
 
@@ -263,28 +264,62 @@ def test_run_corpus_reports_case_index():
 
 def test_check_proposal_statuses():
     data = {
-        "lists": {"zone": {"values": [{"in": "couch", "out": "light.couch"}, {"in": "bar", "out": "light.bar"}]}},
+        "lists": {"zone": {"values": [{"in": "couch", "out": "light.couch"}, {"in": "bar", "out": "light.bar"}]},
+                  "pct": {"range": {"from": 0, "to": 100}}},
         "intents": {
             "ZoneOn": {"sentences": {"de": ["{zone} an"], "en": ["turn on [the] {zone}"]}},
-            "AllOff": {"sentences": {"en": ["all lights off"]}},
+            "AllOff": {"sentences": {"en": ["all lights off"], "fr": ["éteins toutes les lumières"]}},
+            "Dim": {"sentences": {"en": ["(set|dim) {zone} to {pct} percent"]}},
         },
     }
     m = matcher_mod.MultilangMatcher(corpus.build_intents(data))
     lists = corpus.build_intents(data)["en"].slot_lists
-
-    def fn(text):
-        r = m.match(text, None)
-        return r and (r.intent_name, r.lang, {})
-
-    src = data["intents"]["ZoneOn"]["sentences"]["de"] + data["intents"]["ZoneOn"]["sentences"]["en"]
-    ok = corpus.check_proposal("ZoneOn", "allume [le|la] {zone}", src, fn, lists, language="fr")
-    assert ok["status"] == "ok", ok
-    assert corpus.check_proposal("ZoneOn", "allume (le|la", src, fn, lists)["status"] == "error"
-    assert "slots" in corpus.check_proposal("ZoneOn", "allume tout", src, fn, lists)["notes"][0]
-    coll = corpus.check_proposal("ZoneOn", "all lights off", [], fn, lists)
+    fn = lambda text: m.match_all(text, "fr", lists)  # noqa: E731
+    src = ["{zone} an", "turn on [the] {zone}"]
+    P = proposals
+    assert P.check_proposal("ZoneOn", "allume [le|la] {zone}", src, fn, lists, language="fr")["status"] == "ok"
+    assert P.check_proposal("ZoneOn", "allume (le|la", src, fn, lists)["status"] == "error"
+    assert "placeholders" in P.check_proposal("ZoneOn", "allume tout", src, fn, lists)["notes"][0]
+    coll = P.check_proposal("ZoneOn", "all lights off", [], fn, lists)
     assert coll["status"] == "error" and coll["collisions"][0]["intent"] == "AllOff"
-    assert corpus.check_proposal("ZoneOn", "turn on {zone}", src, fn, lists)["status"] == "warn"
-    assert corpus.capture_lists("x {a} {b:c}") == frozenset({"a", "c"})
+    assert P.check_proposal("ZoneOn", "turn on {zone}", src, fn, lists)["status"] == "warn"
+    # path-based slots: an alternative of two placeholders is fine per path
+    alt_src = ["({zone}|{pct}) x"]
+    assert P.check_proposal("ZoneOn", "y {zone}", alt_src, fn, lists)["status"] != "error"
+    # same slot name from a different list is an error
+    assert P.check_proposal("ZoneOn", "allume {pct:zone}", src, fn, lists)["status"] == "error"
+    # only optional parts / placeholders → refused
+    assert P.check_proposal("ZoneOn", "[allume] {zone}", src, fn, lists)["status"] == "error"
+    # unknown placeholder, duplicates, size limits
+    assert P.check_proposal("ZoneOn", "allume {nope}", src, fn, lists)["status"] == "error"
+    assert P.check_proposal("ZoneOn", "allume {zone} et {zone}", src, fn, lists)["status"] == "error"
+    assert P.check_proposal("ZoneOn", "x" * 300, src, fn, lists)["status"] == "error"
+    # reverse direction: proposal would swallow another command's sentence
+    others = [("AllOff", "éteins toutes les lumières")]
+    rev = P.check_proposal("ZoneOn", "éteins toutes les lumières [{zone}]", ["[x] {zone}"], lambda t: set(), lists, other_samples=others)
+    assert rev["status"] == "error"
+    assert P.clean_alternatives("(an|an|ein) x") == "(an|ein) x"
+
+
+def test_bounded_sampling_does_not_explode():
+    import time
+    names = [f"lamp {i}" for i in range(400)]
+    data = {"lists": {"name": {"values": names}, "pct": {"range": {"from": 0, "to": 1000}}},
+            "intents": {"S": {"sentences": {"fr": ["x"]}}}}
+    lists = corpus.build_intents(data)["fr"].slot_lists
+    t = time.monotonic()
+    res = proposals.check_proposal("S", "stp (mets {name} à {pct} [pour cent]|x) maintenant", [], lambda _t: set(), lists, language="fr")
+    assert time.monotonic() - t < 2 and res["checked"] > 0
+    deep = "(a|b) (c|d) (e|f) (g|h) (i|j) (k|l) (m|n) (o|p)"
+    assert proposals.check_proposal("S", deep, [], lambda _t: set(), lists)["status"] in ("ok", "warn")
+
+
+def test_check_name():
+    assert proposals.check_name("sofa", lambda t: set()) is None
+    assert proposals.check_name("allume le canapé maintenant tout de suite", lambda t: set())
+    assert proposals.check_name("{x}", lambda t: set())
+    assert proposals.check_name("öffne die haustür", lambda t: {"HaustuerOeffnen"}) == "is itself a command"
+
 
 
 def test_names_table_and_validation():
@@ -297,4 +332,5 @@ def test_names_table_and_validation():
     assert t["light.couch"] == ["sofa", "couch", "canapé"]
     problems = corpus.validate(data)
     assert any("'Sofa' is used for light.couch and light.bar" in p for p in problems)
+    assert corpus.names_table({"names": ["x"]}) == {}
     assert any(p.startswith("names.bad") for p in problems)

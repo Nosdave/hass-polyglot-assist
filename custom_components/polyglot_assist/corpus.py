@@ -21,7 +21,9 @@ from typing import Any, Callable
 
 from hassil.intents import Intents, SlotList, TextSlotList
 from hassil.parse_expression import parse_sentence
+from hassil.util import remove_punctuation
 
+_TARGET_RE = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 # {list} or {list:slot}
 _LIST_REF = re.compile(r"(?<!\{)\{([^{}:]+)(?::[^{}]+)?\}(?!\})")
 # <rule>
@@ -46,7 +48,10 @@ def dynamic_lists(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def names_table(data: dict[str, Any]) -> dict[str, list[str]]:
     """``names:`` → {target_id: [all names of all languages]} (strings only)."""
     out: dict[str, list[str]] = {}
-    for target, per_lang in (data.get("names") or {}).items():
+    raw = data.get("names") or {}
+    if not isinstance(raw, dict):
+        return out
+    for target, per_lang in raw.items():
         if not isinstance(per_lang, dict):
             continue
         names = [
@@ -207,10 +212,14 @@ def validate(
             if not isinstance(per_lang, dict):
                 problems.append(f"names.{target}: must be a mapping of language → list of names")
                 continue
-            if "." not in str(target):
-                problems.append(f"names.{target}: use an entity_id or area.<area_id>")
+            if not _TARGET_RE.match(str(target)):
+                problems.append(f"names.{target}: use a lowercase entity_id or area.<area_id>")
+            for lang, values in per_lang.items():
+                for value in values if isinstance(values, list) else [values]:
+                    if not isinstance(value, str):
+                        problems.append(f"names.{target}.{lang}: {value!r} is not text")
             for name in names_table({"names": {target: per_lang}}).get(str(target), []):
-                key = name.casefold()
+                key = " ".join(remove_punctuation(name).casefold().split())
                 if key in seen and seen[key] != target:
                     problems.append(f"names: {name!r} is used for {seen[key]} and {target}")
                 seen.setdefault(key, str(target))
@@ -373,79 +382,3 @@ def run_corpus(
                 }
             )
     return {"total": len(cases), "passed": len(cases) - len(failed), "failed": failed}
-
-
-# ── translation proposals (pure validation, used by translate.py) ───────────
-
-
-def capture_lists(sentence: str) -> frozenset[str]:
-    """List names a sentence fills (``{list}`` / ``{list:slot}`` → slot name)."""
-    out = set()
-    for m in re.finditer(r"(?<!\{)\{([^{}:]+)(?::([^{}]+))?\}(?!\})", sentence):
-        out.add((m.group(2) or m.group(1)).strip())
-    return frozenset(out)
-
-
-def check_proposal(
-    intent_name: str,
-    sentence: str,
-    source_sentences: list[str],
-    match_fn: Callable[[str], "tuple[str, str, dict[str, Any]] | None"],
-    slot_lists: dict[str, SlotList] | None = None,
-    expansion_rules: dict[str, str] | None = None,
-    language: str | None = None,
-    max_samples: int = 40,
-) -> dict[str, Any]:
-    """Validate one proposed template sentence for ``intent_name``.
-
-    error: unparsable, different slots than every source sentence, or a
-    sample expansion already matches ANOTHER intent (collision).
-    warn:  every sample already matches this intent (redundant).
-    """
-    from hassil.parse_expression import parse_sentence  # noqa: PLC0415
-    from hassil.sample import sample_sentence  # noqa: PLC0415
-
-    result: dict[str, Any] = {"sentence": sentence, "status": "ok", "notes": []}
-    try:
-        parsed = parse_sentence(sentence)
-    except Exception as err:  # noqa: BLE001
-        return {**result, "status": "error", "notes": [f"not parsable: {err}"]}
-    wanted = capture_lists(sentence)
-    if source_sentences and wanted not in {capture_lists(s) for s in source_sentences}:
-        return {**result, "status": "error",
-                "notes": [f"slots {sorted(wanted)} differ from every source sentence"]}
-    rules = {}
-    for name, text in (expansion_rules or {}).items():
-        try:
-            rules[name] = parse_sentence(text)
-        except Exception:  # noqa: BLE001
-            continue
-    samples: list[str] = []
-    try:
-        for text in sample_sentence(parsed, slot_lists=slot_lists or {},
-                                    expansion_rules=rules, language=language):
-            text = " ".join(text.split())
-            if text and text not in samples:
-                samples.append(text)
-            if len(samples) >= max_samples:
-                break
-    except Exception as err:  # noqa: BLE001 — e.g. a runtime list without values
-        result["notes"].append(f"could not sample: {err}")
-    collisions, same = [], 0
-    for text in samples:
-        got = match_fn(text)
-        if got is None:
-            continue
-        if got[0] == intent_name:
-            same += 1
-        else:
-            collisions.append({"text": text, "intent": got[0]})
-    result["samples"] = samples[:5]
-    if collisions:
-        result["status"] = "error"
-        result["notes"].append("collides with other intents")
-        result["collisions"] = collisions[:5]
-    elif samples and same == len(samples):
-        result["status"] = "warn"
-        result["notes"].append("already covered by existing sentences")
-    return result

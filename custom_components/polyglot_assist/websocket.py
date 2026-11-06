@@ -5,6 +5,7 @@ base) and only target the catalog, never a hand-maintained intents.yaml.
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 from typing import Any
 
@@ -13,12 +14,13 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import entity_registry as er
 
 from .const import CONF_TRANSLATION_AI_TASK, DOMAIN, SOURCE_CATALOG
 from .corpus import count_summary, validate
 from .guard import GuardError, async_guarded_update, revision
 from .source import SourceError
-from .translate import async_propose_names, async_propose_sentences
+from .translate import ProposalError, async_propose_names, async_propose_sentences, valid_languages
 
 
 @callback
@@ -202,6 +204,9 @@ def _ai_task_entity(hass: HomeAssistant, entry_id: str) -> str | None:
     return entry.options.get(CONF_TRANSLATION_AI_TASK) if entry else None
 
 
+TOTAL_BUDGET = 180
+
+
 @websocket_api.require_admin
 @websocket_api.websocket_command(
     {
@@ -219,33 +224,37 @@ async def ws_translate(hass: HomeAssistant, connection, msg) -> None:
         return
     ai_task = _ai_task_entity(hass, entry_id)
     if not ai_task:
-        connection.send_error(msg["id"], "not_configured", "set the translation AI task in the options")
+        connection.send_error(msg["id"], "not_configured", "choose an AI task for proposals in the options")
         return
-    config = runtime["matcher"].config
+    matcher = runtime["matcher"]
+    config = matcher.config
     intent_cfg = (config.get("intents") or {}).get(msg["name"])
     if not isinstance(intent_cfg, dict):
         connection.send_error(msg["id"], "not_found", "unknown intent")
         return
-    matcher = runtime["matcher"]
+    languages = valid_languages(msg["languages"], matcher.languages)
+    if not languages:
+        connection.send_error(msg["id"], "invalid_language", "no supported language requested")
+        return
     slot_lists = {**matcher.static_slot_lists(), **runtime["lists"].async_get()}
-
-    def _match(text: str):
-        res = matcher.match(text, None, slot_lists)
-        return res and (res.intent_name, res.lang, {})
-
     try:
-        proposals = await async_propose_sentences(
-            hass,
-            ai_task_entity=ai_task,
-            intent_name=msg["name"],
-            intent_cfg=intent_cfg,
-            config=config,
-            languages=msg["languages"],
-            match_fn=_match,
-            slot_lists=slot_lists,
-        )
-    except Exception as err:  # noqa: BLE001 — report, never break the panel
-        connection.send_error(msg["id"], "translation_failed", str(err)[:300])
+        async with asyncio.timeout(TOTAL_BUDGET):
+            proposals = await async_propose_sentences(
+                hass,
+                ai_task_entity=ai_task,
+                intent_name=msg["name"],
+                intent_cfg=intent_cfg,
+                config=config,
+                languages=languages,
+                matcher=matcher,
+                slot_lists=slot_lists,
+                context=connection.context(msg),
+            )
+    except ProposalError as err:
+        connection.send_error(msg["id"], "refused", str(err))
+        return
+    except TimeoutError:
+        connection.send_error(msg["id"], "timeout", "the AI task took too long")
         return
     connection.send_result(
         msg["id"],
@@ -270,21 +279,45 @@ async def ws_suggest_names(hass: HomeAssistant, connection, msg) -> None:
         return
     ai_task = _ai_task_entity(hass, entry_id)
     if not ai_task:
-        connection.send_error(msg["id"], "not_configured", "set the translation AI task in the options")
+        connection.send_error(msg["id"], "not_configured", "choose an AI task for proposals in the options")
         return
-    targets: dict[str, str] = {}
-    for target in msg["ids"][:20]:
+    matcher = runtime["matcher"]
+    languages = valid_languages(msg["languages"], matcher.languages)
+    ids = list(dict.fromkeys(msg["ids"]))
+    if not languages or not ids:
+        connection.send_error(msg["id"], "invalid", "no valid ids or languages")
+        return
+    if len(ids) * len(languages) > 20:
+        connection.send_error(msg["id"], "too_many", "at most 20 id × language combinations per request")
+        return
+    areas = ar.async_get(hass)
+    targets: dict[str, tuple[str, str, str]] = {}
+    for target in ids:
         if target.startswith("area."):
-            area = ar.async_get(hass).async_get_area(target[5:])
-            if area:
-                targets[target] = area.name
+            if (area := areas.async_get_area(target[5:])) is not None:
+                targets[target] = (area.name, "room", "")
         elif (state := hass.states.get(target)) is not None:
-            targets[target] = state.name
+            entry = er.async_get(hass).async_get(target)
+            area_id = entry.area_id if entry else None
+            area = areas.async_get_area(area_id) if area_id else None
+            targets[target] = (state.name, f"{state.domain} device", area.name if area else "")
+    slot_lists = {**matcher.static_slot_lists(), **runtime["lists"].async_get()}
     try:
-        names = await async_propose_names(
-            hass, ai_task_entity=ai_task, targets=targets, languages=msg["languages"]
-        )
-    except Exception as err:  # noqa: BLE001
-        connection.send_error(msg["id"], "translation_failed", str(err)[:300])
+        async with asyncio.timeout(TOTAL_BUDGET):
+            names = await async_propose_names(
+                hass,
+                ai_task_entity=ai_task,
+                targets=targets,
+                languages=languages,
+                matcher=matcher,
+                slot_lists=slot_lists,
+                source_language=hass.config.language,
+                context=connection.context(msg),
+            )
+    except ProposalError as err:
+        connection.send_error(msg["id"], "refused", str(err))
         return
-    connection.send_result(msg["id"], {"proposals": names})
+    except TimeoutError:
+        connection.send_error(msg["id"], "timeout", "the AI task took too long")
+        return
+    connection.send_result(msg["id"], {"proposals": names, "unknown_ids": sorted(set(ids) - set(targets))})

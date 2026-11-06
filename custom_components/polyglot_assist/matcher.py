@@ -34,6 +34,25 @@ class MultilangMatcher:
         # Parsed intents file (set by the loader; used for runtime lists)
         self.config: dict[str, Any] = {}
 
+    def match_all(
+        self,
+        text: str,
+        hint_lang: str | None,
+        slot_lists: dict[str, SlotList] | None = None,
+    ) -> set[str]:
+        """Every intent any language recognises for ``text`` (for checks)."""
+        found: set[str] = set()
+        for lang in self._order(hint_lang):
+            intents = self._by_lang.get(lang)
+            if intents is None:
+                continue
+            try:
+                for result in recognize_all(text, intents, slot_lists=slot_lists):
+                    found.add(result.intent.name)
+            except Exception:  # noqa: BLE001
+                continue
+        return found
+
     def static_slot_lists(self) -> dict[str, SlotList]:
         """Lists defined in the intents file (identical for every language)."""
         for intents in self._by_lang.values():

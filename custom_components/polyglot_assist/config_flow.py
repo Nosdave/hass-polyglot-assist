@@ -46,6 +46,7 @@ from .corpus import validate
 from .guard import GuardError, async_guarded_update, write_lock
 from .loader import MatcherLoader
 from .source import IntentSource, SourceError
+from .translate import ai_task_has_tools
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -296,14 +297,19 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
     async def async_step_translation(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            new_options = {**self._entry.options}
-            if user_input.get(CONF_TRANSLATION_AI_TASK):
-                new_options[CONF_TRANSLATION_AI_TASK] = user_input[CONF_TRANSLATION_AI_TASK]
+            chosen = user_input.get(CONF_TRANSLATION_AI_TASK)
+            if chosen and ai_task_has_tools(self.hass, chosen):
+                errors[CONF_TRANSLATION_AI_TASK] = "ai_task_has_tools"
             else:
-                new_options.pop(CONF_TRANSLATION_AI_TASK, None)
-            self.hass.config_entries.async_update_entry(self._entry, options=new_options)
-            return self.async_create_entry(title="", data=new_options)
+                new_options = {**self._entry.options}
+                if chosen:
+                    new_options[CONF_TRANSLATION_AI_TASK] = chosen
+                else:
+                    new_options.pop(CONF_TRANSLATION_AI_TASK, None)
+                self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+                return self.async_create_entry(title="", data=new_options)
 
         current = self._entry.options.get(CONF_TRANSLATION_AI_TASK)
         schema = vol.Schema(
@@ -311,10 +317,17 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_TRANSLATION_AI_TASK,
                     description={"suggested_value": current} if current else None,
-                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="ai_task")),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        filter=selector.EntityFilterSelectorConfig(
+                            domain="ai_task",
+                            supported_features=["ai_task.AITaskEntityFeature.GENERATE_DATA"],
+                        )
+                    )
+                ),
             }
         )
-        return self.async_show_form(step_id="translation", data_schema=schema)
+        return self.async_show_form(step_id="translation", data_schema=schema, errors=errors)
 
     # ─────────────────────────────────────────────────────────────────
     # Edit YAML (raw view)
