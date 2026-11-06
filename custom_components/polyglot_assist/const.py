@@ -1,7 +1,11 @@
 """Constants for the Polyglot Assist integration."""
 from __future__ import annotations
 
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.helpers.device_registry import DeviceInfo
 
 DOMAIN: Final = "polyglot_assist"
 
@@ -47,3 +51,15 @@ EVENT_MISS_PROXIED: Final = "polyglot_assist_miss_proxied"
 SLOT_LANG: Final = "lang"
 # Full original sentence, so handlers (e.g. wildcard intents) can pass it on unchanged
 SLOT_UTTERANCE: Final = "utterance"
+
+
+def device_info(entry: "ConfigEntry") -> "DeviceInfo":
+    """One service device per entry, so entities get clear names."""
+    from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo  # noqa: PLC0415
+
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        entry_type=DeviceEntryType.SERVICE,
+        name=entry.title or "Polyglot Assist",
+        manufacturer="Polyglot Assist",
+    )

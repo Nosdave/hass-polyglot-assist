@@ -6,11 +6,16 @@
     "intent",
     "conversation"
   ],
-  "codeowners": ["@Nosdave"],
+  "codeowners": [
+    "@Nosdave"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/Nosdave/hass-polyglot-assist",
   "integration_type": "service",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/Nosdave/hass-polyglot-assist/issues",
-  "version": "0.5.0"
+  "version": "0.5.0",
+  "dependencies": [
+    "websocket_api"
+  ]
 }

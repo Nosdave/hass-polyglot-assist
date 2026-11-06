@@ -138,6 +138,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             self.hass.bus.async_fire(
                 EVENT_MATCH,
                 {
+                    "entry_id": self._entry.entry_id,
                     "intent": match.intent_name,
                     "lang": match.lang,
                     "input": user_input.text,
@@ -265,6 +266,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         self.hass.bus.async_fire(
             EVENT_MISS_PROXIED,
             {
+                "entry_id": self._entry.entry_id,
                 "input": user_input.text,
                 "language": user_input.language,
                 "language_hint": user_input.extra_system_prompt is not None

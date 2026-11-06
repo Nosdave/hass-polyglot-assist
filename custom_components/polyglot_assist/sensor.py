@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import Event, HomeAssistant, callback
@@ -13,6 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, EVENT_MATCH, EVENT_MISS_PROXIED, SIGNAL_LOADED
 from .corpus import count_summary, validate
+from .const import device_info
 
 
 async def async_setup_entry(
@@ -27,7 +28,6 @@ class PolyglotIntentsSensor(SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "intents"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:translate"
     # Hit counters change often and are only interesting live
     _unrecorded_attributes = frozenset({"hits", "hits_by_intent", "misses"})
@@ -36,7 +36,7 @@ class PolyglotIntentsSensor(SensorEntity):
         self.hass = hass
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_intents"
-        self._attr_name = "Intents"
+        self._attr_device_info = device_info(entry)
         self._hits: Counter[str] = Counter()
         self._misses = 0
         self._summary: dict[str, Any] = {}
@@ -67,6 +67,10 @@ class PolyglotIntentsSensor(SensorEntity):
             self.async_write_ha_state()
 
         @callback
+        def _mine(event_data: dict) -> bool:
+            return event_data.get("entry_id") == self._entry.entry_id
+
+        @callback
         def _hit(event: Event) -> None:
             self._hits[str(event.data.get("intent"))] += 1
             self.async_write_ha_state()
@@ -79,8 +83,10 @@ class PolyglotIntentsSensor(SensorEntity):
         self.async_on_remove(
             async_dispatcher_connect(self.hass, f"{SIGNAL_LOADED}_{self._entry.entry_id}", _loaded)
         )
-        self.async_on_remove(self.hass.bus.async_listen(EVENT_MATCH, _hit))
-        self.async_on_remove(self.hass.bus.async_listen(EVENT_MISS_PROXIED, _miss))
+        self.async_on_remove(self.hass.bus.async_listen(EVENT_MATCH, _hit, event_filter=_mine))
+        self.async_on_remove(
+            self.hass.bus.async_listen(EVENT_MISS_PROXIED, _miss, event_filter=_mine)
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

@@ -9,7 +9,7 @@ round-trip) before an installation switches to ``source: catalog``.
 from __future__ import annotations
 
 import copy
-from datetime import datetime
+import json
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +18,8 @@ import yaml
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
+from homeassistant.util.file import write_utf8_file_atomic
 
 from .const import (
     CONF_INTENTS_FILE,
@@ -29,10 +31,25 @@ from .const import (
 )
 
 STORAGE_VERSION = 1
+KEEP_BACKUPS = 10
 
 
 class SourceError(Exception):
     """Source cannot be read or written (message safe for users)."""
+
+
+def json_roundtrip_equal(data: dict[str, Any]) -> bool:
+    """True if ``data`` survives JSON storage unchanged, key order included.
+
+    YAML can carry dates, sets, NaN or integer keys that the store would
+    silently convert — such a catalog would differ after the next restart.
+    """
+    try:
+        raw = json.dumps(data, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError):
+        return False
+    back = json.loads(raw)
+    return back == data and json.dumps(back, ensure_ascii=False) == raw
 
 
 def _dump(data: dict[str, Any]) -> str:
@@ -82,9 +99,20 @@ class IntentSource:
         return stored["catalog"]
 
     async def async_save_catalog(self, data: dict[str, Any]) -> None:
+        """Save and verify; raises SourceError if the store would alter data."""
+        if not json_roundtrip_equal(data):
+            raise SourceError(
+                "the intents contain values the catalog cannot store unchanged "
+                "(dates, sets, NaN or non-text keys)"
+            )
         await self._store.async_save(
-            {"catalog": copy.deepcopy(data), "saved": datetime.now().isoformat()}
+            {"catalog": copy.deepcopy(data), "saved": dt_util.utcnow().isoformat()}
         )
+        if await self.async_load_catalog() != data:
+            raise SourceError("catalog write could not be verified (see log)")
+
+    async def async_remove_catalog(self) -> None:
+        await self._store.async_remove()
 
     # ── active source ───────────────────────────────────────────────────
 
@@ -106,13 +134,26 @@ class IntentSource:
         await self.async_save_yaml_text(text)
 
     async def async_save_yaml_text(self, text: str) -> None:
+        """Atomic write; the previous file is kept as a timestamped backup."""
         path = self.yaml_path
+        stamp = dt_util.now().strftime("%Y%m%d-%H%M%S")
 
         def _write() -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
             if path.is_file():
-                path.with_name(path.name + ".bak").write_text(path.read_text("utf-8"), "utf-8")
-            path.write_text(text, "utf-8")
+                old = path.read_text("utf-8")
+                if old == text:
+                    return
+                backup = path.with_name(f"{path.name}.bak-{stamp}-polyglot")
+                n = 1
+                while backup.exists():
+                    n += 1
+                    backup = path.with_name(f"{path.name}.bak-{stamp}-{n}-polyglot")
+                write_utf8_file_atomic(str(backup), old)
+                backups = sorted(path.parent.glob(f"{path.name}.bak-*-polyglot"))
+                for stale in backups[:-KEEP_BACKUPS]:
+                    stale.unlink(missing_ok=True)
+            write_utf8_file_atomic(str(path), text)
 
         await self.hass.async_add_executor_job(_write)
 
@@ -134,13 +175,32 @@ class IntentSource:
 
     # ── migration ───────────────────────────────────────────────────────
 
-    async def async_import_yaml(self) -> dict[str, Any]:
-        """Copy intents.yaml 1:1 into the catalog and verify the round-trip."""
+    async def async_import_yaml(self, *, overwrite: bool = False) -> dict[str, Any]:
+        """Copy intents.yaml 1:1 into the catalog (checked BEFORE writing).
+
+        While the catalog is the active source it is only overwritten with
+        ``overwrite`` — and then exported first, so no catalog edit is lost.
+        """
         data = await self.async_load_yaml()
-        await self.async_save_catalog(data)
-        stored = await self.async_load_catalog()
-        if stored != data:
-            raise SourceError("catalog round-trip differs from intents.yaml — not switched")
+        if not json_roundtrip_equal(data):
+            raise SourceError(
+                "intents.yaml contains values the catalog cannot store unchanged "
+                "(dates, sets, NaN or non-text keys) — nothing was changed"
+            )
+        previous = await self.async_load_catalog()
+        if previous is not None and self.kind == SOURCE_CATALOG:
+            if not overwrite:
+                raise SourceError(
+                    "the catalog is the active source — importing would replace its "
+                    "edits; use overwrite (the catalog is exported first)"
+                )
+            await self.async_export_yaml()
+        try:
+            await self.async_save_catalog(data)
+        except SourceError:
+            if previous is not None:
+                await self._store.async_save({"catalog": previous, "saved": dt_util.utcnow().isoformat()})
+            raise
         return data
 
     async def async_export_yaml(self) -> Path:
@@ -148,13 +208,17 @@ class IntentSource:
         data = await self.async_load_catalog()
         if data is None:
             raise SourceError("catalog is empty")
-        target = Path(self.hass.config.path(DOMAIN, "export")) / (
-            f"intents-{datetime.now().strftime('%Y%m%d-%H%M%S')}.yaml"
-        )
+        folder = Path(self.hass.config.path(DOMAIN, "export"))
+        stamp = dt_util.now().strftime("%Y%m%d-%H%M%S")
 
-        def _write() -> None:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(_dump(data), "utf-8")
+        def _write() -> Path:
+            folder.mkdir(parents=True, exist_ok=True)
+            target = folder / f"intents-{stamp}.yaml"
+            n = 1
+            while target.exists():
+                n += 1
+                target = folder / f"intents-{stamp}-{n}.yaml"
+            write_utf8_file_atomic(str(target), _dump(data))
+            return target
 
-        await self.hass.async_add_executor_job(_write)
-        return target
+        return await self.hass.async_add_executor_job(_write)

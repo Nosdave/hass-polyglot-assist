@@ -236,6 +236,26 @@ def test_safety_disabled_takes_no_part_in_matching():
     assert fn("open the door") is None
     assert fn("lamp on")[0] == "Lamp"
     s = corpus.count_summary(data)
-    assert s["intents"] == 3 and s["active"] == 2
-    assert s["disabled"] == ["Door"] and s["sensitive"] == ["Lamp"]
+    assert s["intents"] == 3 and s["active"] == 1  # unknown level "maybe" fails closed
+    assert s["disabled"] == ["Bad", "Door"] and s["sensitive"] == ["Lamp"]
     assert any("unknown safety level" in p for p in corpus.validate(data))
+
+
+def test_unparsable_sentence_is_reported():
+    data = {"intents": {"A": {"sentences": {"de": ["mach [was", "licht an"]}}},
+            "expansion_rules": {"r": "(a|b"}}
+    problems = corpus.validate(data)
+    assert any("cannot parse" in p and "mach [was" in p for p in problems)
+    assert any("expansion rule <r>: cannot parse" in p for p in problems)
+
+
+def test_safety_fails_closed_on_typos():
+    data = {"intents": {"Door": {"safety": "Disabled", "sentences": {"en": ["open the door"]}}}}
+    assert _matcher(data)("open the door") is None
+    assert corpus.count_summary(data)["disabled"] == ["Door"]
+
+
+def test_run_corpus_reports_case_index():
+    data = {"intents": {"A": {"sentences": {"en": ["a"]}}}}
+    cases = corpus.parse_corpus({"cases": [{"text": "a", "intent": "A"}, {"text": "a", "intent": None}]})
+    assert [f["index"] for f in corpus.run_corpus(_matcher(data), cases)["failed"]] == [1]

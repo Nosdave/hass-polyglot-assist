@@ -35,13 +35,14 @@ from .const import (
     CONF_FALLBACK_AGENT,
     CONF_LANGUAGE_HINT,
     CONF_INTENTS_FILE,
-    CONF_LLM_APIS,
     CONF_SOURCE,
     DEFAULT_INTENTS_FILE,
     DOMAIN,
     SOURCE_CATALOG,
     SOURCE_YAML,
 )
+from .guard import GuardError, async_guarded_update
+from .loader import MatcherLoader
 from .source import IntentSource, SourceError
 
 _LOGGER = logging.getLogger(__name__)
@@ -109,6 +110,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
         self._entry = config_entry
         self._intents_data: dict[str, Any] = {}
         self._loaded = False
+        self._original_intent_name: str | None = None
         self._current_intent_name: str | None = None
         self._current_intent_data: dict[str, Any] = {}
 
@@ -211,16 +213,38 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
     async def async_step_source(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        """Switch YAML ↔ catalog without ever losing edits of the other side."""
         errors: dict[str, str] = {}
+        placeholders = {"err": ""}
         if user_input is not None:
             wanted = user_input[CONF_SOURCE]
+            choice = user_input.get("when_different", "ask")
+            src = self._source
             try:
-                if wanted == SOURCE_CATALOG and await self._source.async_load_catalog() is None:
-                    # first switch: copy intents.yaml 1:1 (verified round-trip)
-                    await self._source.async_import_yaml()
-            except SourceError as err:
+                yaml_data = await src.async_load_yaml()
+                catalog = await src.async_load_catalog()
+                if wanted == SOURCE_CATALOG:
+                    if catalog is None or (catalog != yaml_data and choice == "use_yaml"):
+                        if catalog is not None:
+                            await src.async_export_yaml()  # keep the replaced catalog as a file
+                        await src.async_save_catalog(yaml_data)  # verified write
+                        catalog = await src.async_load_catalog()
+                    elif catalog != yaml_data and choice != "keep_other":
+                        errors["base"] = "sources_differ"
+                    target = catalog
+                else:
+                    if catalog is not None and catalog != yaml_data:
+                        if choice != "keep_other":
+                            errors["base"] = "sources_differ"
+                        else:
+                            await src.async_export_yaml()  # keep the catalog edits as a file
+                    target = yaml_data
+                if not errors:
+                    await MatcherLoader.load_data(self.hass, target, "switch-test")
+            except (SourceError, ValueError) as err:
                 _LOGGER.error("Switching source failed: %s", err)
                 errors["base"] = "import_failed"
+                placeholders["err"] = str(err)[:200]
             if not errors:
                 new_options = {**self._entry.options, CONF_SOURCE: wanted}
                 self.hass.config_entries.async_update_entry(self._entry, options=new_options)
@@ -233,13 +257,20 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                     CONF_SOURCE, default=self._entry.options.get(CONF_SOURCE, SOURCE_YAML)
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[SOURCE_YAML, SOURCE_CATALOG],
-                        translation_key="source",
+                        options=[SOURCE_YAML, SOURCE_CATALOG], translation_key="source"
+                    )
+                ),
+                vol.Optional("when_different", default="ask"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=["ask", "use_yaml", "keep_other"],
+                        translation_key="when_different",
                     )
                 ),
             }
         )
-        return self.async_show_form(step_id="source", data_schema=schema, errors=errors)
+        return self.async_show_form(
+            step_id="source", data_schema=schema, errors=errors, description_placeholders=placeholders
+        )
 
     # ─────────────────────────────────────────────────────────────────
     # Edit YAML (raw view)
@@ -263,9 +294,19 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                     errors={"base": "invalid_yaml"},
                     description_placeholders={"err": str(err)[:200]},
                 )
-            # Write to the active source (YAML file or catalog)
-            await self._source.async_save_text(new_yaml)
-            await self._reload_matcher()
+            # Write to the active source (YAML file or catalog), guarded
+            def _replace(data: dict) -> None:
+                data.clear()
+                data.update(parsed)
+
+            error = await self._guarded_write(_replace)
+            if error:
+                return self.async_show_form(
+                    step_id="edit_yaml",
+                    data_schema=self._yaml_schema(new_yaml),
+                    errors={"base": "refused"},
+                    description_placeholders={"err": error},
+                )
             return self.async_create_entry(title="", data=dict(self._entry.options))
 
         current_yaml = await self._source.async_load_text()
@@ -346,32 +387,46 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
             response_intent = user_input.get("response_intent", "").strip()
             new_lang_to_add = (user_input.get("add_language") or "").strip().lower()
 
-            updated_intent: dict[str, Any] = {}
-            if description:
-                updated_intent["description"] = description
+            # Keep every other field (safety, llm_equivalent, translation, …)
+            updated_intent: dict[str, Any] = dict(self._current_intent_data)
+            for key, value in (
+                ("description", description),
+                ("response_intent", response_intent),
+            ):
+                if value:
+                    updated_intent[key] = value
+                else:
+                    updated_intent.pop(key, None)
             if new_sentences:
                 updated_intent["sentences"] = new_sentences
-            if response_intent:
-                updated_intent["response_intent"] = response_intent
-
-            self._intents_data["intents"][self._current_intent_name] = updated_intent
+            else:
+                updated_intent.pop("sentences", None)
 
             if new_lang_to_add and new_lang_to_add not in new_sentences:
-                # Add empty bucket — user can populate next iteration
-                self._intents_data["intents"][self._current_intent_name].setdefault(
-                    "sentences", {}
-                )[new_lang_to_add] = []
-                await self._save_intents()
-                # Re-enter the edit step so the new lang's textarea appears
-                self._current_intent_data = (
-                    self._intents_data["intents"][self._current_intent_name]
-                )
+                # Add an empty bucket in memory only and re-enter the form
+                updated_intent.setdefault("sentences", {})[new_lang_to_add] = []
+                self._current_intent_data = updated_intent
                 return await self.async_step_edit_intent()
 
-            await self._save_intents()
-            await self._reload_matcher()
+            name = self._current_intent_name
+            original = self._original_intent_name
+
+            def _apply(data: dict) -> None:
+                intents = data.setdefault("intents", {})
+                if original is None and name in intents:
+                    raise GuardError("exists", f"an intent named {name} already exists")
+                intents[name] = updated_intent
+
+            error = await self._guarded_write(_apply)
+            if error:
+                self._current_intent_data = updated_intent
+                return self._edit_intent_form(existing_langs, error)
             return self.async_create_entry(title="", data=dict(self._entry.options))
 
+        return self._edit_intent_form(existing_langs, None)
+
+    def _edit_intent_form(self, existing_langs: list[str], error: str | None) -> ConfigFlowResult:
+        sentences_by_lang = self._current_intent_data.get("sentences", {}) or {}
         # Build dynamic schema with one textarea per existing language
         schema_dict: dict = {}
         schema_dict[vol.Optional(
@@ -399,9 +454,11 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="edit_intent",
             data_schema=vol.Schema(schema_dict),
+            errors={"base": "refused"} if error else None,
             description_placeholders={
                 "intent_name": self._current_intent_name,
                 "existing_langs": ", ".join(existing_langs) or "(none)",
+                "err": error or "",
             },
         )
 
@@ -433,15 +490,14 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                     errors={"new_intent_name": "name_exists"},
                 )
 
-            self._intents_data.setdefault("intents", {})[name] = {
+            # Staged in memory; saved (guarded) once sentences were entered
+            self._current_intent_name = name
+            self._original_intent_name = None
+            self._current_intent_data = {
                 "description": description or f"{name} intent",
                 "sentences": {initial_lang: []},
                 "response_intent": name,
             }
-            await self._save_intents()
-            # Open the new intent in the edit-intent flow
-            self._current_intent_name = name
-            self._current_intent_data = self._intents_data["intents"][name]
             return await self.async_step_edit_intent()
 
         return self.async_show_form(
@@ -478,8 +534,15 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
     # ─────────────────────────────────────────────────────────────────
 
     @property
+    def _runtime(self) -> dict[str, Any] | None:
+        return self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
+
+    @property
     def _source(self) -> IntentSource:
-        return self.hass.data[DOMAIN][self._entry.entry_id]["source"]
+        # Works while the entry is not loaded (e.g. a broken catalog): this
+        # flow is the way to repair it.
+        runtime = self._runtime
+        return runtime["source"] if runtime else IntentSource(self.hass, self._entry)
 
     async def _ensure_loaded(self) -> None:
         if self._loaded:
@@ -491,10 +554,31 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
         self._intents_data.setdefault("intents", {})
         self._loaded = True
 
-    async def _save_intents(self) -> None:
-        await self._source.async_save(self._intents_data)
+    async def _guarded_write(self, mutate) -> str | None:
+        """Write through the regression guard; returns an error text or None."""
+        runtime = self._runtime
+        try:
+            if runtime is None:
+                # Entry not loaded: plain write, then let the entry load again
+                data = await self._source.async_load() if self._loaded else {"intents": {}}
+                mutate(data)
+                await self._source.async_save(data)
+                await self.hass.config_entries.async_reload(self._entry.entry_id)
+                return None
+            await async_guarded_update(self.hass, runtime, mutate)
+        except GuardError as err:
+            details = err.details.get("problems") or [
+                f"{r['text']!r}: expected {r['expected']['intent']}, got "
+                f"{(r['got'] or {}).get('intent')}"
+                for r in err.details.get("regressions", [])
+            ]
+            return f"{err} " + "; ".join(details[:5])
+        except SourceError as err:
+            return str(err)
+        return None
 
     async def _reload_matcher(self) -> None:
-        await self.hass.services.async_call(
-            DOMAIN, "reload", {}, blocking=True
-        )
+        if self._runtime is None or not self.hass.services.has_service(DOMAIN, "reload"):
+            await self.hass.config_entries.async_reload(self._entry.entry_id)
+            return
+        await self.hass.services.async_call(DOMAIN, "reload", {}, blocking=True)

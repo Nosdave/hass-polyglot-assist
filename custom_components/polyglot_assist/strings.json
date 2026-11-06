@@ -90,9 +90,10 @@
       },
       "source": {
         "title": "Intents source",
-        "description": "YAML file (default) or catalog in Home Assistant's storage. The first switch to the catalog copies intents.yaml 1:1 (verified); the YAML file is kept. Export the catalog any time with the export_yaml action.",
+        "description": "YAML file (default) or catalog in Home Assistant's storage. The first switch to the catalog copies intents.yaml 1:1 (checked before writing). If both differ you decide; the side that is replaced is exported to polyglot_assist/export/ first. {err}",
         "data": {
-          "source": "Source"
+          "source": "Source",
+          "when_different": "If YAML file and catalog differ"
         }
       }
     },
@@ -100,7 +101,9 @@
       "invalid_yaml": "YAML failed to parse: {err}. Fix the syntax and save again.",
       "invalid_name": "Intent name must be alphanumeric with optional underscores.",
       "name_exists": "An intent with that name already exists.",
-      "import_failed": "Could not import intents.yaml into the catalog (see log)."
+      "import_failed": "Could not switch the source: {err}",
+      "refused": "Not saved: {err}",
+      "sources_differ": "YAML file and catalog differ. Choose what to do with the differences below."
     },
     "abort": {
       "no_intents": "No intents found in the file. Use 'Add a new intent' to create one."
@@ -141,7 +144,13 @@
     },
     "import_yaml": {
       "name": "Import intents.yaml into the catalog",
-      "description": "Copies the YAML file 1:1 into the catalog (.storage) and verifies the round-trip. Does not switch the source. Admin only."
+      "description": "Copies the YAML file 1:1 into the catalog (.storage) and verifies the round-trip. Does not switch the source. Admin only.",
+      "fields": {
+        "overwrite": {
+          "name": "Overwrite active catalog",
+          "description": "Replace the catalog even while it is the active source (it is exported first)."
+        }
+      }
     },
     "export_yaml": {
       "name": "Export catalog to YAML",
@@ -161,6 +170,19 @@
         "yaml": "YAML file (intents.yaml)",
         "catalog": "Catalog (.storage)"
       }
+    },
+    "when_different": {
+      "options": {
+        "ask": "Stop and ask me",
+        "use_yaml": "Use the YAML file (export the catalog first)",
+        "keep_other": "Keep the target as it is (export the catalog when leaving it)"
+      }
+    }
+  },
+  "issues": {
+    "load_failed": {
+      "title": "Polyglot Assist could not load its intents",
+      "description": "Source: {source}. Error: {error}. Open the integration options → Intents source to switch to the other source, or restore the file. Polyglot does not fall back on its own, so intents you disabled stay disabled."
     }
   }
 }

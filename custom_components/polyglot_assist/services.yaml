@@ -58,8 +58,17 @@ run_tests:
 import_yaml:
   name: Import intents.yaml into the catalog
   description: >-
-    Copies the YAML file 1:1 into the catalog (.storage) and verifies the
-    round-trip. Does not switch the source (options → Intents source).
+    Copies the YAML file 1:1 into the catalog (.storage), checked before
+    writing. Does not switch the source (options → Intents source). While the
+    catalog is the active source it is only replaced with "overwrite" (the
+    catalog is exported first).
+  fields:
+    overwrite:
+      name: Overwrite active catalog
+      required: false
+      default: false
+      selector:
+        boolean:
 
 export_yaml:
   name: Export catalog to YAML

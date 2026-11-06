@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from hassil.intents import Intents, SlotList, TextSlotList
+from hassil.parse_expression import parse_sentence
 
 # {list} or {list:slot}
 _LIST_REF = re.compile(r"(?<!\{)\{([^{}:]+)(?::[^{}]+)?\}(?!\})")
@@ -79,6 +80,14 @@ def slot_lists_from_fixture(raw: dict[str, Any] | None) -> dict[str, SlotList]:
     return out
 
 
+SAFETY_LEVELS = ("normal", "sensitive", "disabled")
+
+
+def is_active(intent_cfg: dict[str, Any]) -> bool:
+    """Fail closed: anything but normal/sensitive/unset counts as disabled."""
+    return intent_cfg.get("safety") in (None, "normal", "sensitive")
+
+
 def bucket_by_language(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Split the user-facing ``intents:`` section into hassil dicts per language.
 
@@ -86,7 +95,7 @@ def bucket_by_language(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """
     per_lang: dict[str, dict[str, Any]] = {}
     for intent_name, intent_cfg in (data.get("intents") or {}).items():
-        if not isinstance(intent_cfg, dict) or intent_cfg.get("safety") == "disabled":
+        if not isinstance(intent_cfg, dict) or not is_active(intent_cfg):
             continue
         sentences = intent_cfg.get("sentences") or {}
         if not isinstance(sentences, dict):
@@ -180,14 +189,19 @@ def validate(
         if not isinstance(rule, str):
             problems.append(f"expansion rule <{rule_name}> is not a string (ignored)")
             continue
+        try:
+            parse_sentence(rule)
+        except Exception as err:  # noqa: BLE001
+            problems.append(f"expansion rule <{rule_name}>: cannot parse: {err}")
+            continue
         problems.extend(_check_refs(f"expansion rule <{rule_name}>", rule, known_lists, known_rules))
     for name, cfg in intents.items():
         if cfg is not None and not isinstance(cfg, dict):
             problems.append(f"{name}: intent must be a mapping")
             continue
         safety = (cfg or {}).get("safety")
-        if safety is not None and safety not in ("normal", "sensitive", "disabled"):
-            problems.append(f"{name}: unknown safety level {safety!r}")
+        if safety is not None and safety not in SAFETY_LEVELS:
+            problems.append(f"{name}: unknown safety level {safety!r} (treated as disabled)")
         sentences = (cfg or {}).get("sentences")
         if sentences is not None and not isinstance(sentences, dict):
             problems.append(f"{name}: 'sentences' must be a mapping keyed by language")
@@ -202,6 +216,11 @@ def validate(
             for sentence in sent_list or []:
                 if not isinstance(sentence, str):
                     problems.append(f"{name}/{lang}: sentence is not a string: {sentence!r}")
+                    continue
+                try:
+                    parse_sentence(sentence)
+                except Exception as err:  # noqa: BLE001 — one broken template kills the language
+                    problems.append(f"{name}/{lang}: cannot parse \"{sentence}\": {err}")
                     continue
                 problems.extend(_check_refs(f"{name}/{lang}", sentence, known_lists, known_rules))
     return problems
@@ -227,6 +246,8 @@ def count_summary(data: dict[str, Any]) -> dict[str, Any]:
     per_lang = bucket_by_language(data)
 
     def _with(level: str) -> list[str]:
+        if level == "disabled":
+            return sorted(n for n, c in intents.items() if isinstance(c, dict) and not is_active(c))
         return sorted(n for n, c in intents.items() if isinstance(c, dict) and c.get("safety") == level)
 
     return {
@@ -298,7 +319,7 @@ def run_corpus(
     matcher (it is tried first); a case's own ``hint`` overrides it.
     """
     failed: list[dict[str, Any]] = []
-    for case in cases:
+    for index, case in enumerate(cases):
         got = match_fn(case.text, case.hint or default_hint)
         got_intent = got[0] if got else None
         ok = got_intent == case.intent
@@ -310,6 +331,7 @@ def run_corpus(
         if not ok:
             failed.append(
                 {
+                    "index": index,
                     "text": case.text,
                     "expected": {"intent": case.intent, "lang": case.lang, "slots": case.slots},
                     "got": (

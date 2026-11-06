@@ -176,8 +176,11 @@ Intents can live in `intents.yaml` (default) or in a catalog in
 behaviour. Switch in the options (*Intents source*): the first switch copies
 `intents.yaml` 1:1 into the catalog and verifies the round-trip; the YAML file
 is kept. `polyglot_assist.export_yaml` writes the catalog to
-`polyglot_assist/export/`. Writing to the YAML source rewrites the file
-(comments are lost; the previous file is kept as `intents.yaml.bak`).
+`polyglot_assist/export/`. If the YAML file and the catalog differ when you
+switch, you choose what happens; the replaced side is exported first.
+Options-flow edits of the YAML source rewrite the file atomically (comments
+are lost; the last 10 versions are kept as `intents.yaml.bak-<time>-polyglot`).
+The panel only edits the catalog, never a hand-maintained YAML file.
 
 Per-intent safety level:
 
@@ -196,9 +199,16 @@ attributes, sentences per language, lists, disabled/sensitive intents,
 validation problems, the source and hit/miss counters since start.
 
 Admin WebSocket API (backend of the panel): `polyglot_assist/stats`, `/get`,
-`/test`, `/save_intent`, `/delete_intent`. Saves are guarded: the candidate is
-matched against `polyglot_assist/tests.yaml` first and refused if a previously
-passing case would fail (unless `force: true`).
+`/test`, `/save_intent`, `/delete_intent`. Every write (panel and options
+flow) is guarded: a change that adds errors (e.g. an unparsable sentence,
+which would silently disable its whole language) is always refused; a change
+that makes a previously passing case of `polyglot_assist/tests.yaml` fail is
+refused unless `force: true`. Writes are serialised and start from a fresh
+read; an optional `base_rev` (from `/get`) detects stale editors.
+
+Unknown safety levels count as `disabled` (fail closed). If the active source
+cannot be loaded, Home Assistant shows a repair issue — Polyglot never falls
+back to the other source on its own.
 
 ### Injected slots
 
