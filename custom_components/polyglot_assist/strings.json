@@ -82,10 +82,9 @@
       },
       "chat_log": {
         "title": "Hits in conversation history",
-        "description": "When on, a Polyglot hit whose intent declares `llm_equivalent` is added to the conversation history as a tool call of a tool the fallback LLM really has (e.g. HassTurnOn), so follow-ups like \"and the piano too\" work. Intents without a resolvable equivalent are never recorded. Select the LLM APIs your fallback agent uses.",
+        "description": "When on, a Polyglot hit whose intent declares `llm_equivalent` is added to the conversation history as a call of a tool your fallback agent really has (read from its settings), so follow-ups like \"and the piano too\" work. Intents without a matching tool are never recorded.",
         "data": {
-          "chat_log_tools": "Record hits as tool calls",
-          "fallback_llm_apis": "LLM APIs of the fallback agent"
+          "chat_log_tools": "Record hits as tool calls"
         }
       }
     },

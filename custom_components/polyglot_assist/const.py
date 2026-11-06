@@ -13,8 +13,6 @@ CONF_LANGUAGES: Final = "languages"
 CONF_LANGUAGE_HINT: Final = "fallback_language_hint"
 # Record hits in the ChatLog as tool calls (needs llm_equivalent per intent)
 CONF_CHAT_LOG_TOOLS: Final = "chat_log_tools"
-# LLM API ids the fallback agent uses (to resolve offered tool names)
-CONF_LLM_APIS: Final = "fallback_llm_apis"
 
 # Defaults
 DEFAULT_INTENTS_FILE: Final = "polyglot_assist/intents.yaml"

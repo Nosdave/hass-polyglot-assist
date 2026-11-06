@@ -212,3 +212,15 @@ def test_static_list_overrides_builtin_name():
 def test_dynamic_list_needs_exactly_one_kind():
     data = {"lists": {"x": {"entities": {}, "areas": {}}}, "intents": {"S": {"sentences": {"en": ["{x}"]}}}}
     assert any("exactly one" in p for p in corpus.validate(data))
+
+
+def test_referenced_lists_and_spec_validation():
+    data = {"expansion_rules": {"r": "{zone} x"},
+            "lists": {"zone": {"values": ["a"]}, "lamps": {"entities": {"domain": "light", "exclude": {"a": "b"}}},
+                      "t": {"template": 5}, "both": {"areas": {}, "values": ["x"]}},
+            "intents": {"S": {"sentences": {"en": ["{lamps:target} <r>", "{area}"]}}}}
+    assert corpus.referenced_lists(data) == {"lamps", "area", "zone"}
+    problems = corpus.validate(data)
+    assert any("entities.exclude must be" in p for p in problems)
+    assert any("list t: template must be a string" in p for p in problems)
+    assert any("list both: use exactly one" in p for p in problems)

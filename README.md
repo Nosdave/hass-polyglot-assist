@@ -115,16 +115,18 @@ Matched slot values reach the `intent_script` as template variables.
 ### Runtime lists (no manual upkeep)
 
 Two lists are always available at runtime, like in Home Assistant's own
-sentences (unless `intents.yaml` defines a list with the same name):
+sentences (unless `intents.yaml` defines a list with the same name). Only lists
+your sentences use are built:
 
 | List | Contains | Value |
 |---|---|---|
-| `{area}` | every area name and alias | area name (same as the default agent) |
-| `{name}` | every entity exposed to Assist, name and aliases | entity name |
+| `{area}` | every area name and alias | area name (also for an alias; the default agent returns the alias) |
+| `{name}` | every entity exposed to Assist, with the names Assist uses (aliases) | entity name |
 
 Declarative lists are resolved from your installation and refreshed
-automatically (registry/area/expose changes; at the latest every 5 minutes,
-templates every 60 s):
+automatically in the background (registry, area, device and expose changes,
+added/removed entities; templates every 60 s, with a 3 s render limit). A list
+that cannot be built is empty instead of breaking the language:
 
 ```yaml
 lists:
@@ -157,7 +159,7 @@ intent:
 intents:
   LightZoneOnOff:
     llm_equivalent:
-      tool: HassTurnOn                  # resolved against the selected LLM APIs
+      tool: HassTurnOn                  # resolved against the fallback agent's tools
       args: {name: "{{ zone_text }}"}   # templates: slot values and <slot>_text
 ```
 
@@ -180,7 +182,7 @@ Every Tier-1 match gets two extra slots in addition to the matched ones:
 
 | Option | Default | What it does |
 |---|---|---|
-| Hits in conversation history | off | See above; select the LLM APIs your fallback agent uses. |
+| Hits in conversation history | off | See above; the tools are read from the fallback agent's own settings. |
 | Fallback language hint | off | On a miss, if the utterance is clearly in another configured language (small de/en/fr word lists), a short "reply in <language>" note is appended to `extra_system_prompt` for the fallback agent. Pipelines run with one fixed language, so LLMs otherwise tend to answer in the language of (German) tool results. Otherwise the input is passed on unchanged. |
 
 ## Services

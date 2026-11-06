@@ -40,8 +40,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .chatlog import async_record_hit
 from .const import (
+    DEFAULT_LANGUAGES,
     CONF_CHAT_LOG_TOOLS,
-    CONF_LLM_APIS,
     CONF_FALLBACK_AGENT,
     CONF_LANGUAGE_HINT,
     DOMAIN,
@@ -95,18 +95,15 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         self._attr_name = entry.title or "Polyglot Assist"
         self._attr_unique_id = entry.entry_id
 
-    @property
-    def _runtime(self) -> dict[str, Any]:
-        # Read on every call: the reload service swaps matcher and lists.
-        return self.hass.data[DOMAIN][self._entry.entry_id]
-
-    @property
-    def _matcher(self) -> MultilangMatcher:
-        return self._runtime["matcher"]
+    def _runtime(self) -> dict[str, Any] | None:
+        # Read once per request: the reload service swaps matcher and lists,
+        # and an options change unloads the entry while requests may run.
+        return self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
 
     @property
     def supported_languages(self) -> list[str]:
-        return self._matcher.languages
+        runtime = self._runtime()
+        return runtime["matcher"].languages if runtime else list(DEFAULT_LANGUAGES)
 
     # NOTE: we override _async_handle_message, NOT async_process. The base
     # ConversationEntity.async_process sets up the chat session + ChatLog
@@ -120,9 +117,13 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         t0 = time.perf_counter()
 
         # Hassil is sync-CPU — run in executor.
-        slot_lists = self._runtime["lists"].async_get()
+        runtime = self._runtime()
+        if runtime is None:  # entry is (re)loading — never drop the request
+            return await self._proxy_to_fallback(user_input, 0.0, chat_log, [])
+        matcher: MultilangMatcher = runtime["matcher"]
+        slot_lists = runtime["lists"].async_get()
         match = await self.hass.async_add_executor_job(
-            self._matcher.match,
+            matcher.match,
             user_input.text,
             user_input.language,
             slot_lists,
@@ -144,7 +145,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                     "matched_sentence": match.matched_sentence,
                 },
             )
-            return await self._handle_match(match, user_input, chat_log)
+            return await self._handle_match(match, user_input, chat_log, matcher.config)
 
         # Miss → proxy to fallback agent.
         t_miss_ms = (time.perf_counter() - t0) * 1000.0
@@ -152,13 +153,14 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             "Polyglot miss after %.1f ms — text=%r (lang_hint=%s) → proxy to %s",
             t_miss_ms, user_input.text, user_input.language, self._fallback_agent_id,
         )
-        return await self._proxy_to_fallback(user_input, t_miss_ms, chat_log)
+        return await self._proxy_to_fallback(user_input, t_miss_ms, chat_log, matcher.languages)
 
     async def _handle_match(
         self,
         match: MatchResult,
         user_input: ConversationInput,
         chat_log: ChatLog,
+        config: dict[str, Any],
     ) -> ConversationResult:
         """Dispatch the matched intent to HA's intent system."""
         # Inject the matched language as a slot so existing user-side
@@ -190,7 +192,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             )
             return ConversationResult(
                 response=err_response,
-                conversation_id=user_input.conversation_id,
+                conversation_id=chat_log.conversation_id,
             )
         except intent.UnknownIntent:
             _LOGGER.error(
@@ -204,7 +206,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             )
             return ConversationResult(
                 response=err_response,
-                conversation_id=user_input.conversation_id,
+                conversation_id=chat_log.conversation_id,
             )
 
         # IntentResponse is already populated by the handler (e.g. intent_script
@@ -214,7 +216,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             response.async_set_speech("OK")
 
         if self._entry.options.get(CONF_CHAT_LOG_TOOLS, False):
-            intent_cfg = (self._matcher.config.get("intents") or {}).get(match.intent_name)
+            intent_cfg = (config.get("intents") or {}).get(match.intent_name)
             if isinstance(intent_cfg, dict):
                 await async_record_hit(
                     self.hass,
@@ -223,12 +225,12 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                     intent_cfg=intent_cfg,
                     slots=slots,
                     response=response,
-                    api_ids=list(self._entry.options.get(CONF_LLM_APIS) or []),
+                    fallback_agent_id=self._fallback_agent_id,
                 )
 
         return ConversationResult(
             response=response,
-            conversation_id=user_input.conversation_id,
+            conversation_id=chat_log.conversation_id,
         )
 
     async def _proxy_to_fallback(
@@ -236,6 +238,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         user_input: ConversationInput,
         miss_took_ms: float,
         chat_log: ChatLog,
+        languages: list[str],
     ) -> ConversationResult:
         """Forward the ConversationInput to the configured fallback.
 
@@ -249,7 +252,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             extra = build_extra_prompt(
                 user_input.text,
                 user_input.language,
-                self._matcher.languages,
+                languages,
                 user_input.extra_system_prompt,
                 chat_log.extra_system_prompt,
             )

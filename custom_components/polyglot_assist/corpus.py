@@ -48,6 +48,17 @@ def static_lists(data: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in (data.get("lists") or {}).items() if k not in dyn}
 
 
+def referenced_lists(data: dict[str, Any]) -> set[str]:
+    """List names used by any sentence or expansion rule (not slot aliases)."""
+    texts: list[str] = list(string_rules(data).values())
+    for cfg in (data.get("intents") or {}).values():
+        if isinstance(cfg, dict) and isinstance(cfg.get("sentences"), dict):
+            for lst in cfg["sentences"].values():
+                if isinstance(lst, list):
+                    texts.extend(x for x in lst if isinstance(x, str))
+    return {ref for t in texts for ref in _LIST_REF.findall(t)}
+
+
 def runtime_list_names(data: dict[str, Any]) -> set[str]:
     """Names supplied at runtime: built-ins not overridden + dynamic lists."""
     static = set(static_lists(data))
@@ -59,11 +70,11 @@ def slot_lists_from_fixture(raw: dict[str, Any] | None) -> dict[str, SlotList]:
     out: dict[str, SlotList] = {}
     for name, items in (raw or {}).items():
         tuples = []
-        for item in items or []:
-            if isinstance(item, dict):
+        for item in items if isinstance(items, list) else []:
+            if isinstance(item, dict) and "in" in item:
                 tuples.append((str(item["in"]), item.get("out", item["in"])))
-            else:
-                tuples.append((str(item), str(item)))
+            elif isinstance(item, str):
+                tuples.append((item, item))
         out[name] = TextSlotList.from_tuples(tuples, allow_template=False, name=name)
     return out
 
@@ -136,8 +147,27 @@ def validate(
         | (set(BUILTIN_LISTS) if builtins else set())
     )
     for list_name, spec in dynamic_lists(data).items():
-        if sum(k in spec for k in DYNAMIC_KEYS) != 1:
+        kinds = [k for k in DYNAMIC_KEYS if k in spec]
+        if len(kinds) != 1 or any(k in spec for k in ("values", "range", "wildcard")):
             problems.append(f"list {list_name}: use exactly one of {', '.join(DYNAMIC_KEYS)}")
+            continue
+        body = spec[kinds[0]]
+        if kinds[0] == "template":
+            if not isinstance(body, str):
+                problems.append(f"list {list_name}: template must be a string")
+        elif body is not None and not isinstance(body, dict):
+            problems.append(f"list {list_name}: {kinds[0]} must be a mapping")
+        elif kinds[0] == "entities":
+            for key, value in (body or {}).items():
+                if key not in ("domain", "area", "exclude", "exposed"):
+                    problems.append(f"list {list_name}: unknown key entities.{key}")
+                elif key == "exposed" and not isinstance(value, bool):
+                    problems.append(f"list {list_name}: entities.exposed must be true/false")
+                elif key != "exposed" and not (
+                    isinstance(value, str)
+                    or (isinstance(value, list) and all(isinstance(v, str) for v in value))
+                ):
+                    problems.append(f"list {list_name}: entities.{key} must be a string or list of strings")
     known_rules = set(string_rules(data))
     raw_rules = data.get("expansion_rules") or {}
     if not isinstance(raw_rules, dict):

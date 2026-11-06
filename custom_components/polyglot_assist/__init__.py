@@ -35,6 +35,7 @@ from .const import (
     SERVICE_TEST_MATCH,
 )
 from .corpus import Case, parse_corpus, run_corpus
+from .chatlog import clear_tool_cache
 from .dynlists import DynamicLists
 from .loader import MatcherLoader
 from .matcher import MultilangMatcher
@@ -77,7 +78,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "fallback_agent": entry.data[CONF_FALLBACK_AGENT],
     }
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    clear_tool_cache()
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except Exception:
+        lists.async_stop()
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        raise
 
     # Reload service (no per-entry needed for v0.1 — one global service)
     if not hass.services.has_service(DOMAIN, SERVICE_RELOAD):
