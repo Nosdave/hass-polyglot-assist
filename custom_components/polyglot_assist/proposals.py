@@ -32,7 +32,6 @@ MAX_VARIANTS = 10000
 MAX_PERMUTATION = 4
 MAX_SAMPLES = 120
 MAX_PATHS = 256
-EMPTY_LISTS: set[str] = set()  # lists that were empty during the last shrink (diagnostics)
 MAX_NAME_CHARS = 40
 MAX_NAME_WORDS = 4
 _NAME_FORBIDDEN = re.compile(r"[{}<>\[\]()|;:]")
@@ -156,8 +155,13 @@ def _value_text(value: Any) -> str | None:
     return text if isinstance(text, str) and text.strip() else None
 
 
-def shrink_lists(slot_lists: dict[str, SlotList], per_list: int = 3) -> dict[str, SlotList]:
-    """At most ``per_list`` values per list: first, middle, last."""
+def shrink_lists(
+    slot_lists: dict[str, SlotList], per_list: int = 3, empty: set[str] | None = None
+) -> dict[str, SlotList]:
+    """At most ``per_list`` values per list: first, middle, last.
+
+    Names of lists without any value are added to ``empty`` (if given).
+    """
     out: dict[str, SlotList] = {}
     for name, sl in slot_lists.items():
         if isinstance(sl, TextSlotList):
@@ -165,8 +169,8 @@ def shrink_lists(slot_lists: dict[str, SlotList], per_list: int = 3) -> dict[str
             if len(texts) > per_list:
                 texts = [texts[0], texts[len(texts) // 2], texts[-1]]
             out[name] = TextSlotList.from_strings(texts or ["x"], allow_template=False, name=name)
-            if not texts:
-                EMPTY_LISTS.add(name)
+            if not texts and empty is not None:
+                empty.add(name)
         elif isinstance(sl, RangeSlotList):
             mid = sl.start + ((sl.stop - sl.start) // (2 * sl.step)) * sl.step
             vals = sorted({sl.start, mid, sl.stop})
@@ -184,7 +188,19 @@ def bounded_samples(
     limit: int = MAX_SAMPLES,
 ) -> list[str]:
     """Evenly spread samples over all (bounded) variants."""
-    small = shrink_lists(slot_lists)
+    return bounded_samples_info(sentence, slot_lists, rules, language, limit)[0]
+
+
+def bounded_samples_info(
+    sentence: Sentence,
+    slot_lists: dict[str, SlotList],
+    rules: dict[str, Sentence],
+    language: str | None,
+    limit: int = MAX_SAMPLES,
+) -> tuple[list[str], bool, set[str]]:
+    """Samples, whether optional words were skipped, and empty lists used."""
+    empty: set[str] = set()
+    small = shrink_lists(slot_lists, empty=empty)
     sizes = {name: len(getattr(sl, "values", [])) or 1 for name, sl in small.items()}
     skip = False
     if count_variants(sentence, sizes, rules) > MAX_VARIANTS:
@@ -200,10 +216,10 @@ def bounded_samples(
         if text:
             seen[text] = None
     texts = list(seen)
-    if len(texts) <= limit:
-        return texts
-    step = len(texts) / limit
-    return [texts[int(i * step)] for i in range(limit)]
+    if len(texts) > limit:
+        step = len(texts) / limit
+        texts = [texts[int(i * step)] for i in range(limit)]
+    return texts, skip, empty
 
 
 # ── proposal check ──────────────────────────────────────────────────────────
@@ -275,8 +291,9 @@ def check_proposal(
         odd = sorted(next(iter(wanted - source_paths)))
         return _err(f"placeholders {odd} differ from every source sentence")
 
+    skipped, empty = False, set()
     try:
-        samples = bounded_samples(parsed, slot_lists, parsed_rules, language)
+        samples, skipped, empty = bounded_samples_info(parsed, slot_lists, parsed_rules, language)
     except ValueError:
         return _err("too many variants")
     except Exception as err:  # noqa: BLE001
@@ -322,6 +339,7 @@ def check_proposal(
             result["notes"].append(f"reverse check skipped: {err}")
 
     result["samples"] = samples[:5]
+    used_empty = sorted(empty & set(refs))
     if collisions:
         result["status"] = "error"
         result["notes"].append("collides with other commands")
@@ -329,6 +347,12 @@ def check_proposal(
     elif same == len(samples):
         result["status"] = "warn"
         result["notes"].append("already covered by existing sentences")
+    elif skipped or used_empty:
+        result["status"] = "warn"
+        if skipped:
+            result["notes"].append("checked without optional words (large template)")
+        if used_empty:
+            result["notes"].append(f"list {used_empty[0]} is empty — checked with a placeholder")
     return result
 
 
