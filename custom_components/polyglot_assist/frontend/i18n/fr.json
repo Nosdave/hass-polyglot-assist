@@ -336,7 +336,11 @@
     "source": "Assistant : {assistant} · Reconnaissance : {stt} · Synthèse : {tts} · Langue de l’assistant : {language}",
     "stt_test": "Tester la reconnaissance vocale",
     "stt_running": "Une phrase test par langue est dite et reconnue …",
-    "stt_hint": "Le résultat est une indication : les phrases test sont dites par une voix de synthèse."
+    "stt_hint": "Le résultat est une indication : les phrases test sont dites par une voix de synthèse.",
+    "yes": "oui",
+    "no": "non",
+    "stt_skipped": "Non testées (8 langues au plus par passage) : {languages}.",
+    "apply_slow": "Enregistré. Polyglot redémarre encore – l’affichage se met à jour dans un instant."
   },
   "uitexts": {
     "title": "Textes de l’interface",

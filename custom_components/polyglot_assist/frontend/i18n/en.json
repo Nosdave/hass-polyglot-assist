@@ -336,7 +336,11 @@
     "source": "Assistant: {assistant} · Speech recognition: {stt} · Speech output: {tts} · Assistant language: {language}",
     "stt_test": "Test speech recognition",
     "stt_running": "Speaking and recognising a test sentence per language …",
-    "stt_hint": "The result is a hint: the test sentences are spoken by a synthetic voice."
+    "stt_hint": "The result is a hint: the test sentences are spoken by a synthetic voice.",
+    "yes": "yes",
+    "no": "no",
+    "stt_skipped": "Not tested (at most 8 languages per run): {languages}.",
+    "apply_slow": "Saved. Polyglot is still reloading – the view updates in a moment."
   },
   "uitexts": {
     "title": "Interface texts",

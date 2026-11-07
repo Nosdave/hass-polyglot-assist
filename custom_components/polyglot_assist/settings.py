@@ -205,15 +205,26 @@ async def _stt_one(hass: HomeAssistant, pipeline: Any, lang: str) -> dict[str, A
         )
         stream.async_set_message(sentence)
         data = b"".join([chunk async for chunk in stream.async_stream_result()])
-        with wave.open(io.BytesIO(data)) as wav:
-            if (wav.getframerate(), wav.getnchannels(), wav.getsampwidth()) != (16000, 1, 2):
-                return {"ok": None, "error": "speech output did not deliver 16 kHz mono audio"}
-            pcm = wav.readframes(wav.getnframes())
+        try:
+            with wave.open(io.BytesIO(data)) as wav:
+                if (wav.getframerate(), wav.getnchannels(), wav.getsampwidth()) != (16000, 1, 2):
+                    return {"ok": None, "error": "speech output did not deliver 16 kHz mono audio"}
+                pcm = wav.readframes(wav.getnframes())
+        except (wave.Error, EOFError):
+            return {"ok": None, "error": "speech output cannot deliver WAV audio"}
+        if not pcm and len(data) > 44:  # streamed WAV with an unknown length in the header
+            pcm = data[44:]
+        if not pcm:
+            return {"ok": None, "error": "speech output delivered no audio"}
         provider = stt.async_get_speech_to_text_engine(hass, pipeline.stt_engine)
         if provider is None:
             return {"ok": None, "error": "speech recognition not found"}
+        stt_lang = pipeline.stt_language or pipeline.language
+        supported = list(getattr(provider, "supported_languages", None) or [])
+        if supported and stt_lang not in supported and _base(stt_lang) not in {_base(x) for x in supported}:
+            return {"ok": None, "error": f"speech recognition does not support {stt_lang}"}
         meta = stt.SpeechMetadata(
-            language=pipeline.stt_language or pipeline.language, format=stt.AudioFormats.WAV,
+            language=stt_lang, format=stt.AudioFormats.WAV,
             codec=stt.AudioCodecs.PCM, bit_rate=stt.AudioBitRates.BITRATE_16,
             sample_rate=stt.AudioSampleRates.SAMPLERATE_16000, channel=stt.AudioChannels.CHANNEL_MONO,
         )
@@ -241,7 +252,8 @@ async def async_stt_test(hass: HomeAssistant, *, pipeline_id: str | None, langua
 
     pipeline = async_get_pipeline(hass, pipeline_id)
     out = []
-    for lang in [x for x in dict.fromkeys(_base(x) for x in languages) if LANG_RE.match(x)][:8]:
+    wanted = [x for x in dict.fromkeys(_base(x) for x in languages) if LANG_RE.match(x)]
+    for lang in wanted[:8]:
         try:
             row = await _stt_one(hass, pipeline, lang)
         except TimeoutError:
@@ -250,4 +262,4 @@ async def async_stt_test(hass: HomeAssistant, *, pipeline_id: str | None, langua
             row = {"ok": None, "error": str(err)[:200]}
         out.append({"language": lang, **row})
     return {"pipeline": {"id": pipeline.id, "name": pipeline.name, "stt_language": pipeline.stt_language},
-            "languages": out}
+            "languages": out, "skipped": wanted[8:]}

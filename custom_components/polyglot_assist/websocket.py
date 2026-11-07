@@ -950,7 +950,7 @@ async def ws_fallback_set(hass: HomeAssistant, connection, msg) -> None:
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command({vol.Required("type"): "polyglot_assist/pipelines"})
+@websocket_api.websocket_command({vol.Required("type"): "polyglot_assist/pipelines", vol.Optional("entry_id"): str})
 @callback
 def ws_pipelines(hass: HomeAssistant, connection, msg) -> None:
     """Voice assistants (read only): is Polyglot active, prefer local, STT/TTS, devices."""
@@ -1073,6 +1073,7 @@ async def ws_ui_texts_export(hass: HomeAssistant, connection, msg) -> None:
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "polyglot_assist/languages/stt_test",
+        vol.Optional("entry_id"): str,
         vol.Optional("pipeline_id"): str,
         vol.Required("languages"): [vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$")],
     }

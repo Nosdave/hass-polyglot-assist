@@ -336,7 +336,11 @@
     "source": "Assistent: {assistant} · Spracherkennung: {stt} · Sprachausgabe: {tts} · Sprache des Assistenten: {language}",
     "stt_test": "Spracherkennung testen",
     "stt_running": "Je Sprache wird ein Testsatz gesprochen und erkannt …",
-    "stt_hint": "Ergebnis ist ein Hinweis: Die Testsätze spricht eine künstliche Stimme."
+    "stt_hint": "Ergebnis ist ein Hinweis: Die Testsätze spricht eine künstliche Stimme.",
+    "yes": "ja",
+    "no": "nein",
+    "stt_skipped": "Nicht getestet (höchstens 8 Sprachen je Durchlauf): {languages}.",
+    "apply_slow": "Gespeichert. Polyglot lädt noch neu – die Anzeige aktualisiert sich gleich."
   },
   "uitexts": {
     "title": "Oberflächentexte",
