@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e1b4b"/>
+      <stop offset="0.55" stop-color="#3730a3"/>
+      <stop offset="1" stop-color="#0e7490"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.3" cy="0.2" r="0.8">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wave" gradientUnits="userSpaceOnUse" x1="160" y1="0" x2="354" y2="0">
+      <stop offset="0" stop-color="#f43f5e"/>
+      <stop offset="0.5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fde68a"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#0b0a2a" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#glow)"/>
+  <!-- two languages behind -->
+  <path d="M150 112 h188 a46 46 0 0 1 46 46 v92 a46 46 0 0 1 -46 46 h-188 a46 46 0 0 1 -46 -46 v-92 a46 46 0 0 1 46 -46z" fill="#f43f5e" opacity="0.55" transform="rotate(-10 256 220) translate(-34 -18)"/>
+  <path d="M150 112 h188 a46 46 0 0 1 46 46 v92 a46 46 0 0 1 -46 46 h-188 a46 46 0 0 1 -46 -46 v-92 a46 46 0 0 1 46 -46z" fill="#06b6d4" opacity="0.6" transform="rotate(8 256 220) translate(40 -26)"/>
+  <!-- the one pipeline: main bubble -->
+  <g filter="url(#sh)">
+    <path d="M144 150 h224 a56 56 0 0 1 56 56 v112 a56 56 0 0 1 -56 56 h-120 l-70 58 l14 -58 h-48 a56 56 0 0 1 -56 -56 v-112 a56 56 0 0 1 56 -56z" fill="#ffffff"/>
+  </g>
+  <!-- one voice, many languages -->
+  <g fill="url(#wave)">
+    <rect x="160" y="236" width="26" height="52" rx="13"/>
+    <rect x="202" y="206" width="26" height="112" rx="13"/>
+    <rect x="244" y="182" width="26" height="160" rx="13"/>
+    <rect x="286" y="214" width="26" height="96" rx="13"/>
+    <rect x="328" y="242" width="26" height="40" rx="13"/>
+  </g>
+  <!-- learns by itself -->
+  <path d="M414 70 C420 104 430 114 464 120 C430 126 420 136 414 170 C408 136 398 126 364 120 C398 114 408 104 414 70Z" fill="url(#spark)"/>
+  <path d="M458 176 C460 188 464 192 476 194 C464 196 460 200 458 212 C456 200 452 196 440 194 C452 192 456 188 458 176Z" fill="#fde68a"/>
+</svg>

@@ -1,34 +1,90 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.png">
+    <img src="docs/images/logo.png" alt="Polyglot Assist" width="440">
+  </picture>
+</p>
+
 # Polyglot Assist
 
-> **A local, multi-language voice layer for Home Assistant Assist.**
-> Deterministic local matching across multiple languages, with your AI agent
-> as fallback. A single voice pipeline can serve a multilingual household.
-> It solves HA's `hass.config.language`-only sentence-trigger limit and
-> includes a panel, safe suggestions, learning by voice and a designable
-> confirmation tone that works with any TTS.
+**Many languages. One Home Assistant pipeline. One wake word.**
+
+Speak German, English or French to the same voice satellite, without
+switching the wake word or the pipeline. The same command runs locally in a
+few milliseconds and answers in the language you spoke. "Licht Küche an",
+"Turn on the kitchen light" and "Allume la lumière de la cuisine" are one
+command, not three setups.
+
+**New: local intents that teach themselves.** Polyglot notices which
+sentences keep ending up at your AI agent. Your **AI task** turns the
+recurring ones into local commands, in every language, each validated
+against a regression corpus. You accept them in the panel, or simply by
+voice: *"What have you learned?" → "Accept the first one" → "Yes"*. Over
+time more of your household's everyday sentences run locally, fast and
+without an LLM.
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## What it does
+## Highlights
 
-A custom **Conversation Agent** that sits in front of your LLM agent
-(skye-harris, ollama, anthropic, …) on the Voice-PE pipeline. For each
-spoken utterance:
+- **One pipeline, one wake word, many languages.** A deterministic
+  per-language matcher sits in front of any HA conversation agent (OpenAI,
+  Anthropic, Ollama, local LLMs, …). That agent remains the fallback for
+  everything else.
+- **Self-learning local intents (opt-in).** Nightly monitoring plus your AI
+  task turn repeated sentences into suggestions. They are always validated
+  and never applied silently. Learning by voice is limited to harmless
+  additions on the satellites you approve, at most 5 per hour, and can be
+  undone.
+- **HA's built-in commands in every language.** Turn on/off, timers
+  (incl. named timers) and more, with every target checked.
+- **A panel in the sidebar:**
+  - commands with hit counters, a test field and an editor;
+  - names per language;
+  - suggestions with their origin and check;
+  - version history with restore;
+  - all settings, including the fallback agent, the language check
+    (STT, AI, Polyglot, TTS) and the interface language (English, German,
+    French — more as files or translated by your AI).
+- **Safe by design.** Every command has a safety level, and doors, locks and
+  alarms are protected. The AI task used for learning must have no tools.
+  Every change runs against the corpus before it is saved.
+- **Confirmation tone like HA's own, with any TTS.** Choose classic, design
+  your own (single/double/triple, rising/falling, flowing, bell …), or upload
+  or record a tone.
+- **Light.** About 16 MB for 3 languages and about 2 ms per hit. Runs on
+  typical HA hardware.
 
-1. Try a fast, deterministic **per-language Hassil match** against your
-   `intents.yaml` — patterns can be defined separately for **DE, EN, FR**
-   (or any languages you add).
-2. **On match**: dispatch to your existing `intent_script` (the speech is
-   rendered in the matched language because we inject `lang` as a slot).
-3. **On miss**: forward the unmodified `ConversationInput` to your
-   configured fallback agent. The LLM handles free-form, tool-calls,
-   RAG, etc.
+## The multilingual voice stack
 
-The result: "Wettervorhersage", "What's the weather", "Quel temps fait-il"
-all match a single intent **deterministically**, run **without LLM
-mediation** when matched, and fall through to the LLM only when the intent
-is genuinely unknown.
+Polyglot Assist handles the *understanding*. For the whole household to be
+multilingual, the other two ends of the pipeline need to be too:
+
+- **Speech-to-text** that recognises several languages in one pipeline, for
+  example a multilingual Whisper or Parakeet model.
+- **Text-to-speech:** [**Polyglot TTS**](https://github.com/Nosdave/polyglot-tts)
+  is the companion project. One voice speaks seven languages, detects the
+  language per sentence and streams the audio. It also turns Polyglot's tone
+  marker into the confirmation tone by itself. It offers a Wyoming endpoint
+  for HA and an OpenAI-Speech-compatible HTTP endpoint, and you can clone a
+  voice from a short WAV.
+
+Any other TTS works as well. For the confirmation tone, put *Polyglot Assist
+(tone)* in front of it (see [Answer as a tone](#answer-as-a-tone)).
+
+## How it works
+
+A custom **conversation agent** sits in front of your LLM agent on the voice
+pipeline. For each spoken sentence it tries the following in order:
+
+1. **Your commands.** A fast, deterministic per-language Hassil match
+   against the catalog (DE, EN, FR or any language you add). On a match it
+   runs the command and answers in the matched language.
+2. **HA's built-in commands**, in every language, with the targets checked
+   (optional).
+3. **Your AI agent.** Everything else is forwarded unmodified to the
+   configured fallback agent: free-form questions, tool calls, RAG and so on.
 
 ## Why this exists
 
@@ -52,17 +108,8 @@ languages on the same wake-word."
 Polyglot Assist fixes that by being **the** selected agent (not a
 local-fallback companion) and owning its own per-language matcher.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full stack: STT polyglot
-(Parakeet on a GPU host) → polyglot_assist → LLM fallback → TTS polyglot
-(Wyoming pocket-tts with Lingua-LID).
-
-## Companion project
-
-Polyglot Assist pairs naturally with [**Polyglot TTS**](https://github.com/Nosdave/polyglot-tts) —
-a multi-language streaming TTS server with voice cloning, exposing both
-Wyoming (for HA) and OpenAI-Speech-compatible HTTP (for OpenClaw and
-other consumers). Same multi-language philosophy, opposite end of the
-voice pipeline.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full stack: multilingual STT
+→ Polyglot Assist → LLM fallback → Polyglot TTS.
 
 ## Installation
 
