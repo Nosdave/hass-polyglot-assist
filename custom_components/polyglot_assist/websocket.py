@@ -16,11 +16,20 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import entity_registry as er
 
-from .const import CONF_TRANSLATION_AI_TASK, DOMAIN, SOURCE_CATALOG
+from .const import CONF_LANGUAGES_ENABLED, CONF_TRANSLATION_AI_TASK, DOMAIN, SOURCE_CATALOG
 from .corpus import count_summary, validate
 from .guard import GuardError, async_guarded_update, revision
 from .source import SourceError
-from .translate import ProposalError, async_propose_names, async_propose_sentences, valid_languages
+from .assistant import async_discover
+from .proposal_queue import ProposalQueue
+from .proposals import QueueError, apply_op, check_item
+from .translate import (
+    ProposalError,
+    async_propose_languages,
+    async_propose_names,
+    async_propose_sentences,
+    valid_languages,
+)
 
 
 @callback
@@ -28,6 +37,8 @@ def async_register(hass: HomeAssistant) -> None:
     for handler in (
         ws_stats, ws_get, ws_save_intent, ws_delete_intent, ws_test,
         ws_translate, ws_suggest_names,
+        ws_proposals_list, ws_proposals_accept, ws_proposals_reject,
+        ws_proposals_generate, ws_suggest_languages,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -205,6 +216,13 @@ def _ai_task_entity(hass: HomeAssistant, entry_id: str) -> str | None:
 
 
 TOTAL_BUDGET = 180
+CALL_BUDGET = 70
+
+
+def enabled_languages(hass: HomeAssistant, entry_id: str, available: list[str]) -> list[str]:
+    entry = hass.config_entries.async_get_entry(entry_id)
+    chosen = (entry.options.get(CONF_LANGUAGES_ENABLED) if entry else None) or []
+    return [lang for lang in available if not chosen or lang in chosen]
 
 
 @websocket_api.require_admin
@@ -214,6 +232,7 @@ TOTAL_BUDGET = 180
         vol.Optional("entry_id"): str,
         vol.Required("name"): str,
         vol.Required("languages"): [str],
+        vol.Optional("to_queue", default=False): bool,
     }
 )
 @websocket_api.async_response
@@ -256,9 +275,25 @@ async def ws_translate(hass: HomeAssistant, connection, msg) -> None:
     except TimeoutError:
         connection.send_error(msg["id"], "timeout", "the AI task took too long")
         return
+    queued = 0
+    if msg.get("to_queue"):
+        items = [
+            {
+                "op": "add_sentences",
+                "payload": {"intent": msg["name"], "lang": lang, "sentences": [r["sentence"]]},
+                "title": f"{msg['name']} ({lang}): {r['sentence']}",
+                "origin": {"source": "translation", "detail": f"Übersetzung von {msg['name']} nach {lang}"},
+                "check": {"status": r["status"], "notes": r["notes"]},
+            }
+            for lang, results in proposals.items()
+            if isinstance(results, list)
+            for r in results
+        ]
+        queued = len(await _queue(hass, runtime).async_add(items))
     connection.send_result(
         msg["id"],
-        {"name": msg["name"], "safety": intent_cfg.get("safety", "normal"), "proposals": proposals},
+        {"name": msg["name"], "safety": intent_cfg.get("safety", "normal"), "proposals": proposals,
+         "queued": queued},
     )
 
 
@@ -321,3 +356,154 @@ async def ws_suggest_names(hass: HomeAssistant, connection, msg) -> None:
         connection.send_error(msg["id"], "timeout", "the AI task took too long")
         return
     connection.send_result(msg["id"], {"proposals": names, "unknown_ids": sorted(set(ids) - set(targets))})
+
+
+# ── proposal queue ──────────────────────────────────────────────────────────
+
+
+def _queue(hass: HomeAssistant, runtime: dict) -> ProposalQueue:
+    queue = runtime.get("queue")
+    if queue is None:
+        queue = runtime["queue"] = ProposalQueue(hass, runtime["entry"].entry_id)
+    return queue
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/proposals/list", vol.Optional("entry_id"): str}
+)
+@websocket_api.async_response
+async def ws_proposals_list(hass: HomeAssistant, connection, msg) -> None:
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    connection.send_result(msg["id"], {"items": list(await _queue(hass, runtime).async_items())})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "polyglot_assist/proposals/accept",
+        vol.Optional("entry_id"): str,
+        vol.Required("ids"): [str],
+        vol.Optional("force", default=False): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_proposals_accept(hass: HomeAssistant, connection, msg) -> None:
+    """Apply the selected proposals in ONE guarded write."""
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    queue = _queue(hass, runtime)
+    wanted = set(msg["ids"])
+    items = [i for i in await queue.async_items() if i["id"] in wanted]
+    refused = {}
+    for item in items:
+        reason = check_item(item) or (
+            "; ".join(item.get("check", {}).get("notes", [])[:1]) or "has errors"
+            if item.get("check", {}).get("status") == "error"
+            else None
+        )
+        if reason:
+            refused[item["id"]] = reason
+    usable = [i for i in items if i["id"] not in refused]
+    if not usable:
+        connection.send_result(msg["id"], {"saved": False, "code": "nothing_usable", "refused": refused})
+        return
+
+    def _mutate(data: dict) -> None:
+        for item in usable:
+            try:
+                apply_op(data, item)
+            except QueueError as err:
+                raise GuardError("stale", f"{item.get('title', item['id'])}: {err}") from None
+
+    msg = {**msg, "force": msg.get("force", False)}
+    if runtime["source"].kind != SOURCE_CATALOG:
+        connection.send_error(
+            msg["id"], "yaml_source_read_only",
+            "proposals are applied to the catalog — switch the intents source to the catalog first",
+        )
+        return
+    try:
+        result = await async_guarded_update(hass, runtime, _mutate, force=msg["force"])
+    except GuardError as err:
+        connection.send_result(msg["id"], {"saved": False, "code": err.code, "message": str(err), "refused": refused, **err.details})
+        return
+    await queue.async_remove([i["id"] for i in usable])
+    connection.send_result(msg["id"], {**result, "applied": [i["id"] for i in usable], "refused": refused})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "polyglot_assist/proposals/reject",
+        vol.Optional("entry_id"): str,
+        vol.Required("ids"): [str],
+    }
+)
+@websocket_api.async_response
+async def ws_proposals_reject(hass: HomeAssistant, connection, msg) -> None:
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    removed = await _queue(hass, runtime).async_remove(msg["ids"])
+    connection.send_result(msg["id"], {"removed": removed})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "polyglot_assist/proposals/generate",
+        vol.Optional("entry_id"): str,
+        vol.Required("what"): vol.In(["starter", "new_devices"]),
+    }
+)
+@websocket_api.async_response
+async def ws_proposals_generate(hass: HomeAssistant, connection, msg) -> None:
+    """Starter set or new devices → proposals in the queue (nothing applied)."""
+    entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    ai_task = _ai_task_entity(hass, entry_id)
+    if not ai_task:
+        connection.send_error(msg["id"], "not_configured", "choose an AI task for proposals in the options")
+        return
+    languages = enabled_languages(hass, entry_id, runtime["matcher"].languages)
+    try:
+        async with asyncio.timeout(TOTAL_BUDGET * 2):
+            found = await async_discover(
+                hass, runtime, ai_task=ai_task, languages=languages,
+                only_new=msg["what"] == "new_devices", context=connection.context(msg),
+            )
+    except ProposalError as err:
+        connection.send_error(msg["id"], "refused", str(err))
+        return
+    except TimeoutError:
+        connection.send_error(msg["id"], "timeout", "the AI task took too long")
+        return
+    added = await _queue(hass, runtime).async_add(found["items"])
+    connection.send_result(msg["id"], {"added": len(added), "errors": found["errors"]})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/suggest_languages", vol.Optional("entry_id"): str}
+)
+@websocket_api.async_response
+async def ws_suggest_languages(hass: HomeAssistant, connection, msg) -> None:
+    entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    ai_task = _ai_task_entity(hass, entry_id)
+    if not ai_task:
+        connection.send_error(msg["id"], "not_configured", "choose an AI task for proposals in the options")
+        return
+    try:
+        async with asyncio.timeout(CALL_BUDGET):
+            langs = await async_propose_languages(hass, ai_task, connection.context(msg))
+    except (ProposalError, TimeoutError) as err:
+        connection.send_error(msg["id"], "failed", str(err) or "timeout")
+        return
+    connection.send_result(msg["id"], {"languages": langs})

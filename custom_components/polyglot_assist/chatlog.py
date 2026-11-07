@@ -131,6 +131,7 @@ async def async_record_hit(
     slots: dict[str, dict[str, Any]],
     response: intent.IntentResponse,
     fallback_agent_id: str,
+    spoken: str | None = None,
 ) -> bool:
     """Add tool call + result + spoken answer to the ChatLog. Never raises.
 
@@ -168,7 +169,7 @@ async def async_record_hit(
                 result=llm.ToolResult(data=llm.IntentResponseDict(response), error=failed),
             ),
         ]
-        speech = response.speech.get("plain", {}).get("speech", "")
+        speech = spoken if spoken is not None else response.speech.get("plain", {}).get("speech", "")
         if speech:
             contents.append(AssistantContent(agent_id=agent_id, content=speech))
     except Exception:  # noqa: BLE001 — recording must never break a hit

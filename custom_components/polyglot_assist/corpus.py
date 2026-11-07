@@ -103,6 +103,7 @@ def slot_lists_from_fixture(raw: dict[str, Any] | None) -> dict[str, SlotList]:
 
 
 SAFETY_LEVELS = ("normal", "sensitive", "disabled")
+OTHER_CATEGORY = "Sonstiges"
 
 
 def is_active(intent_cfg: dict[str, Any]) -> bool:
@@ -203,6 +204,13 @@ def validate(
                 ):
                     problems.append(f"list {list_name}: entities.{key} must be a string or list of strings")
     known_rules = set(string_rules(data))
+    raw_categories = data.get("categories")
+    categories: list[str] | None = None
+    if raw_categories is not None:
+        if not isinstance(raw_categories, list) or not all(isinstance(c, str) and c.strip() for c in raw_categories):
+            problems.append("categories must be a list of names")
+        else:
+            categories = raw_categories
     names = data.get("names") or {}
     if not isinstance(names, dict):
         problems.append("names must be a mapping of entity_id / area.<id> → {lang: [names]}")
@@ -241,6 +249,13 @@ def validate(
         if cfg is not None and not isinstance(cfg, dict):
             problems.append(f"{name}: intent must be a mapping")
             continue
+        for key, allowed in (("kind", ("command", "question")), ("response_mode", ("text", "chime"))):
+            value = (cfg or {}).get(key)
+            if value is not None and value not in allowed:
+                problems.append(f"{name}: {key} must be one of {', '.join(allowed)}")
+        category = (cfg or {}).get("category")
+        if category is not None and categories is not None and category not in categories:
+            problems.append(f"{name}: unknown category {category!r}")
         safety = (cfg or {}).get("safety")
         if safety is not None and safety not in SAFETY_LEVELS:
             problems.append(f"{name}: unknown safety level {safety!r} (treated as disabled)")
@@ -299,6 +314,14 @@ def count_summary(data: dict[str, Any]) -> dict[str, Any]:
         "sensitive": _with("sensitive"),
         "lists": len(data.get("lists") or {}),
         "dynamic_lists": sorted(dynamic_lists(data)),
+        "categories": {
+            cat: sorted(n for n, c in intents.items() if isinstance(c, dict) and (c.get("category") or OTHER_CATEGORY) == cat)
+            for cat in dict.fromkeys(
+                [*(data.get("categories") or []), *(
+                    (c.get("category") or OTHER_CATEGORY) for c in intents.values() if isinstance(c, dict)
+                )]
+            )
+        },
         "sentences": {
             lang: sum(len(v["data"][0]["sentences"]) for v in lang_intents.values())
             for lang, lang_intents in per_lang.items()

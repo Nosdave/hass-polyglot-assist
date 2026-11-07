@@ -305,3 +305,114 @@ async def async_propose_names(
             except (TimeoutError, HomeAssistantError) as err:
                 result[target_id][lang] = {"error": str(err) or "timeout"}
     return result
+
+
+async def async_propose_new_command(
+    hass: HomeAssistant,
+    *,
+    ai_task_entity: str,
+    name: str,
+    what: str,
+    languages: list[str],
+    matcher,
+    slot_lists: dict,
+    context: Context | None = None,
+) -> dict[str, Any]:
+    """Sentence templates for a NEW command (no placeholders) per language."""
+    if ai_task_has_tools(hass, ai_task_entity):
+        raise ProposalError(
+            "this AI task has tools (LLM API) — pick one without tools for proposals"
+        )
+    out: dict[str, Any] = {}
+    for lang in languages:
+        try:
+            proposals = await _generate(
+                hass,
+                ai_task_entity,
+                "\n".join(
+                    [
+                        _SYNTAX,
+                        "",
+                        f"Write 2 to 4 sentence templates in {LANG_NAMES.get(lang, lang)} that people "
+                        "say to start the thing described below. No {placeholders}.",
+                        _FENCE,
+                        "<data>",
+                        what,
+                        "</data>",
+                    ]
+                ),
+                "sentences",
+                "sentence templates in hassil syntax",
+                context,
+            )
+
+            def _check(p: str, lang: str = lang) -> dict[str, Any]:
+                return check_proposal(
+                    name, p, [], lambda t: matcher.match_all(t, lang, slot_lists), slot_lists,
+                    None, lang,
+                )
+
+            out[lang] = [await hass.async_add_executor_job(_check, clean_alternatives(p)) for p in proposals]
+        except (TimeoutError, HomeAssistantError) as err:
+            out[lang] = {"error": str(err) or "timeout"}
+    return out
+
+
+async def async_propose_languages(
+    hass: HomeAssistant, ai_task_entity: str, context: Context | None = None
+) -> list[str]:
+    """Ask the model which languages it understands and writes well."""
+    if ai_task_has_tools(hass, ai_task_entity):
+        raise ProposalError("this AI task has tools (LLM API) — pick one without tools")
+    codes = await _generate(
+        hass,
+        ai_task_entity,
+        "List the ISO 639-1 codes (like de, en, fr) of the languages you understand and write "
+        "fluently enough to write voice commands for a smart home. At most 12, best first.",
+        "languages",
+        "ISO 639-1 language codes",
+        context,
+    )
+    return [c.lower() for c in dict.fromkeys(codes) if LANG_RE.match(c.lower())][:12]
+
+
+async def async_propose_from_monitor(
+    hass: HomeAssistant,
+    *,
+    ai_task_entity: str,
+    repeated: list[dict[str, Any]],
+    config: dict[str, Any],
+    context: Context | None = None,
+) -> list[str]:
+    """Lines ``INTENT | LANG | TEMPLATE`` for sentences the assistant kept handling."""
+    if ai_task_has_tools(hass, ai_task_entity):
+        raise ProposalError("this AI task has tools (LLM API) — pick one without tools")
+    commands = []
+    for name, cfg in list((config.get("intents") or {}).items())[:80]:
+        if isinstance(cfg, dict):
+            sample = next(iter((cfg.get("sentences") or {}).values()), [])[:2]
+            commands.append(f"- {name}: {cfg.get('description', '')} | e.g. {' / '.join(sample)}")
+    return await _generate(
+        hass,
+        ai_task_entity,
+        "\n".join(
+            [
+                _SYNTAX,
+                "",
+                "The voice assistant did not recognise the sentences below itself; a slower AI "
+                "handled them and performed the listed tool calls. For each sentence that clearly "
+                "belongs to one of the EXISTING commands, write a template that would match it.",
+                "Answer lines in the form: COMMAND | LANGUAGE_CODE | TEMPLATE. Skip sentences that fit no command.",
+                _FENCE,
+                "<data>",
+                "sentences (with what the AI did):",
+                *[f"- [{r.get('lang') or '?'}] {r['text']} ({r['count']}×) → {r['targets']}" for r in repeated[:15]],
+                "existing commands:",
+                *commands,
+                "</data>",
+            ]
+        ),
+        "suggestions",
+        "lines COMMAND | LANGUAGE_CODE | TEMPLATE",
+        context,
+    )

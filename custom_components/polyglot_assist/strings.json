@@ -29,7 +29,9 @@
           "reload": "Reload matcher (re-read intents.yaml)",
           "chat_log": "Hits in conversation history",
           "source": "Intents source (YAML file or catalog)",
-          "translation": "Translation proposals (AI task)"
+          "translation": "Translation proposals (AI task)",
+          "languages": "Languages",
+          "answers": "Answer to commands (speech or tone)"
         }
       },
       "change_fallback": {
@@ -102,6 +104,20 @@
         "description": "AI Task entity that proposes sentences and names for other languages. Proposals are checked and only applied when you accept them. AI tasks with tools (an LLM API) are not allowed: sentences and device names are untrusted text for the model. Sentences and names are sent to this AI task — with a cloud provider they leave your home.",
         "data": {
           "translation_ai_task": "AI Task entity"
+        }
+      },
+      "languages": {
+        "title": "Languages",
+        "description": "The languages spoken in your home. Polyglot only listens for sentences in these languages.",
+        "data": {
+          "languages_enabled": "Languages"
+        }
+      },
+      "answers": {
+        "title": "Answer to commands",
+        "description": "Speech: e.g. \"Couch light on.\" Tone: a short sound instead (needs Polyglot TTS; with other TTS engines choose Speech). Only for commands marked as switching commands; questions are always spoken.",
+        "data": {
+          "response_mode": "Answer"
         }
       }
     },
@@ -185,6 +201,12 @@
         "ask": "Stop and ask me",
         "use_yaml": "Use the YAML file (export the catalog first)",
         "keep_other": "Keep the target as it is (export the catalog when leaving it)"
+      }
+    },
+    "response_mode": {
+      "options": {
+        "text": "Speech",
+        "chime": "Tone (Polyglot TTS)"
       }
     }
   },

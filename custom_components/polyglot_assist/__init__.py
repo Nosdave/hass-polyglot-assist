@@ -29,6 +29,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
     CONF_FALLBACK_AGENT,
+    CONF_LANGUAGES_ENABLED,
     DEFAULT_TESTS_FILE,
     DOMAIN,
     SERVICE_EXPORT_YAML,
@@ -40,6 +41,12 @@ from .const import (
     SERVICE_TEST_MATCH,
 )
 from .corpus import Case, parse_corpus, run_corpus
+from .actions import (
+    async_prepare_catalog_actions,
+    async_register_catalog_actions,
+    async_swap_catalog_actions,
+    async_unregister_catalog_actions,
+)
 from .chatlog import clear_tool_cache
 from .dynlists import DynamicLists
 from .loader import MatcherLoader
@@ -74,7 +81,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Build matcher from the active source (YAML file or catalog)
     try:
         matcher = await MatcherLoader.load_data(
-            hass, await source.async_load(), f"{source.kind}:{entry.title}"
+            hass, await source.async_load(), f"{source.kind}:{entry.title}",
+            entry.options.get(CONF_LANGUAGES_ENABLED) or None,
         )
     except Exception as err:  # noqa: BLE001 — surface to the user with a fix
         _LOGGER.exception("Failed to load Polyglot intents (%s)", source.kind)
@@ -94,7 +102,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     lists = DynamicLists(hass, matcher.config)
     lists.async_start()
+    actions = await async_register_catalog_actions(hass, matcher.config)
     hass.data[DOMAIN][entry.entry_id] = {
+        "actions": actions,
         "matcher": matcher,
         "lists": lists,
         "source": source,
@@ -107,6 +117,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except Exception:
         lists.async_stop()
+        async_unregister_catalog_actions(hass, actions)
         hass.data[DOMAIN].pop(entry.entry_id, None)
         raise
 
@@ -271,16 +282,21 @@ async def async_reload_entry_matcher(hass: HomeAssistant, data: dict) -> bool:
     generation = data["generation"] = data.get("generation", 0) + 1
     try:
         new_matcher = await MatcherLoader.load_data(
-            hass, await source.async_load(), f"{source.kind}:{entry.title}"
+            hass, await source.async_load(), f"{source.kind}:{entry.title}",
+            entry.options.get(CONF_LANGUAGES_ENABLED) or None,
         )
     except Exception:  # noqa: BLE001
         _LOGGER.exception("Reload failed for %s — keeping previous matcher", entry.entry_id)
         return False
     if data.get("generation") != generation:
         return False  # a newer reload started meanwhile; it wins
+    handlers = await async_prepare_catalog_actions(hass, new_matcher.config, data.get("actions", []))
+    if data.get("generation") != generation:
+        return False
     new_lists = DynamicLists(hass, new_matcher.config)
     new_lists.async_start()
     data["lists"].async_stop()
+    data["actions"] = async_swap_catalog_actions(hass, data.get("actions", []), handlers)
     data["matcher"] = new_matcher
     data["lists"] = new_lists
     clear_tool_cache()
@@ -302,6 +318,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data = hass.data[DOMAIN].pop(entry.entry_id, None)
         if data is not None:
             data["lists"].async_stop()
+            async_unregister_catalog_actions(hass, data.get("actions", []))
         # Last entry → unregister services
         if not hass.data[DOMAIN]:
             hass.services.async_remove(DOMAIN, SERVICE_RELOAD)

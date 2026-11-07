@@ -30,6 +30,20 @@ SAFETY_NORMAL: Final = "normal"
 SAFETY_SENSITIVE: Final = "sensitive"
 SAFETY_DISABLED: Final = "disabled"
 
+# Answer of a hit: speak the text (default) or a short tone (needs Polyglot TTS)
+CONF_RESPONSE_MODE: Final = "response_mode"
+RESPONSE_TEXT: Final = "text"
+RESPONSE_CHIME: Final = "chime"
+# Text sent to TTS instead of the answer; Polyglot TTS turns it into a tone
+CHIME_MARKER: Final = "[[polyglot:chime]]"
+# Languages this installation speaks (empty = all languages of the intents)
+CONF_LANGUAGES_ENABLED: Final = "languages_enabled"
+
+# Optional voice-flow monitoring (local log + daily evaluation by the AI task)
+CONF_MONITOR: Final = "monitor"
+CONF_MONITOR_TIME: Final = "monitor_time"
+DEFAULT_MONITOR_TIME: Final = "03:00"
+
 # Defaults
 DEFAULT_INTENTS_FILE: Final = "polyglot_assist/intents.yaml"
 DEFAULT_LANGUAGES: Final = ["de", "en", "fr"]

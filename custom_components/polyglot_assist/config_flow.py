@@ -35,6 +35,10 @@ from .const import (
     CONF_FALLBACK_AGENT,
     CONF_LANGUAGE_HINT,
     CONF_INTENTS_FILE,
+    CONF_LANGUAGES_ENABLED,
+    CONF_RESPONSE_MODE,
+    RESPONSE_CHIME,
+    RESPONSE_TEXT,
     CONF_SOURCE,
     CONF_TRANSLATION_AI_TASK,
     DEFAULT_INTENTS_FILE,
@@ -132,6 +136,8 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                 "chat_log": "Hits in conversation history",
                 "source": "Intents source (YAML file or catalog)",
                 "translation": "Translation proposals (AI task)",
+                "languages": "Languages",
+                "answers": "Answer to commands (speech or tone)",
                 "edit_visual": "Edit intents (visual)",
                 "edit_yaml": "Edit intents (YAML)",
                 "add_intent": "Add a new intent",
@@ -328,6 +334,52 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="translation", data_schema=schema, errors=errors)
+
+    # ─────────────────────────────────────────────────────────────────
+    # Languages and answer mode
+    # ─────────────────────────────────────────────────────────────────
+
+    async def async_step_languages(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        await self._ensure_loaded()
+        available = sorted(
+            {lang for c in (self._intents_data.get("intents") or {}).values() if isinstance(c, dict)
+             for lang in (c.get("sentences") or {})}
+        )
+        if user_input is not None:
+            chosen = [lang for lang in user_input.get(CONF_LANGUAGES_ENABLED, []) if lang in available]
+            new_options = {**self._entry.options, CONF_LANGUAGES_ENABLED: chosen}
+            self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+            await self.hass.config_entries.async_reload(self._entry.entry_id)
+            return self.async_create_entry(title="", data=new_options)
+        current = self._entry.options.get(CONF_LANGUAGES_ENABLED) or available
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_LANGUAGES_ENABLED, default=[l for l in current if l in available]): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=available, multiple=True)
+                ),
+            }
+        )
+        return self.async_show_form(step_id="languages", data_schema=schema)
+
+    async def async_step_answers(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            new_options = {**self._entry.options, CONF_RESPONSE_MODE: user_input[CONF_RESPONSE_MODE]}
+            self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+            return self.async_create_entry(title="", data=new_options)
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_RESPONSE_MODE, default=self._entry.options.get(CONF_RESPONSE_MODE, RESPONSE_TEXT)
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[RESPONSE_TEXT, RESPONSE_CHIME], translation_key="response_mode")
+                ),
+            }
+        )
+        return self.async_show_form(step_id="answers", data_schema=schema)
 
     # ─────────────────────────────────────────────────────────────────
     # Edit YAML (raw view)

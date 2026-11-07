@@ -7,6 +7,9 @@ test), sampling with shrunk lists, and capped path enumeration.
 """
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
 import math
 import re
 from typing import Any, Callable, Iterable
@@ -381,4 +384,148 @@ def check_name(name: Any, matches: Callable[[str], set[str]]) -> str | None:
         return "contains template characters"
     if matches(name):
         return "is itself a command"
+    return None
+
+
+# ── proposal operations (applied by the queue) ──────────────────────────────
+
+OPS = (
+    "add_intent", "add_sentences", "remove_sentences", "set_field",
+    "add_names", "remove_names", "set_list_value", "remove_list_value",
+)
+SETTABLE_FIELDS = ("category", "kind", "safety", "response_mode", "description", "llm_equivalent")
+ORIGINS = ("new_devices", "starter", "monitor", "translation", "manual")
+
+
+class QueueError(Exception):
+    """Proposal cannot be applied (message safe to show)."""
+
+
+def proposal_id(item: dict[str, Any]) -> str:
+    raw = json.dumps({k: item.get(k) for k in ("op", "payload")}, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()[:12]
+
+
+def _intent(data: dict[str, Any], name: str) -> dict[str, Any]:
+    intent_cfg = (data.get("intents") or {}).get(name)
+    if not isinstance(intent_cfg, dict):
+        raise QueueError(f"command {name} no longer exists")
+    return intent_cfg
+
+
+def apply_op(data: dict[str, Any], item: dict[str, Any]) -> None:
+    """Apply one proposal to an intents document (in place). Raises QueueError."""
+    op, p = item.get("op"), item.get("payload") or {}
+    if op == "add_intent":
+        intents = data.setdefault("intents", {})
+        if p["name"] in intents:
+            raise QueueError(f"a command named {p['name']} already exists")
+        intents[p["name"]] = copy.deepcopy(p["intent"])
+    elif op in ("add_sentences", "remove_sentences"):
+        sentences = _intent(data, p["intent"]).setdefault("sentences", {})
+        current = list(sentences.get(p["lang"]) or [])
+        if op == "add_sentences":
+            sentences[p["lang"]] = current + [s for s in p["sentences"] if s not in current]
+        else:
+            missing = [s for s in p["sentences"] if s not in current]
+            if missing:
+                raise QueueError(f"sentence {missing[0]!r} is no longer there")
+            sentences[p["lang"]] = [s for s in current if s not in p["sentences"]]
+            if not sentences[p["lang"]]:
+                del sentences[p["lang"]]
+    elif op == "set_field":
+        if p["field"] not in SETTABLE_FIELDS:
+            raise QueueError(f"field {p['field']} cannot be set by a proposal")
+        target = _intent(data, p["intent"])
+        if p.get("value") is None:
+            target.pop(p["field"], None)
+        else:
+            target[p["field"]] = copy.deepcopy(p["value"])
+        if p["field"] == "category" and p.get("value"):
+            cats = data.setdefault("categories", [])
+            if p["value"] not in cats:
+                cats.append(p["value"])
+    elif op in ("add_names", "remove_names"):
+        per_lang = data.setdefault("names", {}).setdefault(p["target"], {})
+        current = list(per_lang.get(p["lang"]) or [])
+        if op == "add_names":
+            per_lang[p["lang"]] = current + [n for n in p["names"] if n not in current]
+        else:
+            per_lang[p["lang"]] = [n for n in current if n not in p["names"]]
+            if not per_lang[p["lang"]]:
+                del per_lang[p["lang"]]
+            if not per_lang:
+                del data["names"][p["target"]]
+    elif op in ("set_list_value", "remove_list_value"):
+        lst = (data.get("lists") or {}).get(p["list"])
+        if not isinstance(lst, dict) or not isinstance(lst.get("values"), list):
+            raise QueueError(f"list {p['list']} has no editable values")
+        values = [v for v in lst["values"] if not (isinstance(v, dict) and v.get("in") == p["in"]) and v != p["in"]]
+        if op == "set_list_value":
+            values.append({"in": p["in"], "out": p["out"]})
+        elif len(values) == len(lst["values"]):
+            raise QueueError(f"{p['in']!r} is no longer in list {p['list']}")
+        lst["values"] = values
+    else:
+        raise QueueError(f"unknown proposal type {op}")
+
+
+
+
+# ── actions a proposal may bring along ──────────────────────────────────────
+# Proposals are generated (partly by an LLM). They may only carry simple,
+# harmless actions built from this allowlist; anything security-relevant
+# (locks, alarms, garage doors, valves, …) can only be created by hand.
+SAFE_ACTIONS = {
+    "script.turn_on", "scene.turn_on", "button.press", "input_button.press",
+    "light.turn_on", "light.turn_off", "light.toggle",
+    "switch.turn_on", "switch.turn_off", "switch.toggle",
+    "fan.turn_on", "fan.turn_off", "media_player.media_play", "media_player.media_pause",
+    "media_player.turn_on", "media_player.turn_off",
+}
+SENSITIVE_WORDS = ("lock", "alarm", "garage", "door", "tuer", "tür", "gate", "tor", "valve", "ventil", "safe")
+
+
+def check_action_safe(action: Any) -> str | None:
+    """None if ``action`` is a list of allowed one-entity steps, else the reason."""
+    steps = action if isinstance(action, list) else [action]
+    if not steps or len(steps) > 3:
+        return "a proposal may contain 1 to 3 simple steps"
+    for step in steps:
+        if not isinstance(step, dict) or set(step) - {"action", "target", "data"}:
+            return "only simple action steps are allowed in proposals"
+        service = step.get("action")
+        if service not in SAFE_ACTIONS:
+            return f"{service} cannot be created by a proposal — add it by hand"
+        target = step.get("target") or {}
+        entity = target.get("entity_id") if isinstance(target, dict) else None
+        if not isinstance(entity, str) or set(target) - {"entity_id"}:
+            return "a proposal step targets exactly one entity"
+        if any(word in entity.lower() for word in SENSITIVE_WORDS):
+            return f"{entity} looks security-relevant — add it by hand"
+        data = step.get("data") or {}
+        if not isinstance(data, dict) or any(not isinstance(v, (str, int, float, bool)) for v in data.values()):
+            return "step data must be simple values"
+        if any(isinstance(v, str) and ("{{" in v or "{%" in v) for v in data.values()):
+            return "templates are not allowed in proposal steps"
+    return None
+
+
+def check_item(item: dict[str, Any]) -> str | None:
+    """Static safety check of a queue item before it may be accepted."""
+    if item.get("op") == "add_intent":
+        intent = (item.get("payload") or {}).get("intent") or {}
+        if "action" in intent:
+            reason = check_action_safe(intent["action"])
+            if reason:
+                return reason
+        if intent.get("safety") not in (None, "normal", "sensitive", "disabled"):
+            return "invalid safety level"
+        for text in (intent.get("speech") or {}).values():
+            if not isinstance(text, str) or "{%" in text or len(text) > 200:
+                return "answers must be short plain text"
+    if item.get("op") == "set_field" and (item.get("payload") or {}).get("field") == "llm_equivalent":
+        value = (item.get("payload") or {}).get("value") or {}
+        if not isinstance(value, dict) or not isinstance(value.get("tool"), str):
+            return "invalid llm_equivalent"
     return None

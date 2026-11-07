@@ -1,6 +1,7 @@
 """Matcher regression tests (no Home Assistant needed: hassil + PyYAML only)."""
 from __future__ import annotations
 
+import copy
 import importlib.util
 import sys
 from pathlib import Path
@@ -345,3 +346,50 @@ def test_permutation_and_large_templates_are_bounded():
     big = " ".join("(" + "|".join(f"w{i}{j}" for j in range(10)) + ")" for i in range(4)) + " x"
     res = proposals.check_proposal("S", big, [], lambda _t: set(), lists)
     assert time.monotonic() - t < 2, res
+
+
+def test_categories_kind_response_mode():
+    data = {"categories": ["Licht", "Energie"],
+            "intents": {"A": {"category": "Licht", "kind": "command", "response_mode": "chime", "sentences": {"de": ["a"]}},
+                        "B": {"sentences": {"de": ["b"]}},
+                        "C": {"category": "Garten", "kind": "maybe", "sentences": {"de": ["c"]}}}}
+    problems = corpus.validate(data)
+    assert any("unknown category 'Garten'" in p for p in problems)
+    assert any("C: kind must be one of" in p for p in problems)
+    cats = corpus.count_summary(data)["categories"]
+    assert cats["Licht"] == ["A"] and cats["Sonstiges"] == ["B"] and cats["Energie"] == []
+
+
+def test_proposal_operations():
+    P = proposals
+    data = {"lists": {"raum": {"values": [{"in": "gang", "out": "light.gang_west"}]}},
+            "intents": {"A": {"sentences": {"de": ["a", "b"]}}}}
+    P.apply_op(data, {"op": "add_sentences", "payload": {"intent": "A", "lang": "fr", "sentences": ["x"]}})
+    P.apply_op(data, {"op": "remove_sentences", "payload": {"intent": "A", "lang": "de", "sentences": ["b"]}})
+    P.apply_op(data, {"op": "set_field", "payload": {"intent": "A", "field": "category", "value": "Licht"}})
+    P.apply_op(data, {"op": "set_list_value", "payload": {"list": "raum", "in": "gang", "out": "light.gang_ost"}})
+    P.apply_op(data, {"op": "add_names", "payload": {"target": "light.couch", "lang": "fr", "names": ["canapé"]}})
+    P.apply_op(data, {"op": "add_intent", "payload": {"name": "B", "intent": {"sentences": {"de": ["c"]}}}})
+    assert data["intents"]["A"]["sentences"] == {"de": ["a"], "fr": ["x"]}
+    assert data["categories"] == ["Licht"] and data["intents"]["A"]["category"] == "Licht"
+    assert data["lists"]["raum"]["values"] == [{"in": "gang", "out": "light.gang_ost"}]
+    assert data["names"]["light.couch"]["fr"] == ["canapé"]
+    for bad in ({"op": "remove_sentences", "payload": {"intent": "A", "lang": "de", "sentences": ["zzz"]}},
+                {"op": "add_intent", "payload": {"name": "A", "intent": {}}},
+                {"op": "set_field", "payload": {"intent": "A", "field": "action", "value": []}},
+                {"op": "add_sentences", "payload": {"intent": "Gone", "lang": "de", "sentences": ["x"]}}):
+        with pytest.raises(P.QueueError):
+            P.apply_op(copy.deepcopy(data), bad)
+    assert P.proposal_id({"op": "x", "payload": {"a": 1}}) == P.proposal_id({"op": "x", "payload": {"a": 1}, "origin": {}})
+
+
+def test_proposal_actions_are_restricted():
+    P = proposals
+    ok = [{"action": "script.turn_on", "target": {"entity_id": "script.movie_night"}}]
+    assert P.check_action_safe(ok) is None
+    assert P.check_action_safe([{"action": "lock.unlock", "target": {"entity_id": "lock.front"}}])
+    assert P.check_action_safe([{"action": "switch.turn_on", "target": {"entity_id": "switch.garage_door"}}])
+    assert P.check_action_safe([{"action": "light.turn_on", "target": {"area_id": "kitchen"}}])
+    assert P.check_action_safe([{"action": "light.turn_on", "target": {"entity_id": "light.a"}, "data": {"x": "{{ states('lock.a') }}"}}])
+    item = {"op": "add_intent", "payload": {"name": "X", "intent": {"action": [{"action": "cover.open_cover", "target": {"entity_id": "cover.x"}}]}}}
+    assert P.check_item(item)

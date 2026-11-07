@@ -49,7 +49,7 @@ class MatcherLoader:
 
     @staticmethod
     async def load_data(
-        hass: HomeAssistant, data: dict, origin: str
+        hass: HomeAssistant, data: dict, origin: str, languages: list[str] | None = None
     ) -> MultilangMatcher:
         """Build the matcher from parsed intents data (YAML file or catalog)."""
         if not data.get("intents"):
@@ -70,6 +70,8 @@ class MatcherLoader:
         # One Intents object per language; a broken language is skipped.
         result: dict[str, Intents] = {}
         for lang, intents_dict in bucket_by_language(data).items():
+            if languages and lang not in languages:
+                continue  # language switched off in the options
             payload = {"language": lang, "intents": intents_dict}
             if lists_section:
                 payload["lists"] = lists_section

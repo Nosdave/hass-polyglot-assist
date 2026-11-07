@@ -40,6 +40,10 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .chatlog import async_record_hit
 from .const import (
+    CHIME_MARKER,
+    CONF_RESPONSE_MODE,
+    RESPONSE_CHIME,
+    RESPONSE_TEXT,
     DEFAULT_LANGUAGES,
     CONF_CHAT_LOG_TOOLS,
     CONF_FALLBACK_AGENT,
@@ -146,7 +150,15 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                     "matched_sentence": match.matched_sentence,
                 },
             )
-            return await self._handle_match(match, user_input, chat_log, matcher.config)
+            result = await self._handle_match(match, user_input, chat_log, matcher.config)
+            if (monitor := runtime.get("monitor")) is not None:
+                monitor.async_record(
+                    text=user_input.text, lang=match.lang, result="hit", intent=match.intent_name,
+                    ms=round((time.perf_counter() - t0) * 1000.0, 1),
+                    error=result.response.response_type == intent.IntentResponseType.ERROR,
+                    device=user_input.device_id,
+                )
+            return result
 
         # Miss → proxy to fallback agent.
         t_miss_ms = (time.perf_counter() - t0) * 1000.0
@@ -154,7 +166,25 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             "Polyglot miss after %.1f ms — text=%r (lang_hint=%s) → proxy to %s",
             t_miss_ms, user_input.text, user_input.language, self._fallback_agent_id,
         )
-        return await self._proxy_to_fallback(user_input, t_miss_ms, chat_log, matcher.languages)
+        monitor = runtime.get("monitor")
+        before = len(chat_log.content)
+        result = await self._proxy_to_fallback(user_input, t_miss_ms, chat_log, matcher.languages)
+        if monitor is not None:
+            calls = [
+                {"tool": tc.tool_name, "args": tc.tool_args}
+                for content in chat_log.content[before:]
+                for tc in (getattr(content, "tool_calls", None) or [])
+                if not tc.external
+            ]
+            speech = result.response.speech.get("plain", {}).get("speech", "")
+            monitor.async_record(
+                text=user_input.text, lang=user_input.language, result="assistant",
+                targets=calls[:5], speech=speech[:200],
+                ms=round((time.perf_counter() - t0) * 1000.0, 1),
+                error=result.response.response_type == intent.IntentResponseType.ERROR,
+                device=user_input.device_id,
+            )
+        return result
 
     async def _handle_match(
         self,
@@ -216,9 +246,16 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         if not response.speech:
             response.async_set_speech("OK")
 
+        intent_cfg = (config.get("intents") or {}).get(match.intent_name)
+        intent_cfg = intent_cfg if isinstance(intent_cfg, dict) else {}
+        spoken = response.speech.get("plain", {}).get("speech", "")
+        if self._wants_chime(intent_cfg, response):
+            # Polyglot TTS turns the marker into a short tone; the real answer
+            # stays in the response data (and in the ChatLog record).
+            response.async_set_speech(CHIME_MARKER)
+
         if self._entry.options.get(CONF_CHAT_LOG_TOOLS, False):
-            intent_cfg = (config.get("intents") or {}).get(match.intent_name)
-            if isinstance(intent_cfg, dict):
+            if intent_cfg:
                 await async_record_hit(
                     self.hass,
                     user_input=user_input,
@@ -227,11 +264,23 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                     slots=slots,
                     response=response,
                     fallback_agent_id=self._fallback_agent_id,
+                    spoken=spoken,
                 )
 
         return ConversationResult(
             response=response,
             conversation_id=chat_log.conversation_id,
+        )
+
+    def _wants_chime(self, intent_cfg: dict[str, Any], response: intent.IntentResponse) -> bool:
+        """Tone only for successful commands — questions are always spoken."""
+        mode = intent_cfg.get("response_mode") or self._entry.options.get(
+            CONF_RESPONSE_MODE, RESPONSE_TEXT
+        )
+        return (
+            mode == RESPONSE_CHIME
+            and intent_cfg.get("kind") == "command"
+            and response.response_type == intent.IntentResponseType.ACTION_DONE
         )
 
     async def _proxy_to_fallback(
