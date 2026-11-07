@@ -320,6 +320,8 @@ def _n(text: Any) -> str:
     return " ".join(str(text).casefold().split())
 
 
+_SERVICE = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
+_OPAQUE = ("script", "scene", "automation", "homeassistant")
 _PLAIN_STEP_KEYS = {"action", "service", "target", "data", "entity_id", "alias", "metadata", "enabled", "continue_on_error"}
 _OTHER_TARGETS = ("area_id", "device_id", "floor_id", "label_id")
 
@@ -333,8 +335,10 @@ def _action_entities(action: Any) -> list[str] | None:
             continue  # skipped by the script runner
         if not isinstance(step, dict) or set(step) - _PLAIN_STEP_KEYS or step.get("enabled", True) is not True:
             return None
-        service = str(step.get("action") or step.get("service") or "")
-        if service.split(".", 1)[0] in ("script", "scene", "automation", "homeassistant"):
+        service = step.get("action") or step.get("service")
+        if not isinstance(service, str) or not _SERVICE.match(service):
+            return None  # templated or odd service name — what runs is not known statically
+        if service.split(".", 1)[0] in _OPAQUE:
             return None  # can do anything — not checkable here
         before = len(found)
         for container in (step, step.get("target") or {}, step.get("data") or {}):
@@ -344,6 +348,8 @@ def _action_entities(action: Any) -> list[str] | None:
             for v in value if isinstance(value, list) else ([value] if value is not None else []):
                 if not isinstance(v, str) or "{" in v or not _ENTITY_ID.match(v.strip()):
                     return None
+                if v.strip().split(".", 1)[0] in _OPAQUE:
+                    return None  # a script/scene/automation as target can do anything
                 found.append(v.strip())
         if len(found) == before:
             return None  # a service step without a named entity — not checkable
