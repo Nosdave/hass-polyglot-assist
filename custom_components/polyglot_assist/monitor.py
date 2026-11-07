@@ -188,6 +188,9 @@ def build_monitor_items(
         if len(parts) != 3:
             continue
         name, lang, template = parts
+        lang = lang.lower()
+        if not re.match(r"^[a-z]{2,3}(-[a-z]{2,4})?$", lang):
+            continue  # untrusted model output
         cfg = intents.get(name)
         if not isinstance(cfg, dict) or not template:
             continue

@@ -513,17 +513,24 @@ SAFE_ACTIONS = {
 }
 ENTITY_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 TARGET_KEYS = {"entity_id", "device_id", "area_id", "floor_id", "label_id"}
-# whole words (also between "_"), de/en/fr
+# Words for doors, gates, garages, locks, openers, alarms and cars (de/en/fr).
+# German compounds ("Gartentor", "Haustüröffner", "Kellertür", "Rolltor")
+# are caught as word parts; "tor" only when not part of Motor/Monitor/
+# Ventilator/Sektor …
 PROTECTED_WORDS = re.compile(
-    r"(^|[\W_])("
-    r"tür|tuer|türe|haustür|haustuer|eingangstür|tor|garagentor|garage|schloss|öffner|oeffner|summer|riegel|"
-    r"door|doors|gate|lock|unlock|opener|deadbolt|"
-    r"porte|portail|serrure|verrou|"
-    r"alarm|alarme|sirene|siren|"
-    r"auto|car|fahrzeug|vehicle|voiture|tesla|frunk|trunk|kofferraum|coffre|ladeklappe"
-    r")($|[\W_])",
+    r"tür|tuer|schloss|schlöss|garage|öffner|oeffner|riegel|"
+    r"(?<![aiouck])tor(e|en|s)?(?![a-zäöü])|(?<![a-zäöü])tor(?!te|tel|f|nad|nist)|"
+    r"door|(?<![a-z])gates?(?![a-z])|(?<![c])lock|unlock|opener|deadbolt|"
+    r"(?<![a-z])porte|portail|serrure|verrou|"
+    r"alarm|sirene|siren|"
+    r"(?<![a-z])(auto|car|cars|fahrzeug|vehicle|voiture|summer)(?![a-z])|"
+    r"tesla|frunk|(?<![a-z])trunk|kofferraum|(?<![a-z])coffre|ladeklappe",
     re.I,
 )
+
+
+def looks_protected(text: str) -> bool:
+    return bool(text) and PROTECTED_WORDS.search(text.replace("_", " ").replace("-", " ").lower()) is not None
 
 
 def check_action_safe(action: Any) -> str | None:
@@ -548,7 +555,7 @@ def check_action_safe(action: Any) -> str | None:
             return "a proposal step targets exactly one entity"
         if not ENTITY_RE.match(entity) or entity.split(".", 1)[0] != service.split(".", 1)[0]:
             return "the target must be one entity of the action's domain"
-        if PROTECTED_WORDS.search(entity.replace("-", " ")):
+        if looks_protected(entity):
             return f"{entity} looks security-relevant — add it by hand"
         data = step.get("data") or {}
         if not isinstance(data, dict) or set(data) & TARGET_KEYS:
@@ -560,8 +567,20 @@ def check_action_safe(action: Any) -> str | None:
     return None
 
 
+_LANG = re.compile(r"^[a-z]{2,3}(-[a-z]{2,4})?$")
+
+
 def check_item(item: dict[str, Any]) -> str | None:
     """Static safety check of a queue item before it may be accepted."""
+    p = item.get("payload") or {}
+    if "lang" in p and (not isinstance(p["lang"], str) or not _LANG.match(p["lang"])):
+        return "invalid language code"
+    if item.get("op") in ("add_names", "remove_names") and not re.match(r"^[a-z_]+\.[a-z0-9_]+$", str(p.get("target", ""))):
+        return "invalid name target"
+    if item.get("op") == "add_intent":
+        for lang in ((p.get("intent") or {}).get("sentences") or {}):
+            if not isinstance(lang, str) or not _LANG.match(lang):
+                return "invalid language code"
     if item.get("op") == "add_intent":
         intent = (item.get("payload") or {}).get("intent") or {}
         if "action" in intent:

@@ -23,6 +23,7 @@ from hassil.intents import Intents, SlotList, TextSlotList
 from hassil.parse_expression import parse_sentence
 from hassil.util import remove_punctuation
 
+LANG_CODE_RE = re.compile(r"^[a-z]{2,3}(-[a-z]{2,4})?$")
 _TARGET_RE = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 # {list} or {list:slot}
 _LIST_REF = re.compile(r"(?<!\{)\{([^{}:]+)(?::[^{}]+)?\}(?!\})")
@@ -124,6 +125,9 @@ def bucket_by_language(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
         if not isinstance(sentences, dict):
             continue
         for lang, sent_list in sentences.items():
+            if not isinstance(lang, str) or not LANG_CODE_RE.match(lang):
+                problems.append(f"{name}: invalid language code {lang!r}")
+                continue
             if isinstance(sent_list, str):
                 continue  # list("abc") would split into letters; validate() reports it
             per_lang.setdefault(lang, {})[intent_name] = {
@@ -223,6 +227,9 @@ def validate(
             if not _TARGET_RE.match(str(target)):
                 problems.append(f"names.{target}: use a lowercase entity_id or area.<area_id>")
             for lang, values in per_lang.items():
+                if not isinstance(lang, str) or not LANG_CODE_RE.match(lang):
+                    problems.append(f"names.{target}: invalid language code {lang!r}")
+                    continue
                 for value in values if isinstance(values, list) else [values]:
                     if not isinstance(value, str):
                         problems.append(f"names.{target}.{lang}: {value!r} is not text")
@@ -267,6 +274,9 @@ def validate(
             problems.append(f"{name}: no sentences")
             continue
         for lang, sent_list in sentences.items():
+            if not isinstance(lang, str) or not LANG_CODE_RE.match(lang):
+                problems.append(f"{name}: invalid language code {lang!r}")
+                continue
             if isinstance(sent_list, str):
                 problems.append(f"{name}/{lang}: sentences must be a list, not a string")
                 continue

@@ -42,6 +42,15 @@ ALLOWED_INTENTS = {
     "HassSetVolume", "HassSetVolumeRelative", "HassClimateGetTemperature",
     "HassClimateSetTemperature", "HassFanSetSpeed",
 }
+INTENT_DOMAINS = {
+    "HassLightSet": ["light"],
+    "HassSetPosition": ["cover", "valve"],
+    "HassMediaPause": ["media_player"], "HassMediaUnpause": ["media_player"],
+    "HassMediaNext": ["media_player"], "HassMediaPrevious": ["media_player"],
+    "HassSetVolume": ["media_player"], "HassSetVolumeRelative": ["media_player"],
+    "HassClimateGetTemperature": ["climate"], "HassClimateSetTemperature": ["climate"],
+    "HassFanSetSpeed": ["fan"],
+}
 WILDCARD_OK = {"HassShoppingListAddItem", "HassListAddItem"}
 BLOCKED_DOMAINS = {"lock", "alarm_control_panel", "valve", "siren", "camera"}
 BLOCKED_COVER_CLASSES = {"garage", "door", "gate"}
@@ -207,11 +216,14 @@ def check_targets(
 
     if not any(_val(k) for k in ("name", "area", "floor", "domain", "device_class")):
         return None  # timers, time, weather, shopping list: no device targets
+    # the domains the handler can touch at all (so a protected lamp in the
+    # room does not block "pause the music")
+    implied = INTENT_DOMAINS.get(result.intent.name)
     constraints = intent.MatchTargetsConstraints(
         name=_val("name"),
         area_name=_val("area"),
         floor_name=_val("floor"),
-        domains=_list(_val("domain")),
+        domains=_list(_val("domain")) or implied,
         device_classes=_list(_val("device_class")),
         assistant="conversation",
         allow_duplicate_names=True,

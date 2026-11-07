@@ -341,7 +341,17 @@ alarms, valves, sirens, cameras, scripts, scenes, buttons, covers that are not
 clearly window coverings, anything whose name, alias, room or device mentions
 doors, gates, garages, locks, openers, alarms or cars (de/en/fr), and anything
 a command marked *security-relevant* or *off* uses. This is deliberately
-cautious: even a lamp named "Garage" is left to the assistant. Area-only
+cautious: even a lamp named "Garage" or anything with "Auto" in its name is
+left to the assistant. German compounds are covered ("Gartentor",
+"Haustüröffner", "Kellertür", "Rolltor"); a gate whose name contains a window
+word and that has no device class cannot be recognised — give such covers the
+device class `gate` or `garage`.
+
+Proposals may only bring simple actions: a script is accepted only if every
+step is a static service call on plain entity ids (no templates, no area/
+device/floor/label targets, no device actions, no conditions) and every entity
+it touches — recursively through called scripts and scenes — passes the same
+protection check; otherwise it has to be added by hand. Area-only
 switching and free-text timer names are not handled this way either.
 
 ## Answer as a tone

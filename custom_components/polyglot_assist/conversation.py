@@ -143,8 +143,10 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         if runtime is None:  # entry is (re)loading — never drop the request
             return await self._proxy_to_fallback(user_input, 0.0, chat_log, [])
         matcher: MultilangMatcher = runtime["matcher"]
+        original_input = user_input
         latin = transliterate_cyrillic(user_input.text, matcher.languages)
         if latin is not None:
+            # only for matching; the assistant gets what was really recognised
             _LOGGER.debug("Polyglot: Cyrillic speech-to-text %r → %r", user_input.text, latin)
             user_input = dataclasses.replace(user_input, text=latin)
         slot_lists = runtime["lists"].async_get()
@@ -197,7 +199,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         monitor = runtime.get("monitor")
         before = len(chat_log.content)
         # same conversation as ours, so the fallback continues THIS ChatLog
-        user_input = dataclasses.replace(user_input, conversation_id=chat_log.conversation_id)
+        user_input = dataclasses.replace(original_input, conversation_id=chat_log.conversation_id)
         result = await self._proxy_to_fallback(user_input, t_miss_ms, chat_log, matcher.languages)
         if monitor is not None:
             calls = [
@@ -349,7 +351,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                 # nothing ran yet → let the assistant handle it
                 _LOGGER.debug("Polyglot built-in %s not usable: %s", result.intent.name, err)
                 return None
-            except (intent.IntentHandleError, TemplateError) as err:
+            except (intent.IntentHandleError, intent.IntentUnexpectedError, TemplateError) as err:
                 # the action may have run → answer with an error, never run it twice
                 _LOGGER.warning("Polyglot built-in %s failed: %s", result.intent.name, err)
                 response = intent.IntentResponse(language=lang)

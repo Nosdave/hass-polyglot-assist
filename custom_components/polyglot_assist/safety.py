@@ -26,7 +26,7 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from .proposals import PROTECTED_WORDS  # one word list for built-in path and proposals
+from .proposals import looks_protected  # one word list for built-in path and proposals
 
 PROTECTED_DOMAINS = {
     "lock", "alarm_control_panel", "valve", "siren", "camera",
@@ -75,15 +75,16 @@ def protected_reason(
     if state is None:
         return "unknown entity"
     texts = _texts_of(hass, state, extra_names or {})
+    # names first: a "Rolltor" with device class shutter is still a gate
+    for text in texts:
+        if looks_protected(text):
+            return f"looks security-relevant ({text})"
     if domain == "cover":
         device_class = state.attributes.get("device_class")
         if device_class not in SAFE_COVER_CLASSES and not (
             device_class is None and any(WINDOW_WORDS.search(t) for t in texts)
         ):
             return "cover that is not clearly a window covering"
-    for text in texts:
-        if PROTECTED_WORDS.search(text.replace("-", " ")):
-            return f"looks security-relevant ({text})"
     return None
 
 
@@ -108,27 +109,108 @@ def sensitive_entities(config: dict[str, Any]) -> set[str]:
     return out
 
 
-def script_or_scene_entities(hass: HomeAssistant, entity_id: str, _depth: int = 0) -> set[str]:
-    """Entities a script/scene would touch (recursively), best effort."""
-    if _depth > 3:
-        return set()
-    domain = entity_id.split(".", 1)[0]
-    found: set[str] = set()
-    try:
-        if domain == "script":
-            from homeassistant.components.script import entities_in_script  # noqa: PLC0415
+SCRIPT_SERVICE_DOMAINS = {
+    "light", "switch", "fan", "media_player", "cover", "climate", "input_boolean",
+    "input_number", "input_select", "input_text", "number", "select", "scene", "script",
+    "tts", "notify", "persistent_notification", "timer", "counter", "vacuum", "humidifier",
+}
+_ENTITY = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+_TARGET_KEYS = ("area_id", "device_id", "floor_id", "label_id")
 
-            found = set(entities_in_script(hass, entity_id))
-        elif domain == "scene":
-            from homeassistant.components.homeassistant.scene import entities_in_scene  # noqa: PLC0415
 
-            found = set(entities_in_scene(hass, entity_id))
-    except Exception:  # noqa: BLE001
-        return {"<unknown>"}
-    for inner in list(found):
-        if inner.split(".", 1)[0] in ("script", "scene"):
-            found |= script_or_scene_entities(hass, inner, _depth + 1)
+def _contains(obj: Any, keys: tuple[str, ...]) -> bool:
+    if isinstance(obj, dict):
+        return any(k in keys or _contains(v, keys) for k, v in obj.items())
+    if isinstance(obj, list):
+        return any(_contains(v, keys) for v in obj)
+    return False
+
+
+def _has_template(obj: Any) -> bool:
+    if isinstance(obj, str):
+        return "{{" in obj or "{%" in obj
+    if isinstance(obj, dict):
+        return any(_has_template(v) for v in obj.values())
+    if isinstance(obj, list):
+        return any(_has_template(v) for v in obj)
+    return False
+
+
+def _entities_of(step: dict[str, Any]) -> list[str] | None:
+    """Literal entity ids of a service step, None if not literal."""
+    found: list[str] = []
+    for container in (step, step.get("target") or {}, step.get("data") or {}):
+        if not isinstance(container, dict) or "entity_id" not in container:
+            continue
+        value = container["entity_id"]
+        values = value if isinstance(value, list) else [value]
+        for v in values:
+            if not isinstance(v, str) or not _ENTITY.match(v.strip()):
+                return None
+            found.append(v.strip())
     return found
+
+
+def script_reason(
+    hass: HomeAssistant, entity_id: str, *, sensitive: set[str], extra_names: dict[str, list[str]],
+    _depth: int = 0,
+) -> str | None:
+    """None if a script only runs simple, static, harmless service calls."""
+    if _depth > 3:
+        return "scripts nested too deeply — add it by hand"
+    component = hass.data.get("script")
+    entity = component.get_entity(entity_id) if component is not None and hasattr(component, "get_entity") else None
+    raw = getattr(entity, "raw_config", None)
+    if not isinstance(raw, dict) or not isinstance(raw.get("sequence"), list):
+        return f"cannot inspect what {entity_id} does — add it by hand"
+    for step in raw["sequence"]:
+        if not isinstance(step, dict):
+            return f"{entity_id}: unknown step — add it by hand"
+        keys = set(step) - {"alias", "enabled", "continue_on_error", "response_variable"}
+        if keys <= {"delay"} and not _has_template(step):
+            continue
+        service = step.get("action", step.get("service"))
+        if not isinstance(service, str) or keys - {"action", "service", "target", "data", "entity_id", "metadata"}:
+            return f"{entity_id} has conditions, branches or device actions — add it by hand"
+        if _has_template(step) or "{" in service:
+            return f"{entity_id} uses templates — add it by hand"
+        if _contains(step, _TARGET_KEYS):
+            return f"{entity_id} targets areas/devices/floors/labels — add it by hand"
+        domain = service.split(".", 1)[0]
+        if domain not in SCRIPT_SERVICE_DOMAINS:
+            return f"{entity_id} calls {service} — add it by hand"
+        entities = _entities_of(step)
+        if entities is None:
+            return f"{entity_id}: targets are not plain entity ids — add it by hand"
+        if domain == "script" and service not in ("script.turn_on", "script.turn_off", "script.toggle"):
+            entities = [service]  # script.<name> called as an action
+        for inner in entities:
+            inner_domain = inner.split(".", 1)[0]
+            if inner_domain == "script":
+                reason = script_reason(hass, inner, sensitive=sensitive, extra_names=extra_names, _depth=_depth + 1)
+            elif inner_domain == "scene":
+                reason = scene_reason(hass, inner, sensitive=sensitive, extra_names=extra_names)
+            else:
+                reason = protected_reason(hass, inner, sensitive_entities=sensitive, extra_names=extra_names)
+            if reason:
+                return f"{entity_id} → {inner}: {reason}"
+    return None
+
+
+def scene_reason(hass: HomeAssistant, entity_id: str, *, sensitive: set[str], extra_names: dict[str, list[str]]) -> str | None:
+    try:
+        from homeassistant.components.homeassistant.scene import entities_in_scene  # noqa: PLC0415
+
+        touched = entities_in_scene(hass, entity_id)
+    except Exception:  # noqa: BLE001
+        return f"cannot inspect what {entity_id} does — add it by hand"
+    if not touched:
+        return f"cannot inspect what {entity_id} does — add it by hand"
+    for inner in touched:
+        reason = protected_reason(hass, inner, sensitive_entities=sensitive, extra_names=extra_names)
+        if reason:
+            return f"{entity_id} → {inner}: {reason}"
+    return None
 
 
 def action_target_reason(
@@ -137,29 +219,23 @@ def action_target_reason(
     """For PROPOSALS: scripts/scenes are allowed only if everything they touch is harmless."""
     domain = entity_id.split(".", 1)[0]
     if domain in ("script", "scene"):
-        if hass.states.get(entity_id) is None:
+        state = hass.states.get(entity_id)
+        if state is None:
             return "unknown entity"
         if entity_id in sensitive:
             return "used by a command marked security-relevant or switched off"
-        for text in _texts_of(hass, hass.states.get(entity_id), extra_names):
-            if PROTECTED_WORDS.search(text.replace("-", " ")):
+        for text in _texts_of(hass, state, extra_names):
+            if looks_protected(text):
                 return f"looks security-relevant ({text})"
-        touched = script_or_scene_entities(hass, entity_id)
-        if "<unknown>" in touched:
-            return f"cannot inspect what {entity_id} does — add it by hand"
-        for inner in touched:
-            if inner.split(".", 1)[0] in ("script", "scene"):
-                continue
-            reason = protected_reason(hass, inner, sensitive_entities=sensitive, extra_names=extra_names)
-            if reason:
-                return f"{entity_id} touches {inner}: {reason}"
-        return None
+        if domain == "script":
+            return script_reason(hass, entity_id, sensitive=sensitive, extra_names=extra_names)
+        return scene_reason(hass, entity_id, sensitive=sensitive, extra_names=extra_names)
     if domain in ("button", "input_button"):
         state = hass.states.get(entity_id)
         if state is None:
             return "unknown entity"
         for text in _texts_of(hass, state, extra_names):
-            if PROTECTED_WORDS.search(text.replace("-", " ")):
+            if looks_protected(text):
                 return f"looks security-relevant ({text})"
         return None
     return protected_reason(hass, entity_id, sensitive_entities=sensitive, extra_names=extra_names)

@@ -147,7 +147,7 @@ class PolyglotAssistPanel extends HTMLElement {
     const o = this.s.overview;
     const nProps = (this.s.proposals || []).length;
     const tabs = Object.entries(L.tabs).map(([k, v]) => `<button data-act="tab" data-v="${k}" ${this.s.view === k ? 'aria-current="page"' : ""}>${v}${k === "proposals" && nProps ? ` <span class="chip pri">${nProps}</span>` : ""}</button>`).join("");
-    const langs = o ? o.languages.map((l) => LANG_NAMES[l] || l).join(" · ") : "";
+    const langs = o ? o.languages.map((l) => esc(LANG_NAMES[l] || l)).join(" · ") : "";
     let body = `<div class="loading">Lädt …</div>`;
     if (this.s.error) body = `<div class="card"><div class="banner err">Polyglot antwortet nicht: ${esc(this.s.error)}</div><p class="hint">Ist die Integration geladen? Einstellungen → Geräte &amp; Dienste → Polyglot Assist.</p></div>`;
     else if (o) body = this[`_v_${this.s.view}`]();
@@ -226,7 +226,7 @@ class PolyglotAssistPanel extends HTMLElement {
     const cats = [...new Set([...(o.categories || []), ...Object.values(o.intents).map((m) => m.category).filter(Boolean), "Sonstiges"])];
     const row = ([n, m]) => {
       const max = Math.max(1, ...langs.map((l) => m.sentences[l] || 0));
-      const cov = langs.map((l) => { const c = m.sentences[l] || 0; return `${l.toUpperCase()} <span class="lang ${c === 0 ? "err" : c < Math.max(2, max * 0.5) ? "warn" : "ok"}">${c}</span>`; }).join(" ");
+      const cov = langs.map((l) => { const c = m.sentences[l] || 0; return `${esc(l.toUpperCase())} <span class="lang ${c === 0 ? "err" : c < Math.max(2, max * 0.5) ? "warn" : "ok"}">${c}</span>`; }).join(" ");
       return `<tr class="click" data-act="open" data-name="${esc(n)}"><td><div class="name">${esc(n)}</div><div class="desc">${esc(m.description)}</div></td><td>${cov}</td>
         <td><select data-act="safety" data-name="${esc(n)}" aria-label="Schutz">${Object.entries(SAFETY).map(([k, v]) => `<option value="${k}" ${m.safety === k ? "selected" : ""}>${v}</option>`).join("")}</select></td>
         <td style="text-align:right">${m.hits || "–"}</td></tr>`;
@@ -267,7 +267,7 @@ class PolyglotAssistPanel extends HTMLElement {
     return `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(name)}</h2><button class="b" data-act="close">Schließen</button></div>
       <p class="hint">${esc(intent.description || "")}</p>
       ${intent.safety === "sensitive" ? `<div class="banner warn">Sicherheitsrelevanter Befehl: Änderungen bitte genau prüfen.</div>` : ""}
-      <div class="row" style="margin:10px 0">${langs.map((l) => `<button class="b" data-act="elang" data-l="${l}" aria-pressed="${l === lang}" style="${l === lang ? "border-color:var(--primary-color)" : ""}">${LANG_NAMES[l] || l} · ${((intent.sentences || {})[l] || []).length}</button>`).join("")}</div>
+      <div class="row" style="margin:10px 0">${langs.map((l) => `<button class="b" data-act="elang" data-l="${esc(l)}" aria-pressed="${l === lang}" style="${l === lang ? "border-color:var(--primary-color)" : ""}">${esc(LANG_NAMES[l] || l)} · ${((intent.sentences || {})[l] || []).length}</button>`).join("")}</div>
       <textarea id="esents" aria-label="Sätze, einer pro Zeile">${esc(sents)}</textarea>
       <p class="hint">${esc(TIPS.syntax)}</p>
       <div class="row">
@@ -276,8 +276,8 @@ class PolyglotAssistPanel extends HTMLElement {
         <label class="hint">Antwort <select id="eresp"><option value="">wie eingestellt</option><option value="text" ${intent.response_mode === "text" ? "selected" : ""}>Sprechen</option><option value="chime" ${intent.response_mode === "chime" ? "selected" : ""}>Ton</option></select></label>${tip("answer")}
         <label class="hint">Schutz <select id="esafety">${Object.entries(SAFETY).map(([k, v]) => `<option value="${k}" ${(intent.safety || "normal") === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>${tip("safety")}
       </div>
-      <div class="row" style="margin-top:12px"><button class="b p" data-act="esave" data-name="${esc(name)}" data-lang="${lang}" ${ro ? "disabled" : ""}>Speichern</button>
-        ${missing.length ? `<button class="b" data-act="etrans" data-name="${esc(name)}" data-langs="${missing.join(",")}">Übersetzen nach ${missing.map((l) => LANG_NAMES[l] || l).join(", ")}</button>` : `<button class="b" data-act="etrans" data-name="${esc(name)}" data-langs="${langs.filter((l) => l !== lang).join(",")}">Mehr Varianten vorschlagen</button>`}
+      <div class="row" style="margin-top:12px"><button class="b p" data-act="esave" data-name="${esc(name)}" data-lang="${esc(lang)}" ${ro ? "disabled" : ""}>Speichern</button>
+        ${missing.length ? `<button class="b" data-act="etrans" data-name="${esc(name)}" data-langs="${esc(missing.join(","))}">Übersetzen nach ${esc(missing.map((l) => LANG_NAMES[l] || l).join(", "))}</button>` : `<button class="b" data-act="etrans" data-name="${esc(name)}" data-langs="${esc(langs.filter((l) => l !== lang).join(","))}">Mehr Varianten vorschlagen</button>`}
         <button class="b" data-act="edel" data-name="${esc(name)}" ${ro ? "disabled" : ""}>Löschen</button>
         ${ro ? `<span class="hint">Zum Bearbeiten im Panel unter Einstellungen die Quelle „Katalog“ wählen.</span>` : ""}</div>
       ${this.s.confirmDelete === name ? `<div class="banner err" style="margin-top:10px">„${esc(name)}“ wirklich löschen? Er ist danach nicht mehr verfügbar. <button class="b" data-act="edelyes" data-name="${esc(name)}">Ja, löschen</button> <button class="b" data-act="edelno">Abbrechen</button></div>` : ""}
@@ -291,7 +291,7 @@ class PolyglotAssistPanel extends HTMLElement {
     const c = this.s.corpus;
     return `<section class="grid two"><div class="card"><h2>Satz ausprobieren${tip("test")}</h2>
       <div class="row"><input type="text" id="tin" value="${esc(this.s.testText || "")}" placeholder="z. B. Schalt die Küchendecke aus" style="flex:1;min-width:0" aria-label="Testsatz">
-      <select id="tlang" aria-label="Sprache der Pipeline">${this.s.overview.languages.map((l) => `<option value="${l}">${LANG_NAMES[l] || l}</option>`).join("")}</select>
+      <select id="tlang" aria-label="Sprache der Pipeline">${this.s.overview.languages.map((l) => `<option value="${esc(l)}">${esc(LANG_NAMES[l] || l)}</option>`).join("")}</select>
       <button class="b p" data-act="test">Ausprobieren</button></div><div class="msg">${res}</div></div>
       <div class="card"><h2>Prüfsätze${tip("corpus")}</h2>
       ${c ? (c.error ? `<div class="banner err">${esc(c.error)}</div>` : `<div class="banner ${c.failed.length ? "warn" : "ok"}">${c.passed} von ${c.total} Sätzen wie erwartet</div>${c.failed.slice(0, 8).map((f) => `<div class="hint mono">„${esc(f.text)}“: erwartet ${esc(f.expected.intent)}, erkannt ${esc((f.got || {}).intent)}</div>`).join("")}`) : `<p class="hint">Noch nicht geprüft.</p>`}
@@ -308,14 +308,14 @@ class PolyglotAssistPanel extends HTMLElement {
     const rows = targets.map(([id, label, kind]) => `<tr><td><span class="name">${esc(label)}</span><div class="desc">${esc(kind)}</div></td>${langs.map((l) => {
       const cur = ((names[id] || {})[l] || []).join(", ");
       const s = (sugg[id] || {})[l];
-      const sHtml = Array.isArray(s) ? s.filter((x) => x.status === "ok").map((x) => `<button class="b" data-act="nadd" data-t="${esc(id)}" data-l="${l}" data-n="${esc(x.name)}" style="padding:2px 8px;margin-top:4px">+ ${esc(x.name)}</button>`).join(" ") : "";
-      return `<td><input type="text" data-name-t="${esc(id)}" data-name-l="${l}" value="${esc(cur)}" aria-label="${esc(label)} ${l}" ${ro ? "disabled" : ""} style="width:100%">${sHtml}</td>`;
+      const sHtml = Array.isArray(s) ? s.filter((x) => x.status === "ok").map((x) => `<button class="b" data-act="nadd" data-t="${esc(id)}" data-l="${esc(l)}" data-n="${esc(x.name)}" style="padding:2px 8px;margin-top:4px">+ ${esc(x.name)}</button>`).join(" ") : "";
+      return `<td><input type="text" data-name-t="${esc(id)}" data-name-l="${esc(l)}" value="${esc(cur)}" aria-label="${esc(label)} ${esc(l)}" ${ro ? "disabled" : ""} style="width:100%">${sHtml}</td>`;
     }).join("")}</tr>`).join("");
     return `<section class="grid"><div class="card"><h2>Namen in jeder Sprache${tip("names")}</h2>
       <div class="row"><input type="text" id="newtarget" placeholder="Gerät hinzufügen, z. B. light.couch" aria-label="Gerät"><button class="b" data-act="ntarget">Hinzufügen</button>
       <button class="b" data-act="nsugg" style="margin-left:auto">Lücken vorschlagen lassen</button></div>${this._msg("names")}
       <p class="hint">Mehrere Namen mit Komma trennen. Gespeichert wird beim Verlassen des Feldes.</p>
-      <div class="tbl"><table><thead><tr><th>Raum / Gerät</th>${langs.map((l) => `<th>${LANG_NAMES[l] || l}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></div></section>`;
+      <div class="tbl"><table><thead><tr><th>Raum / Gerät</th>${langs.map((l) => `<th>${esc(LANG_NAMES[l] || l)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></div></section>`;
   }
 
   _v_monitor() {
@@ -343,7 +343,7 @@ class PolyglotAssistPanel extends HTMLElement {
     const mode = opts.response_mode || "text";
     return `<section class="grid two"><div class="card"><h2>Einstellungen</h2>
       <div class="set"><div><div class="t">Sprachen${tip("languages")}</div>
-        <div class="langs" style="margin-top:6px">${available.map((l) => `<label><input type="checkbox" data-lang-opt="${l}" ${enabled.includes(l) ? "checked" : ""}> ${LANG_NAMES[l] || l}</label>`).join("")}</div>
+        <div class="langs" style="margin-top:6px">${available.map((l) => `<label><input type="checkbox" data-lang-opt="${esc(l)}" ${enabled.includes(l) ? "checked" : ""}> ${esc(LANG_NAMES[l] || l)}</label>`).join("")}</div>
         <div class="row" style="margin-top:8px"><button class="b" data-act="langsave">Sprachen speichern</button><button class="b" data-act="langsugg">Welche Sprachen kann meine KI?</button></div>
         ${this.s.langSugg ? `<p class="hint">Deine KI nennt: ${esc(this.s.langSugg.map((l) => LANG_NAMES[l] || l).join(", "))}. Für neue Sprachen schlägt „Übersetzen“ im Befehl Sätze vor.</p>` : ""}</div><span></span></div>
       <div class="set"><div><div class="t">Bestätigung bei Schaltbefehlen${tip("answer")}</div></div>
