@@ -29,7 +29,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .corpus import bucket_by_language, string_rules
-from .proposals import _list_refs, bounded_samples, check_proposal, norm, parse_rules
+from .proposals import bounded_samples, check_proposal, norm, parse_rules
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -211,6 +211,24 @@ def _other_samples(config: dict[str, Any], slot_lists: dict, parsed_rules: dict,
     return out
 
 
+def _all_list_refs(expr: Any, parsed_rules: dict, _depth: int = 0) -> list[str]:
+    """List references of a sentence, following referenced <rules> (bounded)."""
+    from hassil.expression import ListReference, RuleReference, Sentence  # noqa: PLC0415
+
+    if expr is None or _depth > 10:
+        return []
+    if isinstance(expr, Sentence):
+        return _all_list_refs(expr.expression, parsed_rules, _depth + 1)
+    if isinstance(expr, ListReference):
+        return [expr.list_name]
+    if isinstance(expr, RuleReference):
+        return _all_list_refs(parsed_rules.get(expr.rule_name), parsed_rules, _depth + 1)
+    out: list[str] = []
+    for item in getattr(expr, "items", None) or []:
+        out += _all_list_refs(item, parsed_rules, _depth + 1)
+    return out
+
+
 def _template_matches(template: str, lang: str, text: str, slot_lists: dict, rules: dict[str, str]) -> bool:
     """Does the template itself recognise ``text`` (the sentence actually spoken)?"""
     from hassil.intents import Intents  # noqa: PLC0415
@@ -239,11 +257,12 @@ def _harden(check: dict[str, Any], *, name: str, cfg: dict[str, Any], template: 
         parsed = parse_sentence(template)
     except Exception:  # noqa: BLE001
         return fail("not parsable")
-    if any(isinstance(slot_lists.get(r), WildcardSlotList) for r in _list_refs(parsed)):
+    if any(isinstance(slot_lists.get(r), WildcardSlotList) for r in _all_list_refs(parsed, parse_rules(rules))):
         return fail("free-text placeholders are not allowed in learned sentences")
-    # bound to the evidence: the template must recognise a sentence that was really said
-    spoken = [e["text"] for e in evidence if e.get("text")]
-    if spoken and not any(_template_matches(template, lang, t, slot_lists, rules) for t in spoken):
+    # bound to the evidence: the template must recognise a sentence that was really said,
+    # and only THOSE sentences count for the target check below
+    evidence = [e for e in evidence if e.get("text") and _template_matches(template, lang, e["text"], slot_lists, rules)]
+    if not evidence:
         return fail("does not match the sentences that were actually said")
     # must not take over Home Assistant's built-in commands
     if builtin_match is not None:
