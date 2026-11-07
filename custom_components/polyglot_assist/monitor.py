@@ -278,10 +278,13 @@ def _harden(check: dict[str, Any], *, name: str, cfg: dict[str, Any], template: 
         return warn("what this command switches is not known (intent_script) — review it")
     entities = _action_entities(cfg.get("action"))
     if entities is None:
-        return warn("the command's target comes from a placeholder or template — review it")
+        return warn("the command's targets cannot be fully checked (template, nested steps or area/device targets) — review it")
     if not entities:
         return warn("the command names no device (e.g. it runs a script) — review it")
-    said = {_n(v) for e in evidence for t in (e.get("targets") or []) for v in _target_values(t.get("args"))}
+    calls = [t.get("args") for e in evidence for t in (e.get("targets") or [])]
+    said = {_n(v) for args in calls for v in _target_values(args)}
+    if any(_area_only(args) for args in calls):
+        return warn("the assistant switched a whole area or floor — review which devices it means")
     if entities and said and names_of is not None:
         # EVERY target of the command must be one the assistant switched for these sentences
         # (complete names / ids only — "couch" is not "couch strip")
@@ -297,19 +300,37 @@ def _n(text: Any) -> str:
     return " ".join(str(text).casefold().split())
 
 
+_PLAIN_STEP_KEYS = {"action", "service", "target", "data", "entity_id", "alias", "metadata", "enabled", "continue_on_error"}
+_OTHER_TARGETS = ("area_id", "device_id", "floor_id", "label_id")
+
+
 def _action_entities(action: Any) -> list[str] | None:
-    """Plain entity ids in target/data entity_id of the steps; None if any is templated."""
+    """Plain entity ids of plain service steps; None if anything cannot be fully inspected
+    (templates, nested blocks such as parallel/choose, area/device/floor/label targets)."""
     found: list[str] = []
     for step in action if isinstance(action, list) else [action]:
-        if not isinstance(step, dict):
-            continue
+        if not isinstance(step, dict) or set(step) - _PLAIN_STEP_KEYS:
+            return None
         for container in (step, step.get("target") or {}, step.get("data") or {}):
+            if isinstance(container, dict) and any(k in container for k in _OTHER_TARGETS):
+                return None
             value = container.get("entity_id") if isinstance(container, dict) else None
             for v in value if isinstance(value, list) else ([value] if value is not None else []):
                 if not isinstance(v, str) or "{" in v or not _ENTITY_ID.match(v.strip()):
                     return None
                 found.append(v.strip())
     return sorted(set(found))
+
+
+def _area_only(args: Any) -> bool:
+    """A recorded call that targets an area/floor (not named devices)."""
+    import ast  # noqa: PLC0415
+
+    try:
+        data = ast.literal_eval(args) if isinstance(args, str) else args
+    except (ValueError, SyntaxError):
+        return False
+    return isinstance(data, dict) and any(data.get(k) for k in ("area", "floor")) and not any(data.get(k) for k in ("name", "entity_id"))
 
 
 def _target_values(args: Any) -> list[str]:
@@ -324,7 +345,7 @@ def _target_values(args: Any) -> list[str]:
             return [a or b for a, b in re.findall(r"'([^']+)'|\"([^\"]+)\"", args)]
     out: list[str] = []
     if isinstance(data, dict):
-        for key in ("name", "entity_id", "area", "floor"):
+        for key in ("name", "entity_id"):
             v = data.get(key)
             out += [x for x in (v if isinstance(v, list) else [v]) if isinstance(x, str)]
     return out
