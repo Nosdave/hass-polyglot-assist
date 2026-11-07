@@ -332,7 +332,14 @@ Home Assistant pipelines run in one language. Polyglot also understands Home
 Assistant's own commands (lights, switches, covers, timers, time, weather,
 shopping list, media …) in every enabled language, using Home Assistant's
 sentence collection with Polyglot's lists — so the name table works for them
-too. Order: Polyglot commands → built-in commands → assistant.
+too. Order: Polyglot commands → built-in commands → assistant. The panel's
+settings have a switch "Built-in commands in every language" (on by default)
+for setups that want only their own commands.
+
+Free-text placeholders are accepted only where they name what is being
+created (shopping/todo items, the name of a new timer); elsewhere they would
+swallow unrelated questions ("how long does it take to get to work?" is not a
+timer question), so those sentences go to the assistant.
 
 Before a built-in command runs, Polyglot resolves its real targets with Home
 Assistant's own matching (duplicate names included) and refuses — handing the

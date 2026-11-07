@@ -51,7 +51,11 @@ INTENT_DOMAINS = {
     "HassClimateGetTemperature": ["climate"], "HassClimateSetTemperature": ["climate"],
     "HassFanSetSpeed": ["fan"],
 }
-WILDCARD_OK = {"HassShoppingListAddItem", "HassListAddItem"}
+# Free text is allowed where it can only ever name the thing being created:
+# list items, and timer names (starting a timer always needs a duration, so
+# "how long does X take?" can never start one). Timer status/cancel stay
+# blocked — there a free-text name swallows unrelated questions.
+WILDCARD_OK = {"HassShoppingListAddItem", "HassListAddItem", "HassStartTimer"}
 BLOCKED_DOMAINS = {"lock", "alarm_control_panel", "valve", "siren", "camera"}
 BLOCKED_COVER_CLASSES = {"garage", "door", "gate"}
 

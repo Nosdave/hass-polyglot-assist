@@ -18,7 +18,6 @@ const ORIGIN = { new_devices: "Neue Geräte", starter: "Grundstock", monitor: "�
 const SAFETY = { normal: "normal", sensitive: "sicherheitsrelevant", disabled: "aus" };
 const TIPS = {
   how: "Polyglot hört bei jedem Sprachbefehl zuerst hin. Kennt es den Satz, führt es ihn sofort aus, ohne KI und in der Sprache, in der du gesprochen hast. Sonst gibt es ihn an deinen KI-Assistenten weiter.",
-  builtin: "Die Befehle, die Home Assistant mitbringt (Licht, Schalter, Rollläden, Timer, Uhrzeit, Wetter, Einkaufsliste …), funktionieren in allen gewählten Sprachen. Schlösser, Alarm, Garagen- und Haustüren werden so nie geschaltet.",
   proposals: "Hier sammelt Polyglot neue, geänderte und zu entfernende Befehle, Sätze und Namen. Nichts davon ist aktiv, bevor du es übernimmst. Jeder Vorschlag wurde geprüft: Er darf keinen anderen Befehl stören, und alles, was schon funktioniert, muss weiter funktionieren.",
   starter: "Die KI schaut sich deine Skripte, Szenen und Geräte an, die Polyglot noch nicht versteht, und schlägt Befehle und Namen in allen gewählten Sprachen vor. Dazu Arten für deine Befehle. Ideal beim ersten Einrichten.",
   newdev: "Nach einer neuen Integration oder einem neuen Gerät: Polyglot findet, was neu dazugekommen ist, und schlägt Namen und Befehle vor.",
@@ -35,6 +34,7 @@ const TIPS = {
   monitor: "Polyglot merkt sich die letzten 500 Sprachbefehle (nur Text, kein Ton, bleibt in deinem Home Assistant). Einmal am Tag wertet deine eigene KI aus, was oft nicht direkt verstanden wurde, und macht daraus Vorschläge.",
   languages: "Die Sprachen, die in deinem Zuhause gesprochen werden. Polyglot erkennt sie automatisch; abgewählte Sprachen werden nicht mehr beachtet.",
   aitask: "Die KI-Aufgabe, die Übersetzungen, Namen und Befehle vorschlägt. Sie muss ohne Werkzeuge sein: Sie liest fremde Sätze und darf dabei nichts schalten können.",
+  builtin: "Home Assistant bringt fertige Sprachbefehle mit: Licht an/aus, dimmen, Farbe, Timer, Datum, Uhrzeit, Status. Von sich aus versteht es die aber nur in der Sprache deines Sprachassistenten. Mit diesem Schalter erkennt Polyglot sie in allen gewählten Sprachen und führt sie sofort aus, ohne Umweg über die KI. Das ist schneller und funktioniert auch, wenn die KI gerade nicht erreichbar ist. Türen, Schlösser, Tore, Alarm und das Auto schaltet Polyglot dabei nie; solche Befehle gehen weiter an deinen KI-Assistenten. Ausschalten nur, wenn du Befehle ausschließlich selbst festlegen willst.",
   followup: "Damit dein KI-Assistent „und jetzt auch das Piano“ versteht, erfährt er, was Polyglot gerade geschaltet hat.",
   fallback: "Dein KI-Assistent, der alles beantwortet, was kein fester Befehl ist.",
 };
@@ -177,7 +177,7 @@ class PolyglotAssistPanel extends HTMLElement {
     return `<section class="grid">
       <div class="card"><h2>So versteht dein Zuhause mehrere Sprachen${tip("how")}</h2>
         <div class="step"><span class="dot ok">✓</span><div><b>Sprachen</b><div class="hint">${esc(o.languages.map((l) => LANG_NAMES[l] || l).join(", "))} · <a href="#settings" data-act="tab" data-v="settings">ändern</a></div></div></div>
-        <div class="step"><span class="dot ${o.builtin_languages.length ? "ok" : "warn"}">${o.builtin_languages.length ? "✓" : "!"}</span><div><b>Grundbefehle von Home Assistant</b>${tip("builtin")}<div class="hint">${o.builtin_languages.length ? "aktiv in " + esc(o.builtin_languages.map((l) => LANG_NAMES[l] || l).join(", ")) : "nicht verfügbar"}</div></div></div>
+        <div class="step"><span class="dot ${o.builtin_languages.length ? "ok" : "warn"}">${o.builtin_languages.length ? "✓" : "!"}</span><div><b>Grundbefehle von Home Assistant</b>${tip("builtin")}<div class="hint">${o.builtin_languages.length ? "aktiv in " + esc(o.builtin_languages.map((l) => LANG_NAMES[l] || l).join(", ")) : (o.options || {}).builtin_commands === false ? "ausgeschaltet · <a href=\"#settings\" data-act=\"tab\" data-v=\"settings\">einschalten</a>" : "nicht verfügbar"}</div></div></div>
         <div class="step"><span class="dot ${props ? "warn" : "ok"}">${props ? "!" : "✓"}</span><div><b>${props ? props + " Vorschläge warten" : "Keine offenen Vorschläge"}</b><div class="hint"><a href="#proposals" data-act="tab" data-v="proposals">ansehen</a> · Grundstock und neue Geräte findest du dort</div></div></div>
         <div class="step"><span class="dot pri">${sum.active}</span><div><b>Eigene Befehle</b><div class="hint">${sum.active} aktiv mit ${total} Beispielsätzen · <a href="#commands" data-act="tab" data-v="commands">bearbeiten</a></div></div></div>
         ${o.problems.length ? `<div class="step"><span class="dot err">!</span><div><b>${o.problems.length} Hinweise in deinen Befehlen</b><div class="hint mono">${o.problems.slice(0, 3).map(esc).join("<br>")}</div></div></div>` : ""}
@@ -361,6 +361,8 @@ class PolyglotAssistPanel extends HTMLElement {
         <div class="seg" role="group" aria-label="Bestätigung"><button data-act="opt" data-k="response_mode" data-v="text" aria-pressed="${mode === "text"}">Sprechen</button><button data-act="opt" data-k="response_mode" data-v="chime" aria-pressed="${mode === "chime"}">Ton</button></div></div>
       <div class="set"><div><div class="t">KI für Vorschläge${tip("aitask")}</div></div>
         <select data-act="aitask" aria-label="KI-Aufgabe"><option value="">– keine –</option>${aiTasks.map((e) => `<option value="${esc(e)}" ${opts.translation_ai_task === e ? "selected" : ""}>${esc(this._hass.states[e]?.attributes?.friendly_name || e)}</option>`).join("")}</select></div>
+      <div class="set"><div><div class="t">Grundbefehle von Home Assistant in allen Sprachen${tip("builtin")}</div><div class="hint">Licht, Timer, Datum … sofort und ohne KI</div></div>
+        <button class="switch" role="switch" data-act="opt" data-k="builtin_commands" aria-checked="${opts.builtin_commands === false ? "false" : "true"}" aria-label="Grundbefehle"></button></div>
       <div class="set"><div><div class="t">Folgebefehle verstehen${tip("followup")}</div></div>
         <button class="switch" role="switch" data-act="opt" data-k="chat_log_tools" aria-checked="${opts.chat_log_tools ? "true" : "false"}" aria-label="Folgebefehle"></button></div>
       <div class="set"><div><div class="t">Wenn Polyglot nichts erkennt${tip("fallback")}</div><div class="hint">${esc(o.fallback_agent)} · ändern in Einstellungen → Geräte &amp; Dienste → Polyglot Assist</div></div><span></span></div>
@@ -453,7 +455,7 @@ class PolyglotAssistPanel extends HTMLElement {
         const k = el.dataset.k; const v = el.dataset.v !== undefined ? el.dataset.v : el.getAttribute("aria-checked") !== "true";
         const extra = k === "monitor" ? { monitor_time: (this.shadowRoot.getElementById("mtime")?.value || "03:00").slice(0, 5) } : {};
         await this.ws("options", { [k]: v, ...extra });
-        setTimeout(() => this._reload(["overview", "monitor"]), k === "monitor" || k === "chat_log_tools" ? 1500 : 0);
+        setTimeout(() => this._reload(["overview", "monitor"]), k === "monitor" || k === "chat_log_tools" || k === "builtin_commands" ? 1500 : 0);
         this._setMsg(k === "monitor" ? "mon" : "set", "Gespeichert.", "ok");
       } else if (a === "langsave") {
         const langs = [...this.shadowRoot.querySelectorAll("[data-lang-opt]:checked")].map((c) => c.dataset.langOpt);

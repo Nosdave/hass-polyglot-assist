@@ -44,8 +44,8 @@ CONF_MONITOR: Final = "monitor"
 CONF_MONITOR_TIME: Final = "monitor_time"
 DEFAULT_MONITOR_TIME: Final = "03:00"
 
-# Home Assistant's built-in commands in all enabled languages (no UI switch;
-# kept as an option only so it can be turned off in an emergency)
+# Home Assistant's built-in commands (lights, timers, date …) in all enabled
+# languages; on by default, switchable in the panel
 CONF_BUILTIN: Final = "builtin_commands"
 
 # Defaults

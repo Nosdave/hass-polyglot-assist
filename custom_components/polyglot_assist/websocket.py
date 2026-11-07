@@ -21,6 +21,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
 
 from .const import (
+    CONF_BUILTIN,
     CONF_CHAT_LOG_TOOLS,
     CONF_LANGUAGES_ENABLED,
     CONF_MONITOR,
@@ -740,7 +741,7 @@ async def ws_names_set(hass: HomeAssistant, connection, msg) -> None:
 
 PANEL_OPTIONS = (
     CONF_LANGUAGES_ENABLED, CONF_RESPONSE_MODE, CONF_MONITOR, CONF_MONITOR_TIME,
-    CONF_TRANSLATION_AI_TASK, CONF_CHAT_LOG_TOOLS,
+    CONF_TRANSLATION_AI_TASK, CONF_CHAT_LOG_TOOLS, CONF_BUILTIN,
 )
 
 
@@ -755,6 +756,7 @@ PANEL_OPTIONS = (
         vol.Optional(CONF_MONITOR_TIME): vol.Match(r"^\d{2}:\d{2}$"),
         vol.Optional(CONF_TRANSLATION_AI_TASK): vol.Any(None, vol.Match(r"^ai_task\.[a-z0-9_]+$")),
         vol.Optional(CONF_CHAT_LOG_TOOLS): bool,
+        vol.Optional(CONF_BUILTIN): bool,
     }
 )
 @websocket_api.async_response
@@ -773,7 +775,7 @@ async def ws_options(hass: HomeAssistant, connection, msg) -> None:
     if CONF_TRANSLATION_AI_TASK in changes and not ai_task:
         new_options.pop(CONF_TRANSLATION_AI_TASK, None)
     hass.config_entries.async_update_entry(entry, options=new_options)
-    if any(k in changes for k in (CONF_LANGUAGES_ENABLED, CONF_MONITOR, CONF_MONITOR_TIME, CONF_CHAT_LOG_TOOLS)):
+    if any(k in changes for k in (CONF_LANGUAGES_ENABLED, CONF_MONITOR, CONF_MONITOR_TIME, CONF_CHAT_LOG_TOOLS, CONF_BUILTIN)):
         hass.async_create_task(hass.config_entries.async_reload(entry_id))
     connection.send_result(msg["id"], {"options": {k: v for k, v in new_options.items() if k in PANEL_OPTIONS}})
 
