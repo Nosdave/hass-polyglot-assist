@@ -513,7 +513,10 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
     from homeassistant.helpers import intent as ha_intent  # noqa: PLC0415
 
     from .corpus import OTHER_CATEGORY, names_table, string_rules  # noqa: PLC0415
-    from .proposals import check_action_safe, check_item, check_proposal, clean_alternatives, iter_step_entities  # noqa: PLC0415
+    from .proposals import (  # noqa: PLC0415
+        bounded_samples, check_action_safe, check_item, check_proposal, clean_alternatives, iter_step_entities,
+        parse_rules,
+    )
     from .review import (  # noqa: PLC0415
         COMMAND_KINDS, MAX_COMMAND_PROPOSALS, action_fingerprint, find_episodes, format_episodes,
         parse_command, parse_review,
@@ -586,8 +589,18 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
                 for t in sentences:
                     r = check_proposal(name, clean_alternatives(t), [], lambda x: matcher.match_all(x, lang, slot_lists),
                                        slot_lists, string_rules(config), lang)
-                    if r["status"] != "error" and builtin_match(r["sentence"], lang):
-                        r = {**r, "status": "error"}  # HA already handles it (in the speaker's room) — never take it over
+                    if r["status"] != "error":
+                        # every expansion (same bounded sample set as everywhere else): HA must not
+                        # already handle any of them (in the speaker's room) — never take that over
+                        from hassil.parse_expression import parse_sentence  # noqa: PLC0415
+
+                        try:
+                            samples = bounded_samples(parse_sentence(r["sentence"]), slot_lists,
+                                                      parse_rules(string_rules(config)), lang)
+                        except Exception:  # noqa: BLE001
+                            samples = None
+                        if samples is None or any(builtin_match(x, lang) for x in samples):
+                            r = {**r, "status": "error"}
                     out.append(r)
                 return out
 
