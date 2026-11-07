@@ -56,6 +56,7 @@ from .const import (
     SLOT_LANG,
     SLOT_UTTERANCE,
 )
+from .fallback import IN_FALLBACK, is_polyglot_agent
 from .builtin import (
     async_handle_builtin,
     build_slots,
@@ -286,7 +287,8 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         intent_cfg = intent_cfg if isinstance(intent_cfg, dict) else {}
         spoken = response.speech.get("plain", {}).get("speech", "")
         # tone answers only make sense on voice devices, never in text chats
-        if self._wants_chime(intent_cfg, response, bool(user_input.satellite_id or user_input.device_id)):
+        # only a satellite plays audio; an app (device_id only) would show the marker as text
+        if self._wants_chime(intent_cfg, response, bool(user_input.satellite_id)):
             # Polyglot TTS turns the marker into a short tone; the real answer
             # stays in the response data (and in the ChatLog record).
             response.async_set_speech(CHIME_MARKER)
@@ -439,6 +441,13 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             },
         )
 
+        if fallback_agent is not None and (IN_FALLBACK.get() or is_polyglot_agent(self.hass, self._fallback_agent_id)):
+            # Polyglot → … → Polyglot → fallback again would never end
+            _LOGGER.error(
+                "Polyglot Assist: fallback %r leads back to Polyglot — refusing (loop)",
+                self._fallback_agent_id,
+            )
+            fallback_agent = None
         if fallback_agent is None:
             _LOGGER.error(
                 "Polyglot miss but fallback agent %r not available",
@@ -457,4 +466,8 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         # The base method sets up a fresh ChatLog session for the fallback.
         # Pass user_input otherwise UNCHANGED — preserves satellite_id,
         # extra_system_prompt and any future ConversationInput fields HA adds.
-        return await fallback_agent.async_process(user_input)
+        token = IN_FALLBACK.set(True)
+        try:
+            return await fallback_agent.async_process(user_input)
+        finally:
+            IN_FALLBACK.reset(token)

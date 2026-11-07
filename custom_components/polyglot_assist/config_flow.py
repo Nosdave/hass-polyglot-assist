@@ -50,6 +50,7 @@ from .const import (
     SOURCE_YAML,
 )
 from .corpus import same_document, validate
+from .fallback import fallback_error
 from .guard import GuardError, async_guarded_update, write_lock
 from .loader import MatcherLoader
 from .source import IntentSource, SourceError
@@ -76,7 +77,9 @@ class PolyglotAssistConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
 
-        if user_input is not None:
+        if user_input is not None and (err := fallback_error(self.hass, user_input[CONF_FALLBACK_AGENT])):
+            errors[CONF_FALLBACK_AGENT] = err
+        elif user_input is not None:
             return self.async_create_entry(
                 title="Polyglot Assist",
                 data={
@@ -156,7 +159,10 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
     async def async_step_change_fallback(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        if user_input is not None:
+        errors: dict[str, str] = {}
+        if user_input is not None and (err := fallback_error(self.hass, user_input[CONF_FALLBACK_AGENT])):
+            errors[CONF_FALLBACK_AGENT] = err
+        elif user_input is not None:
             new_data = {**self._entry.data, CONF_FALLBACK_AGENT: user_input[CONF_FALLBACK_AGENT]}
             self.hass.config_entries.async_update_entry(self._entry, data=new_data)
             await self.hass.config_entries.async_reload(self._entry.entry_id)
@@ -170,7 +176,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                 ),
             }
         )
-        return self.async_show_form(step_id="change_fallback", data_schema=schema)
+        return self.async_show_form(step_id="change_fallback", data_schema=schema, errors=errors)
 
     # ─────────────────────────────────────────────────────────────────
     # Fallback language hint (opt-in)

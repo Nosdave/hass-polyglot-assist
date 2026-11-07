@@ -12,7 +12,9 @@
     },
     "error": {
       "intents_not_found": "Intents file not found at the given path.",
-      "intents_invalid": "Intents file failed validation. Check the log for details."
+      "intents_invalid": "Intents file failed validation. Check the log for details.",
+      "fallback_is_polyglot": "Polyglot cannot be its own fallback (that would be an endless loop). Choose your AI assistant or the Home Assistant agent.",
+      "fallback_missing": "Choose a fallback agent."
     }
   },
   "options": {
@@ -137,7 +139,9 @@
       "import_failed": "Could not switch the source: {err}",
       "refused": "Not saved: {err}",
       "sources_differ": "YAML file and catalog differ. Choose what to do with the differences below.",
-      "ai_task_has_tools": "This AI task has tools (an LLM API). Choose one without tools."
+      "ai_task_has_tools": "This AI task has tools (an LLM API). Choose one without tools.",
+      "fallback_is_polyglot": "Polyglot cannot be its own fallback (that would be an endless loop). Choose your AI assistant or the Home Assistant agent.",
+      "fallback_missing": "Choose a fallback agent."
     },
     "abort": {
       "no_intents": "No intents found in the file. Use 'Add a new intent' to create one."
