@@ -65,7 +65,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_monitor_status, ws_monitor_run,
         ws_overview, ws_categories, ws_names_set, ws_options, ws_entries,
         ws_history_list, ws_history_diff, ws_history_restore,
-        ws_fallback_set, ws_pipelines, ws_languages_check, ws_stt_test,
+        ws_fallback_set, ws_pipelines, ws_languages_check, ws_stt_test, ws_ai_task_check,
         ws_ui_texts_get, ws_ui_texts_languages, ws_ui_texts_set, ws_ui_texts_translate, ws_ui_texts_export,
     ):
         websocket_api.async_register_command(hass, handler)
@@ -1109,3 +1109,14 @@ async def ws_stt_test(hass: HomeAssistant, connection, msg) -> None:
         connection.send_error(msg["id"], "failed", str(err)[:200])
         return
     connection.send_result(msg["id"], result)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/ai_task/check", vol.Optional("entry_id"): str,
+     vol.Required("entity_id"): vol.Match(r"^ai_task\.[a-z0-9_]+$")}
+)
+@callback
+def ws_ai_task_check(hass: HomeAssistant, connection, msg) -> None:
+    """Whether an AI task may receive foreign text (it must have no tools)."""
+    connection.send_result(msg["id"], {"entity_id": msg["entity_id"], "has_tools": ai_task_has_tools(hass, msg["entity_id"])})

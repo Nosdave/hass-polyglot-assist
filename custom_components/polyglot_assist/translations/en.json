@@ -192,7 +192,7 @@
     },
     "export_yaml": {
       "name": "Export catalog to YAML",
-      "description": "Writes the catalog to polyglot_assist/export/intents-<time>.yaml. Admin only."
+      "description": "Writes the catalog to polyglot_assist/export/intents-TIMESTAMP.yaml. Admin only."
     }
   },
   "entity": {

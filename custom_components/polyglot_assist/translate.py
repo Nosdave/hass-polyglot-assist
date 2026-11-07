@@ -370,7 +370,7 @@ async def async_propose_new_command(
             def _check(p: str, lang: str = lang) -> dict[str, Any]:
                 return check_proposal(
                     name, p, [], lambda t: matcher.match_all(t, lang, slot_lists), slot_lists,
-                    None, lang,
+                    string_rules(getattr(matcher, "config", None) or {}), lang,
                 )
 
             out[lang] = [await hass.async_add_executor_job(_check, clean_alternatives(p)) for p in proposals]

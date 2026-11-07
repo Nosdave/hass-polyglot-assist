@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Record real AI answers for the golden proposal tests (run by a maintainer).
 
-Asks a real AI Task entity (without tools) — through the Home Assistant REST
-API — for translations of example commands, with the same instructions
-Polyglot uses, and stores the raw answers plus today's check results in
+Asks a real AI Task entity — it must have no tools; checked first through
+Polyglot's own WebSocket check (needs Polyglot ≥ 0.8.2 and `pip install
+websockets`) — through the Home Assistant REST API for translations of example commands, with the core of the
+instructions Polyglot uses (syntax rules, data fence, language name; without
+placeholder examples and the sentences of other commands), and stores the raw answers plus today's check results in
 tests/golden/translations.json. The CI replays them (tests/test_golden.py).
 
   HA_URL=http://homeassistant.local:8123 HA_TOKEN=... AI_TASK=ai_task.xyz \\
@@ -48,9 +50,29 @@ def ask(url: str, token: str, ai_task: str, instructions: str) -> list[str]:
     return [" ".join(x.split()) for x in items if isinstance(x, str)][:12]
 
 
+def has_tools(url: str, token: str, ai_task: str) -> bool:
+    """Polyglot's own check (same rule as for proposals); unknown → refuse."""
+    import asyncio  # noqa: PLC0415
+
+    import websockets  # noqa: PLC0415  (pip install websockets)
+
+    async def run() -> bool:
+        async with websockets.connect(url.replace("http", "ws", 1) + "/api/websocket") as ws:
+            await ws.recv()
+            await ws.send(json.dumps({"type": "auth", "access_token": token}))
+            await ws.recv()
+            await ws.send(json.dumps({"id": 1, "type": "polyglot_assist/ai_task/check", "entity_id": ai_task}))
+            reply = json.loads(await ws.recv())
+            return not reply.get("success") or bool(reply["result"]["has_tools"])
+
+    return asyncio.run(run())
+
+
 def main() -> int:
     url, token, ai_task = os.environ["HA_URL"].rstrip("/"), os.environ["HA_TOKEN"], os.environ["AI_TASK"]
-    syntax, fence = golden_lib.prompt_constants()
+    syntax, fence, lang_names = golden_lib.prompt_constants()
+    if has_tools(url, token, ai_task):
+        raise SystemExit(f"{ai_task} has tools (an LLM API) — the injection fixture must never reach it. Choose one without tools.")
     full = yaml.safe_load((ROOT / "config_example" / "intents.yaml").read_text("utf-8"))
     out = []
     for case in CASES:
@@ -60,7 +82,7 @@ def main() -> int:
             cfg["description"] = case["description"]
         source = [s for lst in cfg["sentences"].values() for s in lst]
         instructions = "\n".join([
-            syntax, "", f"Write sentence templates in {case['lang']} for the command described below. Same meaning as the source sentences.",
+            syntax, "", f"Write sentence templates in {lang_names.get(case['lang'], case['lang'])} for the command described below. Same meaning as the source sentences.",
             fence, "<data>", f"command: {case['intent']}", f"description: {cfg.get('description', '')}",
             "source sentences:", *[f"- {s}" for s in source[:30]], "</data>",
         ])

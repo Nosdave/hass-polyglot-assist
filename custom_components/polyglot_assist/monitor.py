@@ -28,6 +28,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
+from .corpus import string_rules
 from .proposals import check_proposal, norm
 
 _LOGGER = logging.getLogger(__name__)
@@ -189,6 +190,7 @@ def build_monitor_items(
 ) -> list[dict[str, Any]]:
     """Turn ``INTENT | LANG | TEMPLATE`` lines from the AI task into queue items."""
     intents = config.get("intents") or {}
+    rules = string_rules(config)  # the user's <rules> are known, unknown ones are refused
     evidence = "; ".join(f"„{r['text']}“ {r['count']}×" for r in repeated[:5])
     items: list[dict[str, Any]] = []
     for line in suggestions[:20]:
@@ -203,7 +205,7 @@ def build_monitor_items(
         if not isinstance(cfg, dict) or not template:
             continue
         source = [s for lst in (cfg.get("sentences") or {}).values() for s in (lst or []) if isinstance(s, str)]
-        check = check_proposal(name, template, source, lambda t, lang=lang: matches(t, lang), slot_lists, None, lang)
+        check = check_proposal(name, template, source, lambda t, lang=lang: matches(t, lang), slot_lists, rules, lang)
         items.append({
             "op": "add_sentences",
             "payload": {"intent": name, "lang": lang, "sentences": [template]},

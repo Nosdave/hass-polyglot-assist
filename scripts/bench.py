@@ -14,11 +14,14 @@ Raspberry Pi, a VM) inside the HA container or any venv:
 
   python3 scripts/bench.py [--intents config_example/intents.yaml] [--json out.json]
 
-Numbers are per process and indicative; compare runs on the same machine.
-"load" is timed in a second pass (the package caches its parsed data, as it
-is inside Home Assistant); "in use" includes the caches built while
-recognising. CI runners are much faster than an HA Green or a Raspberry Pi —
-run it on the target hardware for real numbers.
+Every language set runs in its own fresh process (comparable memory, cold
+first sentence). "in use" includes the caches built while recognising.
+"hit" = a sentence recognised in its own language; "miss" = a sentence no
+language knows, tried in every enabled language one after the other — what
+Polyglot does at runtime before handing a sentence to the AI. The name/area
+lists are empty placeholders, so device commands mostly take the miss path
+inside hassil too. CI runners are much faster than an HA Green or a
+Raspberry Pi — run it on the target hardware for real numbers.
 """
 from __future__ import annotations
 
@@ -107,26 +110,45 @@ def _recognize_all(loaded: dict, lists: dict, rounds: int) -> list[float]:
     return times
 
 
+MISSES = ["erzähl mir einen witz über katzen", "tell me a joke about cats", "raconte-moi une blague sur les chats"]
+
+
+def _miss_all(loaded: dict, lists: dict, rounds: int) -> list[float]:
+    """A sentence nobody knows, tried in every loaded language (per utterance)."""
+    from hassil.recognize import recognize_best  # noqa: PLC0415
+
+    times = []
+    for _ in range(rounds):
+        for text in MISSES:
+            t = time.perf_counter()
+            for lang, (intents, skip) in loaded.items():
+                recognize_best(text, intents, slot_lists=lists, skip_words=skip, language=lang)
+            times.append((time.perf_counter() - t) * 1000)
+    return times
+
+
 def bench_builtin(langs: list[str], rounds: int) -> dict:
+    """Run in a fresh process: cold timing first, then a separate memory pass."""
     lists = {n: _empty_list(n) for n in ("name", "area", "floor")}
-    # memory pass (tracemalloc slows everything down — no timing here)
-    tracemalloc.start()
-    mem_loaded = _build_builtin(langs)
-    held = tracemalloc.get_traced_memory()[0]
-    _recognize_all(mem_loaded, lists, 1)
-    used, peak = tracemalloc.get_traced_memory()  # incl. caches built by recognition
-    tracemalloc.stop()
-    del mem_loaded
-    # timing pass, fresh objects
     t0 = time.perf_counter()
     loaded = _build_builtin(langs)
     load_s = time.perf_counter() - t0
-    first = _recognize_all({k: v for k, v in list(loaded.items())[:1]}, lists, 1)[:1]
-    times = _recognize_all(loaded, lists, rounds)
-    return {"languages": list(loaded), "load_s": round(load_s, 3), "memory_mb": round(held / 2**20, 1),
+    first = _recognize_all({k: v for k, v in list(loaded.items())[:1]}, lists, 1)[:1]  # cold
+    hits = _recognize_all(loaded, lists, rounds)
+    misses = _miss_all(loaded, lists, rounds)
+    del loaded
+    tracemalloc.start()  # memory pass (slows everything down — no timing here)
+    mem_loaded = _build_builtin(langs)
+    held = tracemalloc.get_traced_memory()[0]
+    _recognize_all(mem_loaded, lists, 1)
+    _miss_all(mem_loaded, lists, 1)
+    used, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    return {"languages": list(mem_loaded), "load_s": round(load_s, 3), "memory_mb": round(held / 2**20, 1),
             "memory_in_use_mb": round(used / 2**20, 1), "memory_peak_mb": round(peak / 2**20, 1),
-            "first_ms": round(first[0], 1) if first else None, "p50_ms": round(statistics.median(times), 2) if times else None,
-            "p95_ms": round(_pct(times, 0.95), 2) if times else None, "sentences": len(times)}
+            "first_ms": round(first[0], 1) if first else None,
+            "hit_p50_ms": round(statistics.median(hits), 2) if hits else None, "hit_p95_ms": round(_pct(hits, 0.95), 2) if hits else None,
+            "miss_p50_ms": round(statistics.median(misses), 2), "miss_p95_ms": round(_pct(misses, 0.95), 2)}
 
 
 def _load(name: str):
@@ -162,12 +184,24 @@ def bench_own(intents_file: Path, rounds: int) -> dict:
             "p50_ms": round(statistics.median(times), 2), "p95_ms": round(_pct(times, 0.95), 2), "sentences": len(times)}
 
 
+def _fresh(index: int, rounds: int) -> dict:
+    import subprocess  # noqa: PLC0415
+
+    out = subprocess.run([sys.executable, __file__, "--set", str(index), "--rounds", str(rounds)],
+                         check=True, capture_output=True, text=True)
+    return json.loads(out.stdout.strip().splitlines()[-1])
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--intents", type=Path, default=Path(__file__).resolve().parent.parent / "config_example" / "intents.yaml")
     ap.add_argument("--rounds", type=int, default=5)
     ap.add_argument("--json", type=Path)
+    ap.add_argument("--set", type=int, help=argparse.SUPPRESS)  # internal: one language set, JSON on stdout
     args = ap.parse_args()
+    if args.set is not None:
+        print(json.dumps(bench_builtin(LANG_SETS[args.set], args.rounds)))
+        return 0
     tracemalloc.start()
     t0 = time.perf_counter()
     import hassil.recognize  # noqa: F401, PLC0415
@@ -178,7 +212,7 @@ def main() -> int:
         "imports": imports,
         "machine": {"python": platform.python_version(), "arch": platform.machine(), "system": platform.system(),
                     "cpu": platform.processor() or platform.machine()},
-        "builtin": [bench_builtin(langs, args.rounds) for langs in LANG_SETS],
+        "builtin": [_fresh(i, args.rounds) for i in range(len(LANG_SETS))],
         "own": bench_own(args.intents, args.rounds) if args.intents.is_file() else None,
     }
     print(f"{result['machine']['arch']} · Python {result['machine']['python']}")
@@ -186,7 +220,8 @@ def main() -> int:
     print("Built-in commands (home-assistant-intents)")
     for r in result["builtin"]:
         print(f"  {len(r['languages'])} language(s): load {r['load_s']} s · {r['memory_mb']} MB, in use {r['memory_in_use_mb']} MB "
-              f"(peak {r['memory_peak_mb']}) · first {r['first_ms']} ms · p50 {r['p50_ms']} ms · p95 {r['p95_ms']} ms")
+              f"(peak {r['memory_peak_mb']}) · first {r['first_ms']} ms (cold) · hit p50 {r['hit_p50_ms']} / p95 {r['hit_p95_ms']} ms · "
+              f"miss over all {len(r['languages'])} p50 {r['miss_p50_ms']} / p95 {r['miss_p95_ms']} ms")
     if result["own"]:
         o = result["own"]
         print(f"Own commands ({o['commands']}): build {o['build_s']} s · {o['memory_mb']} MB · p50 {o['p50_ms']} ms · p95 {o['p95_ms']} ms")

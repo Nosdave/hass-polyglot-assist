@@ -26,14 +26,14 @@ def _load(name: str):
     return mod
 
 
-def prompt_constants() -> tuple[str, str]:
-    """_SYNTAX and _FENCE of translate.py (read, not imported: it needs HA)."""
+def prompt_constants() -> tuple[str, str, dict]:
+    """_SYNTAX, _FENCE and LANG_NAMES of translate.py (read, not imported: it needs HA)."""
     tree = ast.parse((PKG / "translate.py").read_text("utf-8"))
     found = {}
     for node in tree.body:
-        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) in ("_SYNTAX", "_FENCE"):
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) in ("_SYNTAX", "_FENCE", "LANG_NAMES"):
             found[node.targets[0].id] = ast.literal_eval(node.value)
-    return found["_SYNTAX"], found["_FENCE"]
+    return found["_SYNTAX"], found["_FENCE"], found["LANG_NAMES"]
 
 
 def without_language(config: dict, lang: str) -> dict:
@@ -74,5 +74,7 @@ def check(config: dict, intent: str, lang: str, proposals: list[str]) -> list[di
             intent, p, source, lambda text: matcher.match_all(text, lang, slot_lists),
             slot_lists, rules, lang, other, corpus.static_lists(config),
         )
+        if cfg.get("safety") == "sensitive" and r["status"] == "ok":  # as translate._check
+            r["status"] = "warn"
         out.append({"sentence": p, "status": r["status"]})
     return out
