@@ -789,10 +789,13 @@ async def ws_options(hass: HomeAssistant, connection, msg) -> None:
     if CONF_CHIME_TONE in changes:
         from .tone import normalize  # noqa: PLC0415
 
-        # the own file's hash is only ever set by tone/upload — never by the client
-        stored = (entry.options.get(CONF_CHIME_TONE) or {}).get("custom_hash")
-        changes[CONF_CHIME_TONE] = normalize({**changes[CONF_CHIME_TONE], "custom_hash": stored})
-        if changes[CONF_CHIME_TONE]["source"] != (msg[CONF_CHIME_TONE].get("source") or "classic"):
+        # the own file's hash is only ever set by tone/upload — never by the client;
+        stored_tone = entry.options.get(CONF_CHIME_TONE) or {}
+        # a partial update keeps the rest of the stored tone
+        changes[CONF_CHIME_TONE] = normalize({**stored_tone, **changes[CONF_CHIME_TONE],
+                                              "custom_hash": stored_tone.get("custom_hash")})
+        wanted = msg[CONF_CHIME_TONE].get("source", stored_tone.get("source") or "classic")
+        if changes[CONF_CHIME_TONE]["source"] != wanted:
             connection.send_error(msg["id"], "no_custom_tone", "upload or record your own tone first")
             return
     new_options = {**entry.options, **changes}

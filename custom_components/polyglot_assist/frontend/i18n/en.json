@@ -427,7 +427,8 @@
     "err_no_announce": "This voice device cannot play announcements.",
     "err_tts_unavailable": "Choose the speech output behind the tone first.",
     "err_no_custom_tone": "Upload or record your own tone first.",
-    "err_no_mic": "No microphone available – this needs HTTPS or the app. Upload a file instead."
+    "err_no_mic": "No microphone available – this needs HTTPS or the app. Upload a file instead.",
+    "custom_stored": "Your own tone is saved but not in use – “Apply” switches it on."
   },
   "voicelearn": {
     "title": "Accept suggestions by voice",

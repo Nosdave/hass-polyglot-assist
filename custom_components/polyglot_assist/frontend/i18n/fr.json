@@ -427,7 +427,8 @@
     "err_no_announce": "Cet appareil vocal ne peut pas jouer d'annonces.",
     "err_tts_unavailable": "Choisis d'abord la sortie vocale derrière le son.",
     "err_no_custom_tone": "Importe ou enregistre d'abord ton propre son.",
-    "err_no_mic": "Pas de micro disponible – il faut HTTPS ou l'application. Importe plutôt un fichier."
+    "err_no_mic": "Pas de micro disponible – il faut HTTPS ou l'application. Importe plutôt un fichier.",
+    "custom_stored": "Ton son personnel est enregistré mais pas actif – « Appliquer » l'active."
   },
   "voicelearn": {
     "title": "Accepter les suggestions à la voix",

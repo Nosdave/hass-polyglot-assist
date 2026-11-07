@@ -180,6 +180,8 @@ async def async_tone_audio(hass: Any, entry_id: str, tone: dict[str, Any] | None
         found = await hass.async_add_executor_job(read_custom, hass.config.config_dir, entry_id)
         if found is not None and data_hash(found[1]) == t["custom_hash"]:
             result = found
+        else:  # file missing or not (yet) the stored one: sound the preset, but never cache that
+            return ("wav", await hass.async_add_executor_job(preset_wav, {**t, "source": "preset"}))
     if result is None and t["source"] == "classic":
         result = ("wav", await hass.async_add_executor_job(CLASSIC_FILE.read_bytes))
     if result is None:
@@ -251,11 +253,14 @@ def to_tone_wav(data: bytes, ext: str, ffmpeg: str | None) -> bytes:
     else:
         if ext != "wav":
             raise ToneFileError("convert")  # without ffmpeg only plain 16-bit mono WAV
-        with wave.open(io.BytesIO(data)) as w:
-            if w.getsampwidth() != 2 or w.getnchannels() != 1:
-                raise ToneFileError("convert")
-            rate = w.getframerate()
-            pcm = w.readframes(int(MAX_CUSTOM_WAV_S * rate))
+        try:
+            with wave.open(io.BytesIO(data)) as w:
+                if w.getsampwidth() != 2 or w.getnchannels() != 1:
+                    raise ToneFileError("convert")
+                rate = w.getframerate()
+                pcm = w.readframes(int(MAX_CUSTOM_WAV_S * rate))
+        except (wave.Error, EOFError, struct.error) as err:  # float/compressed/truncated WAV
+            raise ToneFileError("format") from err
         samples = [v / 32768 for (v,) in struct.iter_unpack("<h", pcm[: len(pcm) // 2 * 2])]
         return _wav_at(samples, rate)
     samples = [v / 32768 for (v,) in struct.iter_unpack("<h", pcm[: len(pcm) // 2 * 2])]

@@ -181,3 +181,38 @@ def test_with_ffmpeg_any_format_becomes_a_short_mono_wav(tmp_path):
     assert len(s) / rate <= tone.MAX_CUSTOM_WAV_S + 0.05
     with pytest.raises(tone.ToneFileError, match="format"):
         tone.to_tone_wav(b"ID3\x04" + b"\0" * 400, "mp3", shutil.which("ffmpeg"))
+
+
+class _FakeHass:
+    def __init__(self, config_dir):
+        self.config = type("C", (), {"config_dir": config_dir})()
+
+    async def async_add_executor_job(self, fn, *args):
+        return fn(*args)
+
+
+def test_tone_audio_sources_and_cache(tmp_path):
+    import asyncio
+
+    tone._CACHE.clear()
+    hass = _FakeHass(str(tmp_path))
+    run = lambda t: asyncio.run(tone.async_tone_audio(hass, "E1", t))  # noqa: E731
+    assert run(None) == ("wav", tone.CLASSIC_FILE.read_bytes())  # default = the tone shipped so far
+    assert run(dict(source="preset", count=3))[1] == tone.preset_wav(dict(source="preset", count=3))
+    # own tone whose file is missing: the preset sounds, and that fallback is NOT cached
+    own = dict(source="custom", custom_hash=tone.data_hash(b"x" * 10), count=1)
+    assert run(own)[1] == tone.preset_wav(dict(source="preset", count=1))
+    assert ("E1", tone.tone_hash(own)) not in tone._CACHE
+    # the stored file with the matching hash is used (and cached)
+    wav = tone.to_tone_wav(_wav(0.3), "wav", None)
+    tone.write_custom(str(tmp_path), "E1", wav)
+    own = dict(source="custom", custom_hash=tone.data_hash(wav))
+    assert run(own) == ("wav", wav)
+    assert ("E1", tone.tone_hash(own)) in tone._CACHE
+    # another entry never gets E1's file
+    assert asyncio.run(tone.async_tone_audio(hass, "E2", own))[1] != wav
+
+
+def test_broken_wav_is_a_format_error_without_ffmpeg():
+    with pytest.raises(tone.ToneFileError, match="format"):
+        tone.to_tone_wav(_wav(1.0)[:30] + b"\0" * 10, "wav", None)

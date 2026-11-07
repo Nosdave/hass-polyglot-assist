@@ -642,6 +642,8 @@ class PolyglotAssistPanel extends HTMLElement {
   // ── confirmation tone designer ────────────────────────────────────────────
   _toneDraft() {
     const saved = ((this.s.overview || {}).options || {}).chime_tone || {};
+    const savedKey = this.s.entryId + "|" + JSON.stringify(saved);
+    if (this.s.toneDraftKey !== savedKey) { this.s.toneDraft = null; this.s.toneDraftKey = savedKey; } // another entry or changed elsewhere
     if (!this.s.toneDraft) this.s.toneDraft = { source: "classic", count: 2, contour: "up", flow: "separate", pitch: "mid", timbre: "soft", volume: 0.6, ...saved };
     return this.s.toneDraft;
   }
@@ -663,13 +665,13 @@ class PolyglotAssistPanel extends HTMLElement {
         ${row("tone.pitch", seg("pitch", ["low", "mid", "high"], "tone.pitch"))}
         ${row("tone.timbre", seg("timbre", ["soft", "bright", "bell"], "tone.timbre"))}
         ${row("tone.volume", `<input type="range" min="0.2" max="1" step="0.05" data-tonevol value="${esc(String(d.volume))}" aria-label="${t("tone.volume")}">`)}` : ""}
-      ${d.source === "custom" ? `<p class="hint">${saved.custom_hash ? t("tone.custom_have") : t("tone.custom_none")}</p>
+      ${d.source === "custom" ? `<p class="hint">${saved.custom_hash ? (saved.source === "custom" ? t("tone.custom_have") : t("tone.custom_stored")) : t("tone.custom_none")}</p>
         <div class="row"><label class="b">${t("tone.upload")}<input type="file" accept=".wav,.mp3,.ogg,.flac,audio/wav,audio/mpeg,audio/ogg,audio/flac" data-act="toneupload" hidden></label>
         <button class="b" data-act="tonerec" ${busy ? "disabled" : ""}>${this.s.toneRec ? `<span class="spin"></span>${t("tone.recording", { seconds: this.s.toneRec })}` : t("tone.record")}</button>
         ${saved.custom_hash ? `<button class="b" data-act="tonedel" ${busy ? "disabled" : ""}>${t("tone.delete")}</button>` : ""}</div>
         <p class="hint">${t("tone.custom_hint")}</p>` : ""}
       <div class="row"><button class="b" data-act="tonepreview" ${busy ? "disabled" : ""}>${t("tone.preview")}</button>
-        ${d.source !== "custom" ? `<button class="b primary" data-act="tonesave" ${busy || !changed ? "disabled" : ""}>${t("tone.apply")}</button>` : ""}</div>
+        ${d.source !== "custom" || (saved.custom_hash && saved.source !== "custom") ? `<button class="b primary" data-act="tonesave" ${busy || !changed ? "disabled" : ""}>${t("tone.apply")}</button>` : ""}</div>
       ${sats.length ? `<div class="row"><select data-bind="toneSat" aria-label="${t("tone.device")}">${sats.map((e) => `<option value="${esc(e)}" ${this.s.toneSat === e ? "selected" : ""}>${esc(this._hass.states[e]?.attributes?.friendly_name || e)}</option>`).join("")}</select>
         <button class="b" data-act="toneplay" ${busy || changed ? "disabled" : ""}>${t("tone.play_device")}</button></div>${changed ? `<p class="hint">${t("tone.play_saved_only")}</p>` : ""}` : ""}
       ${this._msg("tone")}</div>`;
@@ -706,7 +708,8 @@ class PolyglotAssistPanel extends HTMLElement {
     let stream;
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } }); }
     catch (err) { this._setMsg("tone", this.t("tone.err_no_mic"), "err"); return; }
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    let ctx; try { ctx = new AC({ sampleRate: 22050 }); } catch (e) { ctx = new AC(); } // small file (96 kHz would exceed 512 KB)
     await ctx.resume();
     const src = ctx.createMediaStreamSource(stream);
     const proc = ctx.createScriptProcessor(4096, 1, 1);
@@ -942,6 +945,7 @@ class PolyglotAssistPanel extends HTMLElement {
       catch (err) { this._setMsg("set", this.t("messages.error", { error: err.message || err.code }), "err"); }
       return;
     }
+    if (el.dataset.tonevol !== undefined) { this._toneDraft().volume = Number(el.value); this._render(); return; }
     if (el.dataset.act === "toneupload" && el.files && el.files[0]) {
       const f = el.files[0]; const ext = (f.name.split(".").pop() || "").toLowerCase();
       if (!["wav", "mp3", "ogg", "flac"].includes(ext)) { this._setMsg("tone", this.t("tone.err_type"), "err"); return; }

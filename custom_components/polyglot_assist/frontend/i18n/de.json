@@ -427,7 +427,8 @@
     "err_no_announce": "Dieses Sprachgerät kann keine Durchsagen abspielen.",
     "err_tts_unavailable": "Zuerst die Sprachausgabe hinter dem Ton wählen.",
     "err_no_custom_tone": "Erst einen eigenen Ton hochladen oder aufnehmen.",
-    "err_no_mic": "Kein Mikrofon verfügbar – das geht nur über HTTPS oder die App. Lade stattdessen eine Datei hoch."
+    "err_no_mic": "Kein Mikrofon verfügbar – das geht nur über HTTPS oder die App. Lade stattdessen eine Datei hoch.",
+    "custom_stored": "Dein eigener Ton ist gespeichert, aber gerade nicht aktiv – „Übernehmen“ schaltet ihn ein."
   },
   "voicelearn": {
     "title": "Vorschläge per Sprache übernehmen",
