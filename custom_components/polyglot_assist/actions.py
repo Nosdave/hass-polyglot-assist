@@ -28,12 +28,11 @@ from homeassistant.helpers import intent
 from homeassistant.helpers.script import Script, async_validate_actions_config
 from homeassistant.helpers.template import Template
 
+from .speech import say
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_SPEECH = {"de": "Erledigt.", "en": "Done.", "fr": "C'est fait.", "nl": "Gedaan.",
-                  "it": "Fatto.", "es": "Hecho."}
 
 
 class CatalogIntentHandler(intent.IntentHandler):
@@ -57,7 +56,7 @@ class CatalogIntentHandler(intent.IntentHandler):
             variables["action_response"] = result.service_response
         response = intent_obj.create_response()
         template = self._speech.get(lang)
-        text = template.async_render(variables, parse_result=False) if template else DEFAULT_SPEECH.get(lang, "OK")
+        text = template.async_render(variables, parse_result=False) if template else say("done", lang)
         response.async_set_speech(text)
         return response
 

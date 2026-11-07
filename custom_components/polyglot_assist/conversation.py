@@ -56,6 +56,7 @@ from .const import (
     SLOT_LANG,
     SLOT_UTTERANCE,
 )
+from .speech import say
 from .fallback import IN_FALLBACK, is_polyglot_agent
 from .builtin import (
     async_handle_builtin,
@@ -89,11 +90,6 @@ async def async_setup_entry(
     async_add_entities([agent])
 
 
-ERROR_SPEECH = {
-    "de": "Das hat leider nicht geklappt.",
-    "en": "Sorry, that did not work.",
-    "fr": "Désolé, ça n'a pas marché.",
-}
 
 
 class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
@@ -255,9 +251,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                 match.intent_name, err,
             )
             err_response = intent.IntentResponse(language=match.lang)
-            err_response.async_set_speech(
-                f"Intent {match.intent_name} fehlgeschlagen: {err}"
-            )
+            err_response.async_set_speech(say("handler_failed", match.lang, name=match.intent_name))
             return ConversationResult(
                 response=err_response,
                 conversation_id=chat_log.conversation_id,
@@ -269,9 +263,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                 match.intent_name,
             )
             err_response = intent.IntentResponse(language=match.lang)
-            err_response.async_set_speech(
-                f"Kein Handler für Intent {match.intent_name} registriert."
-            )
+            err_response.async_set_speech(say("no_handler", match.lang, name=match.intent_name))
             return ConversationResult(
                 response=err_response,
                 conversation_id=chat_log.conversation_id,
@@ -281,7 +273,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         # set speech via its `speech.text` template). We just need to return it.
         # If the handler didn't set speech (rare), fall back to a generic OK.
         if not response.speech:
-            response.async_set_speech("OK")
+            response.async_set_speech(say("done", match.lang))
 
         intent_cfg = (config.get("intents") or {}).get(match.intent_name)
         intent_cfg = intent_cfg if isinstance(intent_cfg, dict) else {}
@@ -359,7 +351,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                 # the action may have run → answer with an error, never run it twice
                 _LOGGER.warning("Polyglot built-in %s failed: %s", result.intent.name, err)
                 response = intent.IntentResponse(language=lang)
-                response.async_set_error(intent.IntentResponseErrorCode.FAILED_TO_HANDLE, ERROR_SPEECH.get(lang, ERROR_SPEECH["en"]))
+                response.async_set_error(intent.IntentResponseErrorCode.FAILED_TO_HANDLE, say("error", lang))
             t_ms = (time.perf_counter() - t0) * 1000.0
             self.hass.bus.async_fire(
                 EVENT_MATCH,
@@ -441,7 +433,8 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             },
         )
 
-        if fallback_agent is not None and (IN_FALLBACK.get() or is_polyglot_agent(self.hass, self._fallback_agent_id)):
+        loop = fallback_agent is not None and (IN_FALLBACK.get() or is_polyglot_agent(self.hass, self._fallback_agent_id))
+        if loop:
             # Polyglot → … → Polyglot → fallback again would never end
             _LOGGER.error(
                 "Polyglot Assist: fallback %r leads back to Polyglot — refusing (loop)",
@@ -453,10 +446,9 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                 "Polyglot miss but fallback agent %r not available",
                 self._fallback_agent_id,
             )
+            lang = guess_language(user_input.text, languages) or user_input.language
             err_response = intent.IntentResponse(language=user_input.language)
-            err_response.async_set_speech(
-                "Fallback-Agent ist nicht verfügbar."
-            )
+            err_response.async_set_speech(say("fallback_loop" if loop else "fallback_unavailable", lang))
             return ConversationResult(
                 response=err_response,
                 conversation_id=user_input.conversation_id,
