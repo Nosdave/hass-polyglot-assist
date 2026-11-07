@@ -57,7 +57,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_proposals_list, ws_proposals_accept, ws_proposals_reject,
         ws_proposals_generate, ws_suggest_languages,
         ws_monitor_status, ws_monitor_run,
-        ws_overview, ws_categories, ws_names_set, ws_options,
+        ws_overview, ws_categories, ws_names_set, ws_options, ws_entries,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -446,6 +446,10 @@ async def ws_proposals_accept(hass: HomeAssistant, connection, msg) -> None:
 
     def _mutate(data: dict) -> None:
         for item in usable:
+            # repeat document checks on the FRESH document inside the write lock
+            reason = check_item_against(item, data)
+            if reason:
+                raise GuardError("stale", f"{item.get('title', item['id'])}: {reason}")
             try:
                 apply_op(data, item)
             except QueueError as err:
@@ -792,3 +796,15 @@ def _dynamic_reason(hass: HomeAssistant, item: dict, sensitive: set[str], extra_
     if op in ("add_names", "remove_names") and not str(p.get("target", "")).startswith("area."):
         return protected_reason(hass, p.get("target", ""), sensitive_entities=sensitive, extra_names=extra_names)
     return None
+
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): "polyglot_assist/entries"})
+@callback
+def ws_entries(hass: HomeAssistant, connection, msg) -> None:
+    """Loaded Polyglot entries (the panel lets the user pick one if several)."""
+    connection.send_result(
+        msg["id"],
+        {"entries": [{"entry_id": eid, "title": data["entry"].title} for eid, data in hass.data.get(DOMAIN, {}).items()]},
+    )

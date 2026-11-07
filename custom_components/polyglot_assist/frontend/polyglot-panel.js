@@ -111,7 +111,10 @@ class PolyglotAssistPanel extends HTMLElement {
   get hass() { return this._hass; }
   set narrow(n) { this._narrow = n; }
 
-  ws(type, data = {}) { return this._hass.callWS({ type: `polyglot_assist/${type}`, ...data }); }
+  ws(type, data = {}) {
+    const extra = this.s.entryId ? { entry_id: this.s.entryId } : {};
+    return this._hass.callWS({ type: `polyglot_assist/${type}`, ...extra, ...data });
+  }
 
   async _boot() {
     this.shadowRoot.innerHTML = `<style>${CSS}</style><div class="loading">Polyglot wird geladen …</div>`;
@@ -121,6 +124,14 @@ class PolyglotAssistPanel extends HTMLElement {
     this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") this._closeTips(); if (e.key === "Enter" && e.target.id === "tin") this._test(); });
     const hash = location.hash.slice(1);
     if (L.tabs[hash]) this.s.view = hash;
+    try {
+      const r = await this._hass.callWS({ type: "polyglot_assist/entries" });
+      this.s.entries = r.entries || [];
+      let saved = null;
+      try { saved = localStorage.getItem("polyglot-entry"); } catch (e) { saved = null; }
+      const pick = this.s.entries.find((x) => x.entry_id === saved) || this.s.entries[0];
+      this.s.entryId = pick ? pick.entry_id : null;
+    } catch (err) { this.s.entries = []; }
     await this._reload();
   }
 
@@ -152,7 +163,7 @@ class PolyglotAssistPanel extends HTMLElement {
     if (this.s.error) body = `<div class="card"><div class="banner err">Polyglot antwortet nicht: ${esc(this.s.error)}</div><p class="hint">Ist die Integration geladen? Einstellungen → Geräte &amp; Dienste → Polyglot Assist.</p></div>`;
     else if (o) body = this[`_v_${this.s.view}`]();
     this.shadowRoot.innerHTML = `<style>${CSS}</style>
-      <div class="top"><div class="wrap"><div class="appbar">${this._narrow ? '<button class="menu" data-act="menu" aria-label="Menü">☰</button>' : ""}<h1>${L.title}</h1><span class="src">${esc(langs)}</span></div>
+      <div class="top"><div class="wrap"><div class="appbar">${this._narrow ? '<button class="menu" data-act="menu" aria-label="Menü">☰</button>' : ""}<h1>${L.title}</h1>${(this.s.entries || []).length > 1 ? `<select data-act="entry" aria-label="Polyglot-Eintrag" style="margin-left:12px">${this.s.entries.map((x) => `<option value="${esc(x.entry_id)}" ${x.entry_id === this.s.entryId ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select>` : ""}<span class="src">${esc(langs)}</span></div>
       <nav class="tabs" aria-label="Bereiche">${tabs}</nav></div></div>
       <main class="wrap">${body}</main>`;
   }
@@ -460,6 +471,11 @@ class PolyglotAssistPanel extends HTMLElement {
   async _change(e) {
     const el = e.target;
     if (el.dataset.bind) { this.s[el.dataset.bind] = el.value; this._render(); return; }
+    if (el.dataset.act === "entry") {
+      this.s.entryId = el.value; this.s.selected = null; this.s.monitor = null;
+      try { localStorage.setItem("polyglot-entry", el.value); } catch (e) { /* per-viewer convenience only */ }
+      await this._reload(["overview", "data", "proposals", "monitor"]); return;
+    }
     if (el.id === "mtime") {
       try { await this.ws("options", { monitor_time: (el.value || "03:00").slice(0, 5) }); this._setMsg("mon", "Uhrzeit gespeichert.", "ok"); setTimeout(() => this._reload(["overview", "monitor"]), 1500); }
       catch (err) { this._setMsg("mon", `Fehler: ${err.message || err}`, "err"); }

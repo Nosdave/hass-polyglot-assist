@@ -75,7 +75,9 @@ def _lists_for(hass: HomeAssistant, data: dict):
 
 async def _report(hass: HomeAssistant, runtime: dict[str, Any], data: dict, cases: list) -> dict:
     matcher = await MatcherLoader.load_data(hass, data, "candidate")
-    slot_lists = _lists_for(hass, data).async_get()
+    lists = _lists_for(hass, data)
+    await lists.async_render_templates_now()  # template lists too, not only registry lists
+    slot_lists = lists.async_get()
 
     def _match(text: str, hint: str | None):
         res = matcher.match(text, hint, slot_lists)

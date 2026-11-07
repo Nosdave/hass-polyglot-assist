@@ -291,6 +291,10 @@ class DynamicLists:
                 tuples.append((text, eid, {"domain": state.domain}))
         return _slot_list(list_name, tuples)
 
+    async def async_render_templates_now(self) -> None:
+        """Render template lists immediately (for one-off checks)."""
+        await self._async_render_templates()
+
     async def _async_render_templates(self, _now: Any = None) -> None:
         for list_name, spec in self._specs.items():
             if "template" not in spec:

@@ -142,8 +142,8 @@ async def async_discover(
 
     # 1) commands for scripts / scenes / buttons
     for state in [s for s in fresh if s.domain in COMMAND_DOMAINS and s.entity_id not in covered][:MAX_COMMANDS_PER_RUN]:
-        processed.add(state.entity_id)
         if action_target_reason(hass, state.entity_id, sensitive=sensitive, extra_names=extra):
+            processed.add(state.entity_id)  # decided: never proposed
             continue  # script/scene/button that touches something protected
         name = _camel(f"{state.domain} {state.name}")
         if name in (config.get("intents") or {}):
@@ -165,7 +165,8 @@ async def async_discover(
             if good:
                 sentences[lang] = good
         if not sentences:
-            continue
+            continue  # nothing usable (e.g. AI timeout) → stays eligible for the next run
+        processed.add(state.entity_id)
         intent_cfg = {
             "description": f"{state.name} starten ({state.entity_id})",
             "category": OTHER_CATEGORY, "kind": "command", "action": action,
@@ -200,7 +201,6 @@ async def async_discover(
             area = areas.async_get_area(entry.area_id) if entry and entry.area_id else None
             targets.setdefault(state.entity_id, (state.name, f"{state.domain} device", area.name if area else ""))
     targets = dict(list(targets.items())[:MAX_NAME_TARGETS_PER_RUN])
-    processed |= set(targets)
     if targets and other_langs:
         names = await async_propose_names(
             hass, ai_task_entity=ai_task, targets=targets, languages=other_langs,
@@ -214,6 +214,7 @@ async def async_discover(
                     continue
                 good = [r["name"] for r in res if r["status"] == "ok"]
                 if good:
+                    processed.add(target)
                     items.append({
                         "op": "add_names", "payload": {"target": target, "lang": lang, "names": good},
                         "title": f"Namen für {targets[target][0]} ({lang}): {', '.join(good)}",
