@@ -167,10 +167,12 @@ def check_voice_item(
                 lst = lists.get(ref)
                 if isinstance(lst, TextSlotList):
                     for v in lst.values:
-                        out = getattr(v, "value_out", None)
-                        if isinstance(out, str) and _ENTITY.match(out) and protected_reason(
-                                hass, out, sensitive_entities=sensitive, extra_names=extra):
-                            return f"a placeholder can reach a protected device ({out}) — use the panel"
+                        # the value itself or its context (e.g. {name}: friendly name + context entity_id)
+                        ctx = getattr(v, "context", None) or {}
+                        for out in (getattr(v, "value_out", None), ctx.get("entity_id") if isinstance(ctx, dict) else None):
+                            if isinstance(out, str) and _ENTITY.match(out) and protected_reason(
+                                    hass, out, sensitive_entities=sensitive, extra_names=extra):
+                                return f"a placeholder can reach a protected device ({out}) — use the panel"
                 elif ref in ("name", "area", "floor") or lst is None:
                     return "a placeholder whose values are not known — use the panel"
             for ref in refs:
