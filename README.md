@@ -1,9 +1,11 @@
 # Polyglot Assist
 
-> **Multi-language Tier-1 intent matcher for Home Assistant Voice.**
-> Deterministic local Hassil matching across multiple languages, with LLM
-> fallback proxy. Solves HA's `hass.config.language`-only sentence-trigger
-> limit so a single Voice-PE pipeline can serve a multilingual household.
+> **A local, multi-language voice layer for Home Assistant Assist.**
+> Deterministic local matching across multiple languages, with your AI agent
+> as fallback. A single voice pipeline can serve a multilingual household.
+> It solves HA's `hass.config.language`-only sentence-trigger limit and
+> includes a panel, safe suggestions, learning by voice and a designable
+> confirmation tone that works with any TTS.
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
