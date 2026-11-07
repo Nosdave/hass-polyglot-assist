@@ -60,6 +60,15 @@ def loosened(current: dict[str, Any], old: dict[str, Any]) -> list[dict[str, Any
 
     for entity in sorted(sensitive_entities(current) - sensitive_entities(old)):
         out.append({"entity": entity, "now": "protected", "then": "unprotected"})
+    # devices protected today only because a Polyglot name looks security-relevant
+    from .corpus import names_table  # noqa: PLC0415
+    from .proposals import looks_protected  # noqa: PLC0415
+
+    def _by_name(cfg: dict[str, Any]) -> set[str]:
+        return {t for t, names in names_table(cfg).items() if any(looks_protected(n) for n in names)}
+
+    for entity in sorted(_by_name(current) - _by_name(old)):
+        out.append({"entity": entity, "now": "protected by name", "then": "unprotected"})
     return out
 
 
