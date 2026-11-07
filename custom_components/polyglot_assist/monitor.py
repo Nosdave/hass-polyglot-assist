@@ -266,7 +266,7 @@ def _harden(check: dict[str, Any], *, name: str, cfg: dict[str, Any], template: 
         return fail("does not match the sentences that were actually said")
     # must not take over Home Assistant's built-in commands
     if builtin_match is not None:
-        for sample in bounded_samples(parsed, slot_lists, parse_rules(rules), lang, 4):
+        for sample in bounded_samples(parsed, slot_lists, parse_rules(rules), lang):  # same sample set as the normal check
             if (hit := builtin_match(sample, lang)) is not None:
                 return fail(f"would take over a Home Assistant command ({hit}) for “{sample}”")
     # the command must switch what the assistant switched back then
@@ -283,9 +283,11 @@ def _harden(check: dict[str, Any], *, name: str, cfg: dict[str, Any], template: 
         return warn("the command names no device (e.g. it runs a script) — review it")
     said = {_n(v) for e in evidence for t in (e.get("targets") or []) for v in _target_values(t.get("args"))}
     if entities and said and names_of is not None:
-        names = {_n(n) for e in entities for n in [e, *names_of(e)] if n}
-        if not names & said:  # complete names / ids only — "couch" is not "couch strip"
-            return fail("this command switches something else than the assistant did")
+        # EVERY target of the command must be one the assistant switched for these sentences
+        # (complete names / ids only — "couch" is not "couch strip")
+        extra = [e for e in entities if not {_n(n) for n in [e, *names_of(e)] if n} & said]
+        if extra:
+            return fail(f"this command switches something else than the assistant did ({', '.join(extra[:3])})")
     elif entities and not said:
         return warn("the assistant's tool calls name no target — review it")
     return check
