@@ -472,7 +472,9 @@ class PolyglotAssistPanel extends HTMLElement {
     const el = e.target;
     if (el.dataset.bind) { this.s[el.dataset.bind] = el.value; this._render(); return; }
     if (el.dataset.act === "entry") {
-      this.s.entryId = el.value; this.s.selected = null; this.s.monitor = null;
+      // nothing of entry A may leak into entry B (editors, suggestions, results)
+      Object.assign(this.s, { entryId: el.value, selected: null, monitor: null, catsOpen: false, catEdit: null,
+        nameSugg: null, langSugg: null, testResult: undefined, corpus: null, confirmDelete: null, lang: null, msg: {} });
       try { localStorage.setItem("polyglot-entry", el.value); } catch (e) { /* per-viewer convenience only */ }
       await this._reload(["overview", "data", "proposals", "monitor"]); return;
     }
