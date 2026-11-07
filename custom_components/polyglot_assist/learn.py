@@ -61,7 +61,8 @@ _SENTENCES = {
         "no": ["no", "no thanks"],
     },
     "fr": {
-        "list": ["qu'as-tu appris", "qu'est-ce que tu as appris", "[y a-t-il] des [nouvelles] suggestions"],
+        "list": ["qu'as-tu appris", "qu'(est-ce|est ce) (que|qu'|quelque chose [que]) tu as appris [de nouveau]",
+                 "[y a-t-il] des [nouvelles] suggestions"],
         "detail": ["(dis-m'en|dis moi) plus sur (la|le) {pg_nth} [suggestion]", "quelle est la {pg_nth} [suggestion]"],
         "accept": ["(accepte|applique)(-la|-le| la| le)", "(accepte|applique) (la|le) {pg_nth} [suggestion]"],
         "reject": ["(rejette|refuse)(-la|-le| la| le)", "(rejette|refuse) (la|le) {pg_nth} [suggestion]"],
