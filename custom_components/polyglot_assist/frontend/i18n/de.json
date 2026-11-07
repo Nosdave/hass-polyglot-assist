@@ -42,7 +42,11 @@
     "aitask": "Die KI-Aufgabe, die Übersetzungen, Namen und Befehle vorschlägt. Sie muss ohne Werkzeuge sein: Sie liest fremde Sätze und darf dabei nichts schalten können.",
     "builtin": "Home Assistant bringt fertige Sprachbefehle mit: Licht an/aus, dimmen, Farbe, Timer, Datum, Uhrzeit, Status. Von sich aus versteht es die aber nur in der Sprache deines Sprachassistenten. Mit diesem Schalter erkennt Polyglot sie in allen gewählten Sprachen und führt sie sofort aus, ohne Umweg über die KI. Das ist schneller und funktioniert auch, wenn die KI gerade nicht erreichbar ist. Türen, Schlösser, Tore, Alarm und das Auto schaltet Polyglot dabei nie; solche Befehle gehen weiter an deinen KI-Assistenten. Ausschalten nur, wenn du Befehle ausschließlich selbst festlegen willst.",
     "followup": "Damit dein KI-Assistent „und jetzt auch das Piano“ versteht, erfährt er, was Polyglot gerade geschaltet hat.",
-    "fallback": "Dein KI-Assistent, der alles beantwortet, was kein fester Befehl ist."
+    "fallback": "Alles, was kein fester Befehl ist, beantwortet dein KI-Assistent. Hier wählst du, welcher. Polyglot selbst kann es nicht sein – sonst würde der Satz endlos im Kreis geschickt.",
+    "pipelines": "Ein Sprachassistent in Home Assistant legt fest, wer zuhört (Spracherkennung), wer versteht (hier soll Polyglot stehen) und wer spricht. „Befehle lokal bevorzugen“: Ist das an, prüft Home Assistant jeden Satz zuerst selbst – nur in der Sprache des Assistenten – und Polyglot sieht diese Sätze nie. Aus ist richtig, wenn Polyglot die Grundbefehle übernimmt.",
+    "apply": "Polyglot hört danach nur noch auf die ausgewählten Sprachen und lädt die Grundbefehle von Home Assistant dafür. Das dauert etwa eine Sekunde. Deine eigenen Befehle bleiben, wie sie sind. Mindestens eine Sprache muss ausgewählt sein.",
+    "amp": "Damit ein Satz in einer Sprache klappt, braucht es vier Dinge: Die Spracherkennung muss die Sprache verstehen, deine KI muss sie können, Polyglot muss Befehle in ihr kennen, und die Sprachausgabe muss in ihr antworten können. Ob die Spracherkennung die Sprache auch von selbst erkennt, meldet Home Assistant nicht – das prüft „Spracherkennung testen“.",
+    "uitexts": "Die Texte dieser Oberfläche. Mitgeliefert sind Deutsch, Englisch und Französisch. Für jede weitere Sprache übersetzt deine KI die Texte; du kannst jede Zeile ändern. Mit „Exportieren“ entsteht eine Datei, die sich mit allen teilen lässt."
   },
   "kinds": {
     "new": "neu",
@@ -284,5 +288,70 @@
     "time_saved": "Uhrzeit gespeichert.",
     "ai_task_has_tools": "Diese KI-Aufgabe hat Werkzeuge. Bitte eine ohne Werkzeuge wählen.",
     "need_catalog": "Zum Ändern bitte unter Einstellungen die Quelle „Katalog“ wählen."
+  },
+  "fallback": {
+    "label": "Weitergeben an",
+    "same_setting": "Dieselbe Einstellung wie unter Geräte & Dienste → Polyglot Assist → Konfigurieren.",
+    "not_possible": "nicht möglich",
+    "not_possible_long": "Polyglot kann nicht sein eigener KI-Assistent sein – der Satz würde endlos im Kreis geschickt.",
+    "saving": "Wird gespeichert … Polyglot lädt neu.",
+    "saved": "Gespeichert – Polyglot gibt ab jetzt hierhin weiter."
+  },
+  "pipes": {
+    "title": "Sprachassistenten",
+    "assistant": "Assistent",
+    "polyglot": "Polyglot aktiv",
+    "local": "Befehle lokal bevorzugen",
+    "devices": "Geräte",
+    "preferred": "bevorzugt",
+    "no": "nein",
+    "local_on": "an – nur {language}",
+    "local_off": "aus – alles über Polyglot",
+    "none": "Keine Sprachassistenten eingerichtet.",
+    "open": "Sprachassistenten öffnen ↗",
+    "readonly": "Änderungen an Assistenten macht Home Assistant selbst; hier wird nur angezeigt."
+  },
+  "langs": {
+    "ask": "Welche Sprachen kann mein Sprachassistent?",
+    "apply": "Auswahl übernehmen",
+    "dirty": "nicht übernommen",
+    "step_ai_list": "Deine KI wird nach Sprachen gefragt …",
+    "step_stt_tts": "Spracherkennung, Sprachausgabe und Polyglot gelesen",
+    "step_ai_test": "KI: Probesatz je Sprache wird geprüft … das dauert meist 10–60 Sekunden.",
+    "stop_waiting": "Nicht mehr warten",
+    "stopped": "Nicht mehr gewartet. Die Anfrage an die KI läuft im Hintergrund noch bis zu ihrer Zeitgrenze.",
+    "done": "Geprüft. Neue Sprachen sind gestrichelt und noch nicht ausgewählt.",
+    "done_no_ai": "Geprüft – ohne KI-Test (keine KI für Vorschläge gewählt).",
+    "min_one": "Mindestens eine Sprache auswählen.",
+    "applying": "Wird übernommen … Polyglot lädt neu.",
+    "applied": "Übernommen. Polyglot hört jetzt auf: {languages}",
+    "not_full": "funktioniert nicht durchgehend – siehe Tabelle",
+    "table_title": "Funktioniert jede Sprache durchgehend?",
+    "language": "Sprache",
+    "stt": "Spracherkennung",
+    "ai": "KI",
+    "commands": "Befehle",
+    "tts": "Sprachausgabe",
+    "unknown": "unbekannt",
+    "source": "Assistent: {assistant} · Spracherkennung: {stt} · Sprachausgabe: {tts} · Sprache des Assistenten: {language}",
+    "stt_test": "Spracherkennung testen",
+    "stt_running": "Je Sprache wird ein Testsatz gesprochen und erkannt …",
+    "stt_hint": "Ergebnis ist ein Hinweis: Die Testsätze spricht eine künstliche Stimme."
+  },
+  "uitexts": {
+    "title": "Oberflächentexte",
+    "language": "Sprache",
+    "translate": "Mit KI übersetzen",
+    "export": "Als Datei exportieren",
+    "edit": "Texte bearbeiten",
+    "none": "Für diese Sprache gibt es noch keine Oberflächentexte. Polyglot kann sie mit deiner KI übersetzen; danach kannst du jede Zeile korrigieren.",
+    "machine": "{count} Texte sind maschinell übersetzt – bitte prüfen. Korrekturen gehen nie verloren, auch nicht bei Updates.",
+    "own": "{count} Texte, alle von dir geprüft.",
+    "filter": "Texte durchsuchen",
+    "machine_chip": "maschinell",
+    "running": "Wird übersetzt … das kann einige Minuten dauern.",
+    "translated": "{count} von {total} Texten übersetzt, {refused} abgelehnt.",
+    "exported": "Exportiert als {file}.",
+    "exported_missing": "Exportiert als {file} – {count} Texte fehlen noch."
   }
 }

@@ -42,7 +42,11 @@
     "aitask": "La tâche IA qui propose des traductions, des noms et des commandes. Elle ne doit pas avoir d'outils : elle lit des phrases venues d'ailleurs et ne doit rien pouvoir actionner pendant ce temps.",
     "builtin": "Home Assistant fournit des commandes vocales toutes prêtes : allumer/éteindre la lumière, varier, couleur, minuteurs, date, heure, état. Mais de lui-même, il ne les comprend que dans la langue de ton assistant vocal. Avec cet interrupteur, Polyglot les reconnaît dans toutes les langues choisies et les exécute tout de suite, sans passer par l'IA. C'est plus rapide et ça marche aussi quand l'IA n'est pas joignable. Polyglot n'actionne jamais ainsi les portes, serrures, portails, alarmes ni la voiture ; ces commandes continuent d'aller à ton assistant IA. Ne le désactive que si tu veux définir toi-même toutes les commandes.",
     "followup": "Pour que ton assistant IA comprenne « et maintenant le piano aussi », il est informé de ce que Polyglot vient d'actionner.",
-    "fallback": "Ton assistant IA, qui répond à tout ce qui n'est pas une commande fixe."
+    "fallback": "Tout ce qui n’est pas une commande fixe est traité par ton assistant IA. Choisis lequel ici. Ce ne peut pas être Polyglot lui-même – la phrase tournerait en rond sans fin.",
+    "pipelines": "Un assistant vocal de Home Assistant définit qui écoute (reconnaissance), qui comprend (Polyglot doit être ici) et qui parle. « Traiter les commandes localement » : activé, Home Assistant vérifie d’abord chaque phrase lui-même – uniquement dans la langue de l’assistant – et Polyglot ne les voit jamais. Désactivé est correct quand Polyglot gère les commandes intégrées.",
+    "apply": "Polyglot n’écoutera alors que les langues choisies et chargera les commandes intégrées de Home Assistant pour elles. Cela prend environ une seconde. Tes propres commandes restent inchangées. Au moins une langue doit être choisie.",
+    "amp": "Pour qu’une phrase fonctionne dans une langue, il faut quatre choses : la reconnaissance vocale doit la comprendre, ton IA doit la parler, Polyglot doit y connaître des commandes, et la synthèse doit pouvoir y répondre. Home Assistant n’indique pas si la reconnaissance détecte la langue toute seule – « Tester la reconnaissance vocale » le vérifie.",
+    "uitexts": "Les textes de cette interface. L’allemand, l’anglais et le français sont fournis. Pour toute autre langue, ton IA traduit les textes ; tu peux modifier chaque ligne. « Exporter » crée un fichier que tu peux partager avec tous."
   },
   "kinds": {
     "new": "ajout",
@@ -284,5 +288,70 @@
     "time_saved": "Heure enregistrée.",
     "ai_task_has_tools": "Cette tâche IA a des outils. Choisis-en une sans outils.",
     "need_catalog": "Pour modifier, choisis la source « Catalogue » dans les paramètres."
+  },
+  "fallback": {
+    "label": "Transmettre à",
+    "same_setting": "Même réglage que Appareils et services → Polyglot Assist → Configurer.",
+    "not_possible": "impossible",
+    "not_possible_long": "Polyglot ne peut pas être son propre assistant IA – la phrase tournerait en rond sans fin.",
+    "saving": "Enregistrement … Polyglot redémarre.",
+    "saved": "Enregistré – Polyglot transmet désormais ici."
+  },
+  "pipes": {
+    "title": "Assistants vocaux",
+    "assistant": "Assistant",
+    "polyglot": "Polyglot actif",
+    "local": "Traiter les commandes localement",
+    "devices": "Appareils",
+    "preferred": "préféré",
+    "no": "non",
+    "local_on": "activé – {language} uniquement",
+    "local_off": "désactivé – tout passe par Polyglot",
+    "none": "Aucun assistant vocal configuré.",
+    "open": "Ouvrir les assistants vocaux ↗",
+    "readonly": "Home Assistant modifie lui-même les assistants ; ici, on ne fait qu’afficher."
+  },
+  "langs": {
+    "ask": "Quelles langues mon assistant vocal gère-t-il ?",
+    "apply": "Appliquer la sélection",
+    "dirty": "pas appliqué",
+    "step_ai_list": "Ton IA est interrogée sur ses langues …",
+    "step_stt_tts": "Reconnaissance, synthèse vocale et Polyglot lus",
+    "step_ai_test": "IA : une phrase test par langue est vérifiée … cela prend en général 10 à 60 secondes.",
+    "stop_waiting": "Ne plus attendre",
+    "stopped": "Attente arrêtée. La demande à l’IA continue en arrière-plan jusqu’à sa limite de temps.",
+    "done": "Vérifié. Les nouvelles langues sont en pointillés et pas encore choisies.",
+    "done_no_ai": "Vérifié – sans test de l’IA (aucune IA choisie pour les suggestions).",
+    "min_one": "Choisis au moins une langue.",
+    "applying": "Application … Polyglot redémarre.",
+    "applied": "Appliqué. Polyglot écoute maintenant : {languages}",
+    "not_full": "ne fonctionne pas de bout en bout – voir le tableau",
+    "table_title": "Chaque langue fonctionne-t-elle de bout en bout ?",
+    "language": "Langue",
+    "stt": "Reconnaissance vocale",
+    "ai": "IA",
+    "commands": "Commandes",
+    "tts": "Synthèse vocale",
+    "unknown": "inconnu",
+    "source": "Assistant : {assistant} · Reconnaissance : {stt} · Synthèse : {tts} · Langue de l’assistant : {language}",
+    "stt_test": "Tester la reconnaissance vocale",
+    "stt_running": "Une phrase test par langue est dite et reconnue …",
+    "stt_hint": "Le résultat est une indication : les phrases test sont dites par une voix de synthèse."
+  },
+  "uitexts": {
+    "title": "Textes de l’interface",
+    "language": "Langue",
+    "translate": "Traduire avec l’IA",
+    "export": "Exporter en fichier",
+    "edit": "Modifier les textes",
+    "none": "Il n’y a pas encore de textes d’interface pour cette langue. Polyglot peut les traduire avec ton IA ; ensuite tu peux corriger chaque ligne.",
+    "machine": "{count} textes sont traduits automatiquement – à vérifier. Les corrections ne sont jamais perdues, même lors des mises à jour.",
+    "own": "{count} textes, tous vérifiés par toi.",
+    "filter": "Chercher dans les textes",
+    "machine_chip": "automatique",
+    "running": "Traduction … cela peut prendre quelques minutes.",
+    "translated": "{count} textes sur {total} traduits, {refused} refusés.",
+    "exported": "Exporté sous {file}.",
+    "exported_missing": "Exporté sous {file} – il manque encore {count} textes."
   }
 }

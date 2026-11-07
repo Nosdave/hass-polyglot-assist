@@ -168,3 +168,86 @@ async def async_language_check(
         "ai_note": None if use_ai else "choose an AI task without tools to check the AI",
         "languages": rows,
     }
+
+
+# ── speech recognition test (synthetic voice → STT) ─────────────────────
+
+TEST_SENTENCES = {
+    "de": "Wie spät ist es heute Abend?", "en": "What time is it this evening?",
+    "fr": "Quelle heure est-il ce soir ?", "nl": "Hoe laat is het vanavond?",
+    "es": "¿Qué hora es esta noche?", "it": "Che ore sono stasera?", "pt": "Que horas são esta noite?",
+    "pl": "Która jest godzina dziś wieczorem?",
+}
+STT_TIMEOUT = 30
+_WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
+
+
+def _words(text: str) -> list[str]:
+    return [w.lower() for w in _WORD.findall(text or "")]
+
+
+async def _stt_one(hass: HomeAssistant, pipeline: Any, lang: str) -> dict[str, Any]:
+    import io  # noqa: PLC0415
+    import wave  # noqa: PLC0415
+
+    from homeassistant.components import stt, tts  # noqa: PLC0415
+
+    sentence = TEST_SENTENCES.get(lang)
+    if not sentence:
+        return {"ok": None, "error": "no test sentence for this language"}
+    if not pipeline.tts_engine or not pipeline.stt_engine:
+        return {"ok": None, "error": "the voice assistant has no speech output or recognition"}
+    async with asyncio.timeout(STT_TIMEOUT):
+        stream = tts.async_create_stream(
+            hass, pipeline.tts_engine, language=lang,
+            options={"preferred_format": "wav", "preferred_sample_rate": 16000,
+                     "preferred_sample_channels": 1, "preferred_sample_bytes": 2},
+        )
+        stream.async_set_message(sentence)
+        data = b"".join([chunk async for chunk in stream.async_stream_result()])
+        with wave.open(io.BytesIO(data)) as wav:
+            if (wav.getframerate(), wav.getnchannels(), wav.getsampwidth()) != (16000, 1, 2):
+                return {"ok": None, "error": "speech output did not deliver 16 kHz mono audio"}
+            pcm = wav.readframes(wav.getnframes())
+        provider = stt.async_get_speech_to_text_engine(hass, pipeline.stt_engine)
+        if provider is None:
+            return {"ok": None, "error": "speech recognition not found"}
+        meta = stt.SpeechMetadata(
+            language=pipeline.stt_language or pipeline.language, format=stt.AudioFormats.WAV,
+            codec=stt.AudioCodecs.PCM, bit_rate=stt.AudioBitRates.BITRATE_16,
+            sample_rate=stt.AudioSampleRates.SAMPLERATE_16000, channel=stt.AudioChannels.CHANNEL_MONO,
+        )
+
+        async def chunks():
+            for i in range(0, len(pcm), 4096):
+                yield pcm[i:i + 4096]
+            yield b"\x00" * 16000  # a moment of silence at the end
+
+        process = getattr(provider, "internal_async_process_audio_stream", None) or provider.async_process_audio_stream
+        result = await process(meta, chunks())
+    heard = (result.text or "").strip()
+    want, got = _words(sentence), set(_words(heard))
+    share = sum(1 for w in want if w in got) / max(len(want), 1)
+    return {"ok": share >= 0.6, "sentence": sentence, "heard": heard[:200], "match": round(share, 2)}
+
+
+async def async_stt_test(hass: HomeAssistant, *, pipeline_id: str | None, languages: list[str]) -> dict[str, Any]:
+    """Speak a short sentence per language with the voice assistant's speech output and
+    let its speech recognition (set to the assistant's language) transcribe it.
+
+    A hint, not a proof: a synthetic voice is clearer than people in a kitchen.
+    """
+    from homeassistant.components.assist_pipeline.pipeline import async_get_pipeline  # noqa: PLC0415
+
+    pipeline = async_get_pipeline(hass, pipeline_id)
+    out = []
+    for lang in [x for x in dict.fromkeys(_base(x) for x in languages) if LANG_RE.match(x)][:8]:
+        try:
+            row = await _stt_one(hass, pipeline, lang)
+        except TimeoutError:
+            row = {"ok": None, "error": "timeout"}
+        except Exception as err:  # noqa: BLE001
+            row = {"ok": None, "error": str(err)[:200]}
+        out.append({"language": lang, **row})
+    return {"pipeline": {"id": pipeline.id, "name": pipeline.name, "stt_language": pipeline.stt_language},
+            "languages": out}

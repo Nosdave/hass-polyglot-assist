@@ -34,7 +34,7 @@ from .const import (
 )
 from .history import change_summary, get_history, loosened
 from .fallback import fallback_error
-from .settings import async_language_check, pipelines_overview
+from .settings import async_language_check, async_stt_test, pipelines_overview
 from .ui_texts import UiTextError, get_ui_texts, shipped_languages
 from .corpus import count_summary, validate
 from .guard import GuardError, async_guarded_update, revision, write_lock
@@ -65,7 +65,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_monitor_status, ws_monitor_run,
         ws_overview, ws_categories, ws_names_set, ws_options, ws_entries,
         ws_history_list, ws_history_diff, ws_history_restore,
-        ws_fallback_set, ws_pipelines, ws_languages_check,
+        ws_fallback_set, ws_pipelines, ws_languages_check, ws_stt_test,
         ws_ui_texts_get, ws_ui_texts_languages, ws_ui_texts_set, ws_ui_texts_translate, ws_ui_texts_export,
     ):
         websocket_api.async_register_command(hass, handler)
@@ -681,6 +681,10 @@ def ws_overview(hass: HomeAssistant, connection, msg) -> None:
             "source": runtime["source"].kind,
             "languages": runtime["matcher"].languages,
             "builtin_languages": runtime["builtin"].loaded if runtime.get("builtin") else [],
+            "polyglot_agents": sorted(
+                e.entity_id for e in er.async_get(hass).entities.values()
+                if e.platform == DOMAIN and e.domain == "conversation"
+            ),
             "summary": count_summary(config),
             "problems": validate(config, extra_lists=runtime["lists"].names)[:50],
             "categories": list(config.get("categories") or []),
@@ -960,6 +964,7 @@ def ws_pipelines(hass: HomeAssistant, connection, msg) -> None:
         vol.Optional("entry_id"): str,
         vol.Optional("pipeline_id"): str,
         vol.Required("languages"): [vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$")],
+        vol.Optional("ai", default=True): bool,
     }
 )
 @websocket_api.async_response
@@ -978,7 +983,7 @@ async def ws_languages_check(hass: HomeAssistant, connection, msg) -> None:
         async with asyncio.timeout(LANG_CHECK_BUDGET):
             result = await async_language_check(
                 hass, pipeline_id=msg.get("pipeline_id"), languages=msg["languages"], polyglot=polyglot,
-                ai_task=_ai_task_entity(hass, entry_id), context=connection.context(msg),
+                ai_task=_ai_task_entity(hass, entry_id) if msg["ai"] else None, context=connection.context(msg),
             )
     except TimeoutError:
         connection.send_error(msg["id"], "timeout", "the check took too long")
@@ -1062,3 +1067,26 @@ async def ws_ui_texts_export(hass: HomeAssistant, connection, msg) -> None:
             node = node.setdefault(part, {})
         node[leaf] = text
     connection.send_result(msg["id"], {"file": f"{msg['lang']}.json", "content": nested, "missing": missing})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "polyglot_assist/languages/stt_test",
+        vol.Optional("pipeline_id"): str,
+        vol.Required("languages"): [vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$")],
+    }
+)
+@websocket_api.async_response
+async def ws_stt_test(hass: HomeAssistant, connection, msg) -> None:
+    """Synthetic voice → speech recognition per language (a hint, not a proof)."""
+    try:
+        async with asyncio.timeout(LANG_CHECK_BUDGET):
+            result = await async_stt_test(hass, pipeline_id=msg.get("pipeline_id"), languages=msg["languages"])
+    except TimeoutError:
+        connection.send_error(msg["id"], "timeout", "the test took too long")
+        return
+    except Exception as err:  # noqa: BLE001
+        connection.send_error(msg["id"], "failed", str(err)[:200])
+        return
+    connection.send_result(msg["id"], result)

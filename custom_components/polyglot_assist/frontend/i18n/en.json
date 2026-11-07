@@ -42,7 +42,11 @@
     "aitask": "The AI task that suggests translations, names and commands. It must not have any tools: it reads sentences from elsewhere and must not be able to control anything while doing so.",
     "builtin": "Home Assistant comes with ready-made voice commands: lights on/off, dimming, color, timers, date, time, status. On its own, though, it only understands them in the language of your voice assistant. With this switch, Polyglot recognizes them in all selected languages and carries them out right away, without going through the AI. That's faster and also works when the AI can't be reached. Polyglot never controls doors, locks, gates, alarms or the car this way; such commands still go to your AI assistant. Only turn this off if you want to define all commands yourself.",
     "followup": "So that your AI assistant understands “and now the piano too”, it is told what Polyglot just switched.",
-    "fallback": "Your AI assistant, which answers everything that isn't a fixed command."
+    "fallback": "Everything that is not a fixed command is answered by your AI assistant. Choose which one here. It cannot be Polyglot itself – the sentence would go round in circles forever.",
+    "pipelines": "A voice assistant in Home Assistant decides who listens (speech recognition), who understands (Polyglot should be here) and who speaks. “Prefer handling commands locally”: when on, Home Assistant checks every sentence itself first – only in the assistant's language – and Polyglot never sees those sentences. Off is right when Polyglot handles the built-in commands.",
+    "apply": "Polyglot will then only listen to the selected languages and load Home Assistant's built-in commands for them. This takes about a second. Your own commands stay as they are. At least one language must be selected.",
+    "amp": "For a sentence to work in a language, four things are needed: speech recognition must understand it, your AI must speak it, Polyglot must know commands in it, and speech output must be able to answer in it. Home Assistant does not report whether speech recognition detects the language by itself – “Test speech recognition” checks that.",
+    "uitexts": "The texts of this interface. German, English and French are included. For any other language your AI translates the texts; you can change every line. “Export” creates a file you can share with everyone."
   },
   "kinds": {
     "new": "new",
@@ -284,5 +288,70 @@
     "time_saved": "Time saved.",
     "ai_task_has_tools": "This AI task has tools. Please choose one without tools.",
     "need_catalog": "To make changes, please choose the source “Catalog” in the settings."
+  },
+  "fallback": {
+    "label": "Hand over to",
+    "same_setting": "Same setting as Devices & services → Polyglot Assist → Configure.",
+    "not_possible": "not possible",
+    "not_possible_long": "Polyglot cannot be its own AI assistant – the sentence would go round in circles forever.",
+    "saving": "Saving … Polyglot is reloading.",
+    "saved": "Saved – Polyglot hands over to this one from now on."
+  },
+  "pipes": {
+    "title": "Voice assistants",
+    "assistant": "Assistant",
+    "polyglot": "Polyglot active",
+    "local": "Prefer handling commands locally",
+    "devices": "Devices",
+    "preferred": "preferred",
+    "no": "no",
+    "local_on": "on – {language} only",
+    "local_off": "off – all through Polyglot",
+    "none": "No voice assistants set up.",
+    "open": "Open voice assistants ↗",
+    "readonly": "Home Assistant itself changes assistants; this only shows them."
+  },
+  "langs": {
+    "ask": "Which languages can my voice assistant handle?",
+    "apply": "Apply selection",
+    "dirty": "not applied",
+    "step_ai_list": "Asking your AI for languages …",
+    "step_stt_tts": "Speech recognition, speech output and Polyglot read",
+    "step_ai_test": "AI: checking a test sentence per language … this usually takes 10–60 seconds.",
+    "stop_waiting": "Stop waiting",
+    "stopped": "Stopped waiting. The request to the AI keeps running in the background until its time limit.",
+    "done": "Checked. New languages are dashed and not selected yet.",
+    "done_no_ai": "Checked – without the AI test (no AI for suggestions chosen).",
+    "min_one": "Select at least one language.",
+    "applying": "Applying … Polyglot is reloading.",
+    "applied": "Applied. Polyglot now listens to: {languages}",
+    "not_full": "does not work end to end – see the table",
+    "table_title": "Does every language work end to end?",
+    "language": "Language",
+    "stt": "Speech recognition",
+    "ai": "AI",
+    "commands": "Commands",
+    "tts": "Speech output",
+    "unknown": "unknown",
+    "source": "Assistant: {assistant} · Speech recognition: {stt} · Speech output: {tts} · Assistant language: {language}",
+    "stt_test": "Test speech recognition",
+    "stt_running": "Speaking and recognising a test sentence per language …",
+    "stt_hint": "The result is a hint: the test sentences are spoken by a synthetic voice."
+  },
+  "uitexts": {
+    "title": "Interface texts",
+    "language": "Language",
+    "translate": "Translate with AI",
+    "export": "Export as file",
+    "edit": "Edit texts",
+    "none": "There are no interface texts for this language yet. Polyglot can translate them with your AI; afterwards you can correct every line.",
+    "machine": "{count} texts are machine-translated – please check. Corrections are never lost, not even with updates.",
+    "own": "{count} texts, all checked by you.",
+    "filter": "Search texts",
+    "machine_chip": "machine",
+    "running": "Translating … this can take a few minutes.",
+    "translated": "{count} of {total} texts translated, {refused} refused.",
+    "exported": "Exported as {file}.",
+    "exported_missing": "Exported as {file} – {count} texts are still missing."
   }
 }

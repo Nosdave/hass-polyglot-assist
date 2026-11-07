@@ -103,6 +103,13 @@ tr.click{cursor:pointer}tr.click:hover td{background:rgba(var(--rgb-primary-colo
 .step{display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;align-items:start;padding:10px 0;border-bottom:1px solid var(--divider-color)}.step:last-child{border-bottom:0}
 .dot{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px}
 .msg{margin-top:8px;font-size:13px}
+.amp{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;font-size:12px;font-weight:700}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--divider-color);border-top-color:var(--primary-color);border-radius:50%;animation:pgsp .8s linear infinite;vertical-align:-1px;margin-right:6px}
+@keyframes pgsp{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spin{animation:none}}
+.dirty{font-size:12px;color:var(--warning-color,#b26a00);margin-left:8px}
+.langs label.new{border-style:dashed}.langs .w{color:var(--warning-color,#b26a00)}
+button[disabled]{opacity:.55;cursor:not-allowed}
 .banner{border-radius:8px;padding:10px 12px;font-size:13px}
 dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;margin:10px 0 0}dt{color:var(--secondary-text-color)}dd{margin:0;font-family:var(--code-font-family,monospace);font-size:12.5px;overflow-wrap:anywhere}
 .langs{display:flex;flex-wrap:wrap;gap:8px}.langs label{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--divider-color);border-radius:999px;padding:4px 12px;cursor:pointer}
@@ -453,15 +460,12 @@ class PolyglotAssistPanel extends HTMLElement {
   _v_settings() {
     const t = (k, v) => esc(this.t(k, v));
     const o = this.s.overview, opts = o.options || {};
-    const available = Object.keys(o.summary.sentences || {});
-    const enabled = opts.languages_enabled && opts.languages_enabled.length ? opts.languages_enabled : available;
+    if (!this.s.setLoaded) { this.s.setLoaded = true; this._loadSettings(); }
     const aiTasks = Object.keys(this._hass.states).filter((e) => e.startsWith("ai_task."));
     const mode = opts.response_mode || "text";
-    return `<section class="grid two"><div class="card"><h2>${t("settings.title")}</h2>
-      <div class="set"><div><div class="t">${t("settings.languages")}${this._tip("languages")}</div>
-        <div class="langs" style="margin-top:6px">${available.map((l) => `<label><input type="checkbox" data-lang-opt="${esc(l)}" ${enabled.includes(l) ? "checked" : ""}> ${esc(this._ln(l))}</label>`).join("")}</div>
-        <div class="row" style="margin-top:8px"><button class="b" data-act="langsave">${t("buttons.save_languages")}</button><button class="b" data-act="langsugg">${t("buttons.ask_languages")}</button></div>
-        ${this.s.langSugg ? `<p class="hint">${t("settings.ai_languages", { languages: this.s.langSugg.map((l) => this._ln(l)).join(", ") })}</p>` : ""}</div><span></span></div>
+    return `<section class="grid two"><div class="grid" style="gap:16px;align-content:start">
+      ${this._card_fallback()}${this._card_pipelines()}${this._card_languages()}${this._card_uitexts()}</div>
+      <div class="grid" style="gap:16px;align-content:start"><div class="card"><h2>${t("settings.title")}</h2>
       <div class="set"><div><div class="t">${t("settings.confirmation")}${this._tip("answer")}</div></div>
         <div class="seg" role="group" aria-label="${t("settings.confirmation_label")}"><button data-act="opt" data-k="response_mode" data-v="text" aria-pressed="${mode === "text"}">${t("answer.text")}</button><button data-act="opt" data-k="response_mode" data-v="chime" aria-pressed="${mode === "chime"}">${t("answer.chime")}</button></div></div>
       <div class="set"><div><div class="t">${t("settings.ai_task")}${this._tip("aitask")}</div></div>
@@ -470,11 +474,108 @@ class PolyglotAssistPanel extends HTMLElement {
         <button class="switch" role="switch" data-act="opt" data-k="builtin_commands" aria-checked="${opts.builtin_commands === false ? "false" : "true"}" aria-label="${t("settings.builtin_label")}"></button></div>
       <div class="set"><div><div class="t">${t("settings.followup")}${this._tip("followup")}</div></div>
         <button class="switch" role="switch" data-act="opt" data-k="chat_log_tools" aria-checked="${opts.chat_log_tools ? "true" : "false"}" aria-label="${t("settings.followup_label")}"></button></div>
-      <div class="set"><div><div class="t">${t("settings.fallback")}${this._tip("fallback")}</div><div class="hint">${t("settings.fallback_hint", { agent: o.fallback_agent })}</div></div><span></span></div>
       ${this._msg("set")}</div>
       <div class="card"><h2>${t("settings.backup")}</h2>
         <p class="hint">${o.source === "catalog" ? t("settings.backup_catalog") : t("settings.backup_file")}</p>
-        <div class="grid" style="gap:8px"><button class="b" data-act="export" ${o.source === "catalog" ? "" : "disabled"}>${t("buttons.export")}</button></div>${this._msg("backup")}</div></section>`;
+        <div class="grid" style="gap:8px"><button class="b" data-act="export" ${o.source === "catalog" ? "" : "disabled"}>${t("buttons.export")}</button></div>${this._msg("backup")}</div></div></section>`;
+  }
+
+  async _loadSettings() {
+    const all = this._setLangs();
+    const jobs = [
+      this.ws("pipelines").then((r) => (this.s.pipes = r)).catch(() => (this.s.pipes = { pipelines: [] })),
+      this._hass.callWS({ type: "conversation/agent/list" }).then((r) => (this.s.agents = r.agents || [])).catch(() => (this.s.agents = [])),
+      this.ws("languages/check", { languages: all, ai: false }).then((r) => (this.s.langCheck = r)).catch(() => {}),
+      this._hass.callWS({ type: "polyglot_assist/ui_texts/languages" }).then((r) => (this.s.uiShipped = r.shipped || [])).catch(() => (this.s.uiShipped = [])),
+    ];
+    await Promise.all(jobs);
+    this._render();
+  }
+
+  /** Languages shown in the settings: enabled, with commands, offered by the check. */
+  _setLangs() {
+    const o = this.s.overview, opts = o.options || {};
+    const available = Object.keys(o.summary.sentences || {});
+    const enabled = opts.languages_enabled && opts.languages_enabled.length ? opts.languages_enabled : available;
+    return [...new Set([...enabled, ...available, ...(this.s.langOffered || [])])];
+  }
+  _enabledLangs() {
+    const o = this.s.overview, opts = o.options || {};
+    return opts.languages_enabled && opts.languages_enabled.length ? opts.languages_enabled : Object.keys(o.summary.sentences || {});
+  }
+
+  _card_fallback() {
+    const t = (k, v) => esc(this.t(k, v));
+    const o = this.s.overview, own = new Set(o.polyglot_agents || []);
+    const agents = (this.s.agents || []);
+    const cur = o.fallback_agent;
+    const opts = agents.map((a) => `<option value="${esc(a.id)}" ${a.id === cur ? "selected" : ""} ${own.has(a.id) ? "disabled" : ""}>${esc(a.name || a.id)}${own.has(a.id) ? " – " + t("fallback.not_possible") : ""}</option>`);
+    if (cur && !agents.some((a) => a.id === cur)) opts.unshift(`<option value="${esc(cur)}" selected>${esc(cur)}</option>`);
+    return `<div class="card"><h2>${t("settings.fallback")}${this._tip("fallback")}</h2>
+      <div class="set"><div><div class="t">${t("fallback.label")}</div><div class="hint">${t("fallback.same_setting")}</div></div>
+        <select data-act="fallback" aria-label="${t("fallback.label")}" ${this.s.fbBusy ? "disabled" : ""}>${opts.join("") || `<option>${t("app.loading_short")}</option>`}</select></div>${this._msg("fb")}</div>`;
+  }
+
+  _card_pipelines() {
+    const t = (k, v) => esc(this.t(k, v));
+    const p = this.s.pipes;
+    const rows = p ? (p.pipelines || []).map((x) => `<tr><td class="name">${esc(x.name)}${x.preferred ? ` <span class="chip pri">${t("pipes.preferred")}</span>` : ""}</td>
+      <td><span class="chip ${x.polyglot ? "ok" : "warn"}">${x.polyglot ? "✓" : t("pipes.no")}</span></td>
+      <td><span class="chip ${x.polyglot && !x.prefer_local_intents ? "ok" : x.prefer_local_intents ? "warn" : ""}">${x.prefer_local_intents ? t("pipes.local_on", { language: this._ln(x.language) }) : t("pipes.local_off")}</span></td>
+      <td class="desc">${esc((x.devices || []).join(", ") || "–")}</td></tr>`).join("") : "";
+    return `<div class="card"><h2>${t("pipes.title")}${this._tip("pipelines")}</h2>
+      ${p ? (p.pipelines || []).length ? `<div class="tbl"><table><thead><tr><th>${t("pipes.assistant")}</th><th>${t("pipes.polyglot")}</th><th>${t("pipes.local")}</th><th>${t("pipes.devices")}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="hint">${t("pipes.none")}</p>` : `<p class="hint">${t("app.loading_short")}</p>`}
+      <div class="row" style="margin-top:12px"><button class="b" data-act="openpipes">${t("pipes.open")}</button><span class="hint">${t("pipes.readonly")}</span></div></div>`;
+  }
+
+  _card_languages() {
+    const t = (k, v) => esc(this.t(k, v));
+    const enabled = this._enabledLangs();
+    if (!this.s.langChosen) this.s.langChosen = [...enabled];
+    const chosen = new Set(this.s.langChosen);
+    const check = this.s.langCheck, rows = (check && check.languages) || [];
+    const byLang = Object.fromEntries(rows.map((r) => [r.language, r]));
+    const full = (l) => { const r = byLang[l]; return r && r.stt !== false && r.tts !== false && r.ai !== false && (r.commands > 0 || r.builtin); };
+    const all = this._setLangs();
+    const dirty = !(chosen.size === enabled.length && enabled.every((l) => chosen.has(l)));
+    const amp = (v) => v === true ? `<span class="amp ok">✓</span>` : v === false ? `<span class="amp err">✕</span>` : `<span class="amp" title="${t("langs.unknown")}">?</span>`;
+    const stt = this.s.sttTest ? Object.fromEntries(this.s.sttTest.languages.map((r) => [r.language, r])) : null;
+    return `<div class="card"><h2>${t("settings.languages")}${this._tip("languages")}</h2>
+      <div class="langs">${all.map((l) => `<label class="${enabled.includes(l) ? "" : "new"}"><input type="checkbox" data-lang-opt="${esc(l)}" ${chosen.has(l) ? "checked" : ""}> ${esc(this._ln(l))}${!enabled.includes(l) && byLang[l] && !full(l) ? ` <span class="w" title="${t("langs.not_full")}">⚠</span>` : ""}</label>`).join("")}</div>
+      <div class="row" style="margin-top:12px">
+        <button class="b" data-act="langask" ${this.s.langBusy ? "disabled" : ""}>${this.s.langBusy ? `<span class="spin"></span>` : ""}${t("langs.ask")}</button>
+        <button class="b pri" data-act="langapply" ${dirty && !this.s.langApplying ? "" : "disabled"}>${t("langs.apply")}</button>${dirty ? `<span class="dirty">${t("langs.dirty")}</span>` : ""}${this._tip("apply")}</div>
+      ${this.s.langSteps ? `<div class="hint" style="margin-top:8px">${this.s.langSteps.map((st, i) => `${st.done ? "✓" : `<span class="spin"></span>`} ${esc(this.t(st.k))}`).join("<br>")} ${this.s.langBusy ? `<button class="b" data-act="langcancel" style="margin-left:8px">${t("langs.stop_waiting")}</button>` : ""}</div>` : ""}
+      ${this._msg("lang")}
+      <h2 style="margin-top:18px">${t("langs.table_title")}${this._tip("amp")}</h2>
+      <div class="tbl"><table><thead><tr><th>${t("langs.language")}</th><th>${t("langs.stt")}</th><th>${t("langs.ai")}</th><th>${t("langs.commands")}</th><th>${t("langs.tts")}</th></tr></thead><tbody>
+      ${all.map((l) => { const r = byLang[l] || {}; return `<tr><td>${esc(this._ln(l))}</td><td>${amp(r.stt)}${stt && stt[l] ? ` <span class="hint">${stt[l].ok === true ? "✓" : stt[l].ok === false ? "✕" : "?"} ${esc(stt[l].heard || stt[l].error || "")}</span>` : ""}</td><td>${amp(r.ai)}</td><td>${r.commands > 0 || r.builtin ? amp(true) : amp(r.language ? false : null)}${r.language ? ` <span class="hint">${esc(String(r.commands || 0))}${r.builtin ? " + HA" : ""}</span>` : ""}</td><td>${amp(r.tts)}</td></tr>`; }).join("")}
+      </tbody></table></div>
+      ${check && check.pipeline ? `<p class="hint">${t("langs.source", { assistant: check.pipeline.name, stt: check.pipeline.stt_engine || "–", tts: check.pipeline.tts_engine || "–", language: this._ln(check.pipeline.language) })}</p>` : ""}
+      <div class="row"><button class="b" data-act="stttest" ${this.s.sttBusy ? "disabled" : ""}>${this.s.sttBusy ? `<span class="spin"></span>` : ""}${t("langs.stt_test")}</button>${this.s.sttTest ? `<span class="hint">${t("langs.stt_hint")}</span>` : ""}</div>${this._msg("stt")}</div>`;
+  }
+
+  _card_uitexts() {
+    const t = (k, v) => esc(this.t(k, v));
+    const shipped = this.s.uiShipped || [];
+    const lang = this._uiPref || "";
+    const candidates = this._enabledLangs().filter((l) => !shipped.includes(l) && !shipped.includes(l.split("-")[0]));
+    if (!lang && !candidates.length) return "";
+    if (lang && shipped.includes(lang)) return "";
+    const target = lang || this.s.uiNew || candidates[0];
+    const en = this._enTexts || {};
+    const own = this.s.uiOwn && this.s.uiOwn.lang === target ? this.s.uiOwn : null;
+    const keys = Object.keys(en).filter((k) => !this.s.uiFilter || (k + " " + en[k] + " " + ((own && own.texts[k]) || "")).toLowerCase().includes(this.s.uiFilter.toLowerCase())).slice(0, 60);
+    return `<div class="card"><h2>${t("uitexts.title")}${this._tip("uitexts")}</h2>
+      <div class="row">${lang ? `<b>${esc(this._endonym(target))}</b>` : `<select data-bind="uiNew" aria-label="${t("uitexts.language")}">${candidates.map((l) => `<option value="${esc(l)}" ${l === target ? "selected" : ""}>${esc(this._ln(l))}</option>`).join("")}</select>`}
+        <button class="b" data-act="uitrans" data-l="${esc(target)}" ${this.s.uiBusy ? "disabled" : ""}>${this.s.uiBusy ? `<span class="spin"></span>` : ""}${t("uitexts.translate")}</button>
+        <button class="b" data-act="uiexport" data-l="${esc(target)}">${t("uitexts.export")}</button>
+        <button class="b" data-act="uiload" data-l="${esc(target)}">${t("uitexts.edit")}</button></div>
+      <p class="hint">${own ? (own.machine.length ? t("uitexts.machine", { count: own.machine.length }) : t("uitexts.own", { count: Object.keys(own.texts).length })) : t("uitexts.none")}</p>${this._msg("ui")}
+      ${own ? `<input type="search" data-bind="uiFilter" value="${esc(this.s.uiFilter || "")}" placeholder="${t("uitexts.filter")}" aria-label="${t("uitexts.filter")}" style="width:100%;margin:8px 0">
+      <div class="tbl"><table><thead><tr><th>English</th><th>${esc(this._endonym(target))}</th></tr></thead><tbody>
+      ${keys.map((k) => `<tr><td class="desc">${esc(en[k])}</td><td><input type="text" data-uikey="${esc(k)}" data-l="${esc(target)}" value="${esc(own.texts[k] || "")}" style="width:100%" aria-label="${esc(en[k])}">${own.machine.includes(k) ? ` <span class="chip warn">${t("uitexts.machine_chip")}</span>` : ""}</td></tr>`).join("")}
+      </tbody></table></div>` : ""}</div>`;
   }
 
   // ── messages ──────────────────────────────────────────────────────────────
@@ -570,15 +671,60 @@ class PolyglotAssistPanel extends HTMLElement {
         await this.ws("options", { [k]: v, ...extra });
         setTimeout(() => this._reload(["overview", "monitor"]), k === "monitor" || k === "chat_log_tools" || k === "builtin_commands" ? 1500 : 0);
         this._setMsg(k === "monitor" ? "mon" : "set", t("messages.saved"), "ok");
-      } else if (a === "langsave") {
-        const langs = [...this.shadowRoot.querySelectorAll("[data-lang-opt]:checked")].map((c) => c.dataset.langOpt);
-        if (!langs.length) return this._setMsg("set", t("messages.pick_language"), "err");
-        await this.ws("options", { languages_enabled: langs }); this._setMsg("set", t("messages.languages_saved"), "ok"); setTimeout(() => this._reload(["overview"]), 1500);
-      } else if (a === "langsugg") { this._setMsg("set", t("messages.asking_ai")); const r = await this.ws("suggest_languages"); this.s.langSugg = r.languages; this._setMsg("set", ""); }
+      } else if (a === "langask") {
+        const run = this.s.langRun = (this.s.langRun || 0) + 1;
+        this.s.langBusy = true; this.s.langSteps = [{ k: "langs.step_ai_list", done: false }]; this._setMsg("lang", "");
+        let offered = [];
+        try { const r = await this.ws("suggest_languages"); offered = (r.languages || []).filter(okLang); } catch (err) { /* no AI task: check what is known */ }
+        if (run !== this.s.langRun) return;
+        this.s.langSteps = [{ k: "langs.step_ai_list", done: true }, { k: "langs.step_stt_tts", done: true }, { k: "langs.step_ai_test", done: false }];
+        this.s.langOffered = offered.filter((l) => !this._enabledLangs().includes(l)); this._render();
+        const r = await this.ws("languages/check", { languages: this._setLangs(), ai: true });
+        if (run !== this.s.langRun) return;
+        this.s.langCheck = r; this.s.langBusy = false; this.s.langSteps = null;
+        this._setMsg("lang", r.ai_task ? this.t("langs.done") : this.t("langs.done_no_ai"), "ok");
+      } else if (a === "langcancel") {
+        this.s.langRun = (this.s.langRun || 0) + 1; this.s.langBusy = false; this.s.langSteps = null; this._setMsg("lang", this.t("langs.stopped"));
+      } else if (a === "langapply") {
+        const langs = [...new Set(this.s.langChosen || [])];
+        if (!langs.length) return this._setMsg("lang", this.t("langs.min_one"), "err");
+        this.s.langApplying = true; this._setMsg("lang", this.t("langs.applying"));
+        await this.ws("options", { languages_enabled: langs });
+        const same = (a1, b1) => a1.length === b1.length && a1.every((x) => b1.includes(x));
+        for (let i = 0; i < 20; i++) { await new Promise((res) => setTimeout(res, 500)); try { const ov = await this.ws("overview"); if (same(ov.options.languages_enabled || [], langs)) { this.s.overview = ov; break; } } catch (err) { /* reloading */ } }
+        this.s.langApplying = false; this.s.langChosen = null;
+        this._setMsg("lang", this.t("langs.applied", { languages: langs.map((l) => this._ln(l)).join(", ") }), "ok");
+      } else if (a === "stttest") {
+        this.s.sttBusy = true; this._setMsg("stt", this.t("langs.stt_running"));
+        try { this.s.sttTest = await this.ws("languages/stt_test", { languages: this._setLangs() }); this._setMsg("stt", ""); }
+        finally { this.s.sttBusy = false; this._render(); }
+      } else if (a === "openpipes") {
+        history.pushState(null, "", "/config/voice-assistants/assistants");
+        window.dispatchEvent(new CustomEvent("location-changed"));
+      } else if (a === "uitrans" || a === "uiload" || a === "uiexport") {
+        const lang = el.dataset.l;
+        if (!this._enTexts) this._enTexts = await fetchTexts("en");
+        if (a === "uitrans") {
+          this.s.uiBusy = true; this._setMsg("ui", this.t("uitexts.running"));
+          try { const r = await this.ws("ui_texts/translate", { lang }); this._setMsg("ui", this.t("uitexts.translated", { count: r.translated, total: r.total, refused: Object.keys(r.refused || {}).length }), "ok"); }
+          finally { this.s.uiBusy = false; }
+          await this._loadUiLangs();
+        }
+        if (a === "uiexport") {
+          const r = await this._hass.callWS({ type: "polyglot_assist/ui_texts/export", lang });
+          const blob = new Blob([JSON.stringify(r.content, null, 2) + "\n"], { type: "application/json" });
+          const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = r.file; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+          this._setMsg("ui", r.missing.length ? this.t("uitexts.exported_missing", { file: r.file, count: r.missing.length }) : this.t("uitexts.exported", { file: r.file }), r.missing.length ? "" : "ok");
+        }
+        const own = await this._hass.callWS({ type: "polyglot_assist/ui_texts/get", lang });
+        this.s.uiOwn = { lang, texts: flatten(own.texts), machine: own.machine || [] };
+        if (lang === this._uiPref) await this._loadTexts();
+        this._render();
+      }
       else if (a === "export") { const r = await this._hass.callService("polyglot_assist", "export_yaml", {}, undefined, false, true); this._setMsg("backup", t("messages.exported", { file: Object.values(r.response || {})[0]?.file || "?" }), "ok"); }
       else if (a === "monrun") { this._setMsg("mon", t("messages.analysing")); await this.ws("monitor/run"); await this._reload(["monitor", "proposals"]); this._setMsg("mon", t("messages.analysed"), "ok"); }
     } catch (err) {
-      const key = { gen: "prop", paccept: "prop", preject: "prop", etrans: "edit", esave: "edit", edelyes: "edit", nsugg: "names", nadd: "names", langsugg: "set", opt: "set", langsave: "set", export: "backup", monrun: "mon", catsave: "cmd" }[a] || "cmd";
+      const key = { gen: "prop", paccept: "prop", preject: "prop", etrans: "edit", esave: "edit", edelyes: "edit", nsugg: "names", nadd: "names", langask: "lang", langapply: "lang", stttest: "stt", uitrans: "ui", uiexport: "ui", uiload: "ui", opt: "set", export: "backup", monrun: "mon", catsave: "cmd" }[a] || "cmd";
       this._setMsg(key, t("messages.error", { error: err.message || err.code || err }), "err");
     }
   }
@@ -586,6 +732,26 @@ class PolyglotAssistPanel extends HTMLElement {
   async _change(e) {
     const el = e.target;
     if (el.dataset.bind) { this.s[el.dataset.bind] = el.value; this._render(); return; }
+    if (el.dataset.langOpt) {
+      const set = new Set(this.s.langChosen || this._enabledLangs());
+      if (el.checked) set.add(el.dataset.langOpt); else set.delete(el.dataset.langOpt);
+      this.s.langChosen = [...set]; this._render(); return;
+    }
+    if (el.dataset.act === "fallback") {
+      this.s.fbBusy = true; this._setMsg("fb", this.t("fallback.saving"));
+      try { await this.ws("fallback/set", { agent_id: el.value }); await this._reload(["overview"]); this.s.fbBusy = false; this._setMsg("fb", this.t("fallback.saved"), "ok"); }
+      catch (err) { this.s.fbBusy = false; await this._reload(["overview"]); this._setMsg("fb", err.code === "fallback_is_polyglot" ? this.t("fallback.not_possible_long") : this.t("messages.error", { error: err.message || err.code }), "err"); }
+      return;
+    }
+    if (el.dataset.uikey) {
+      try { await this._hass.callWS({ type: "polyglot_assist/ui_texts/set", lang: el.dataset.l, key: el.dataset.uikey, text: el.value.trim() ? el.value : null });
+        const own = await this._hass.callWS({ type: "polyglot_assist/ui_texts/get", lang: el.dataset.l });
+        this.s.uiOwn = { lang: el.dataset.l, texts: flatten(own.texts), machine: own.machine || [] };
+        if (el.dataset.l === this._uiPref) await this._loadTexts();
+        this._setMsg("ui", this.t("messages.saved"), "ok"); }
+      catch (err) { this._setMsg("ui", this.t("messages.error", { error: err.message || err.code }), "err"); }
+      return;
+    }
     if (el.dataset.act === "uilang") {
       // only a deliberate choice is remembered; "automatic" follows HA's language
       this._uiPref = okLang(el.value) ? el.value : "";
@@ -595,7 +761,8 @@ class PolyglotAssistPanel extends HTMLElement {
     if (el.dataset.act === "entry") {
       // nothing of entry A may leak into entry B (editors, suggestions, results)
       Object.assign(this.s, { entryId: el.value, selected: null, monitor: null, catsOpen: false, catEdit: null,
-        nameSugg: null, langSugg: null, testResult: undefined, corpus: null, confirmDelete: null, lang: null, msg: {} });
+        nameSugg: null, langSugg: null, testResult: undefined, corpus: null, confirmDelete: null, lang: null, msg: {},
+        setLoaded: false, langCheck: null, langChosen: null, langOffered: null, sttTest: null, uiOwn: null, langRun: (this.s.langRun || 0) + 1, langBusy: false, langSteps: null });
       try { localStorage.setItem("polyglot-entry", el.value); } catch (e) { /* per-viewer convenience only */ }
       await this._reload(["overview", "data", "proposals", "monitor"]); return;
     }
