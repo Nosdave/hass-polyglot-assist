@@ -58,7 +58,7 @@ class ProposalQueue:
     async def async_add(self, items: list[dict[str, Any]]) -> list[str]:
         """Add proposals (deduplicated by content). Returns the new ids."""
         current = await self.async_items()
-        known = {i["id"] for i in current} | set(self._rejected)
+        known = {i["id"] for i in current} | {i["fp"] for i in current if isinstance(i.get("fp"), str)} | set(self._rejected)
         added: list[str] = []
         for item in items:
             if item.get("op") not in OPS:
@@ -68,10 +68,12 @@ class ProposalQueue:
             origin = item.setdefault("origin", {})
             if origin.get("source") not in ORIGINS:
                 origin["source"] = "manual"
-            if item["id"] in known:
-                continue
+            if item["id"] in known or (item.get("fp") and item["fp"] in known):
+                continue  # also when the AI just picked another name for a rejected command
             current.append(item)
             known.add(item["id"])
+            if isinstance(item.get("fp"), str):
+                known.add(item["fp"])
             added.append(item["id"])
         del current[:-MAX_ITEMS]
         await self._save()
@@ -79,8 +81,10 @@ class ProposalQueue:
 
     async def async_reject(self, ids: list[str]) -> int:
         """Remove and remember: a rejected proposal is never proposed again."""
-        await self.async_items()
-        self._rejected = [i for i in self._rejected if i not in set(ids)] + list(dict.fromkeys(ids))
+        current = await self.async_items()
+        fps = [i["fp"] for i in current if i["id"] in set(ids) and isinstance(i.get("fp"), str)]
+        drop = set(ids) | set(fps)
+        self._rejected = [i for i in self._rejected if i not in drop] + list(dict.fromkeys([*ids, *fps]))
         return await self.async_remove(ids)
 
     async def async_remove(self, ids: list[str]) -> int:

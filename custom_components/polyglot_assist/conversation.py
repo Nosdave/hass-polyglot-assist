@@ -199,6 +199,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                     error=result.response.response_type == intent.IntentResponseType.ERROR,
                     device=user_input.device_id, satellite=user_input.satellite_id,
                     conversation=chat_log.conversation_id,
+                    speech=_speech(result.response), switched=_switched(result.response),
                 )
             return result
 
@@ -225,6 +226,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                 if not tc.external
             ]
             speech = result.response.speech.get("plain", {}).get("speech", "")
+            switched = _tool_result_entities(chat_log.content[before:])
             monitor.async_record(
                 text=user_input.text,
                 lang=guess_language(user_input.text, matcher.languages) or (user_input.language or "").split("-")[0],
@@ -234,7 +236,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                           "target": {k: c["args"][k] for k in ("name", "entity_id", "domain", "area", "floor")
                                      if isinstance(c["args"], dict) and isinstance(c["args"].get(k), (str, list))}}
                          for c in calls[:5]],
-                speech=speech[:200],
+                speech=speech[:200], switched=switched,
                 ms=round((time.perf_counter() - t0) * 1000.0, 1),
                 error=result.response.response_type == intent.IntentResponseType.ERROR,
                 device=user_input.device_id, satellite=user_input.satellite_id,
@@ -396,6 +398,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                     builtin=True, ms=round(t_ms, 1), device=user_input.device_id,
                     satellite=user_input.satellite_id, conversation=chat_log.conversation_id,
                     error=response.response_type == intent.IntentResponseType.ERROR,
+                    speech=_speech(response), switched=_switched(response),
                 )
             return ConversationResult(response=response, conversation_id=chat_log.conversation_id)
         return None
@@ -487,3 +490,44 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             return await fallback_agent.async_process(user_input)
         finally:
             IN_FALLBACK.reset(token)
+
+
+# ── what the monitor keeps about a request (for "what went wrong" reviews) ──
+MAX_SWITCHED = 10
+
+
+def _speech(response: intent.IntentResponse) -> str:
+    return (response.speech.get("plain", {}).get("speech", "") or "")[:200]
+
+
+def _switched(response: intent.IntentResponse) -> list[str]:
+    """Entity ids a HA intent reports as switched."""
+    out = []
+    for target in getattr(response, "success_results", None) or []:
+        if getattr(target, "type", None) == intent.IntentResponseTargetType.ENTITY and isinstance(target.id, str):
+            out.append(target.id)
+    return out[:MAX_SWITCHED]
+
+
+def _tool_result_entities(contents) -> list[str]:
+    """Entity ids in the tool RESULTS of an AI turn (what was actually switched)."""
+    found: list[str] = []
+
+    def walk(value, depth=0):
+        if depth > 6 or len(found) >= MAX_SWITCHED:
+            return
+        if isinstance(value, dict):
+            if value.get("type") == "entity" and isinstance(value.get("id"), str) and "." in value["id"]:
+                if value["id"] not in found:
+                    found.append(value["id"])
+            for key, inner in value.items():
+                if key != "failed":  # only what succeeded
+                    walk(inner, depth + 1)
+        elif isinstance(value, list):
+            for inner in value:
+                walk(inner, depth + 1)
+
+    for content in contents:
+        if getattr(content, "role", None) == "tool_result":
+            walk(getattr(content, "tool_result", None))
+    return found[:MAX_SWITCHED]

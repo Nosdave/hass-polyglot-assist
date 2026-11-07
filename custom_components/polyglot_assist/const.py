@@ -48,6 +48,7 @@ CONF_LANGUAGES_ENABLED: Final = "languages_enabled"
 # Optional voice-flow monitoring (local log + daily evaluation by the AI task)
 CONF_MONITOR: Final = "monitor"
 CONF_MONITOR_TIME: Final = "monitor_time"
+CONF_MONITOR_REVIEW: Final = "monitor_review"  # let the AI task read conversations for corrections (opt-in)
 DEFAULT_MONITOR_TIME: Final = "03:00"
 
 # Home Assistant's built-in commands (lights, timers, date …) in all enabled

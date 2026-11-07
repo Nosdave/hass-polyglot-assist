@@ -50,7 +50,8 @@
     "dry_run": "Zeigt, was der Grundstock vorschlagen würde – ohne etwas in die Vorschlagsliste zu legen und ohne sich Geräte zu merken. Gut zum Ausprobieren einer KI.",
     "tone": "Home Assistant spielt seinen eigenen Quittierton nur für seinen eingebauten Assistenten. Damit der Ton mit jeder Sprachausgabe klappt, bringt Polyglot eine kleine Sprachausgabe „Polyglot Assist (Ton)“ mit: Sie gibt jeden Text an die hier gewählte Sprachausgabe weiter und spielt nur bei Schaltbefehlen einen kurzen Ton. Mit Polyglot TTS brauchst du das nicht.",
     "voicelearn": "Du kannst Vorschläge per Sprache besprechen: „Was hast du gelernt?“, „Erzähl mir mehr zum ersten“, „Übernimm ihn“ – Polyglot fragt nach und übernimmt erst nach deinem „Ja“. Per Sprache gehen nur neue Sätze und Namen für harmlose Befehle; alles Sicherheitsrelevante, neue Befehle und Schutzstufen bleiben im Panel. Höchstens 5 pro Stunde, nur auf den gewählten Geräten, und mit „Mach das rückgängig“ innerhalb von 24 Stunden zurücknehmbar.",
-    "tonedesign": "So klingt die Quittung nach einem erfolgreichen Befehl. Klassisch ist der bisherige Ton. Gestalten: Anzahl, Verlauf, Art, Tonhöhe, Klang. Oder ein eigener Ton per Datei oder Aufnahme."
+    "tonedesign": "So klingt die Quittung nach einem erfolgreichen Befehl. Klassisch ist der bisherige Ton. Gestalten: Anzahl, Verlauf, Art, Tonhöhe, Klang. Oder ein eigener Ton per Datei oder Aufnahme.",
+    "monreview": "Sprachunabhängig: Die KI liest Gespräche, in denen du kurz nach einer Aktion nochmal etwas gesagt hast, und erkennt Korrekturen wie „Das stimmt nicht, das Bett ist auch aus“. Vorschläge daraus sind immer markiert und gehen nur im Panel – nie per Sprache."
   },
   "kinds": {
     "new": "neu",
@@ -62,7 +63,8 @@
     "starter": "Grundstock",
     "monitor": "Überwachung",
     "translation": "Übersetzung",
-    "manual": "Von Hand"
+    "manual": "Von Hand",
+    "correction": "Aus einer Korrektur"
   },
   "safety": {
     "normal": "normal",
@@ -145,7 +147,10 @@
     "all_origins": "Alle Herkünfte",
     "kind": "Art",
     "all_kinds": "Alle Arten",
-    "empty": "Keine Vorschläge. Starte mit „{starter}“ oder „{new_devices}“."
+    "empty": "Keine Vorschläge. Starte mit „{starter}“ oder „{new_devices}“.",
+    "wanted_label": "Gewünscht:",
+    "action_label": "Schaltet:",
+    "no_target": "kein Gerät"
   },
   "groups": {
     "several_rooms": "Mehrere Räume",
@@ -233,7 +238,19 @@
     "result_error": "Fehler",
     "result_builtin": "Grundbefehl",
     "result_hit": "sofort",
-    "result_ai": "KI"
+    "result_ai": "KI",
+    "review": "Korrekturen von der KI auswerten lassen",
+    "review_hint": "Nachts bekommt die KI-Aufgabe kurze Gesprächsausschnitte (was gesagt, geantwortet und geschaltet wurde). Sie sagt, was schiefging, und schlägt höchstens drei neue Befehle vor – nur als Vorschlag.",
+    "review_no_ai": "Dafür zuerst unter Einstellungen eine KI-Aufgabe ohne Werkzeuge wählen.",
+    "insights": "Was schiefging",
+    "wanted": "gewünscht: {wanted}",
+    "run_error": "Nicht alles ausgewertet: {error}",
+    "kind_wrong_device": "falsches Gerät",
+    "kind_missing_command": "Befehl fehlt",
+    "kind_misheard": "falsch verstanden",
+    "kind_wrong_value": "falscher Wert",
+    "kind_answer": "Antwort",
+    "kind_other": "anderes"
   },
   "settings": {
     "title": "Einstellungen",

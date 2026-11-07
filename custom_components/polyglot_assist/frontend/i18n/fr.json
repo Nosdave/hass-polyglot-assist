@@ -50,7 +50,8 @@
     "dry_run": "Montre ce que le kit de départ proposerait – sans rien ajouter aux suggestions et sans retenir d’appareils. Pratique pour essayer une IA.",
     "tone": "Home Assistant ne joue son propre son de confirmation que pour son assistant intégré. Pour que le son fonctionne avec n’importe quelle synthèse vocale, Polyglot apporte une petite synthèse « Polyglot Assist (son) » : elle transmet chaque texte à la synthèse choisie ici et ne joue un court son que pour les commandes. Avec Polyglot TTS, ce n’est pas nécessaire.",
     "voicelearn": "Tu peux parler des suggestions : « Qu’as-tu appris ? », « Dis-m’en plus sur la première », « Accepte-la » – Polyglot redemande et n’applique qu’après ton « Oui ». À la voix, seules de nouvelles phrases et de nouveaux noms pour des commandes inoffensives sont possibles ; tout ce qui touche à la sécurité, les nouvelles commandes et les niveaux de protection restent dans le panneau. 5 au plus par heure, uniquement sur les appareils choisis, et « Annule ça » revient en arrière pendant 24 heures.",
-    "tonedesign": "Comment une commande réussie est confirmée. Classique est le son utilisé jusqu'ici. Créer : nombre, direction, style, hauteur, timbre. Ou ton propre son, par fichier ou enregistrement."
+    "tonedesign": "Comment une commande réussie est confirmée. Classique est le son utilisé jusqu'ici. Créer : nombre, direction, style, hauteur, timbre. Ou ton propre son, par fichier ou enregistrement.",
+    "monreview": "Indépendant de la langue : l'IA lit les conversations où tu as reparlé juste après une action et reconnaît des corrections comme « Ce n'est pas juste, le lit s'est éteint aussi ». Les suggestions qui en résultent sont toujours signalées et ne s'acceptent que dans le panneau – jamais à la voix."
   },
   "kinds": {
     "new": "ajout",
@@ -62,7 +63,8 @@
     "starter": "Kit de départ",
     "monitor": "Surveillance",
     "translation": "Traduction",
-    "manual": "À la main"
+    "manual": "À la main",
+    "correction": "D'une correction"
   },
   "safety": {
     "normal": "normal",
@@ -145,7 +147,10 @@
     "all_origins": "Toutes les provenances",
     "kind": "Type de changement",
     "all_kinds": "Tous les changements",
-    "empty": "Aucune suggestion. Commence par « {starter} » ou « {new_devices} »."
+    "empty": "Aucune suggestion. Commence par « {starter} » ou « {new_devices} ».",
+    "wanted_label": "Souhaité :",
+    "action_label": "Commande :",
+    "no_target": "aucun appareil"
   },
   "groups": {
     "several_rooms": "Plusieurs pièces",
@@ -233,7 +238,19 @@
     "result_error": "Erreur",
     "result_builtin": "Commande de base",
     "result_hit": "tout de suite",
-    "result_ai": "IA"
+    "result_ai": "IA",
+    "review": "Faire analyser les corrections par l'IA",
+    "review_hint": "La nuit, la tâche IA reçoit de courts extraits de conversation (ce qui a été dit, répondu et commandé). Elle indique ce qui n'a pas marché et propose au plus trois nouvelles commandes – uniquement comme suggestions.",
+    "review_no_ai": "Choisis d'abord une tâche IA sans outils dans les paramètres.",
+    "insights": "Ce qui n'a pas marché",
+    "wanted": "souhaité : {wanted}",
+    "run_error": "Analyse incomplète : {error}",
+    "kind_wrong_device": "mauvais appareil",
+    "kind_missing_command": "commande manquante",
+    "kind_misheard": "mal compris",
+    "kind_wrong_value": "mauvaise valeur",
+    "kind_answer": "réponse",
+    "kind_other": "autre"
   },
   "settings": {
     "title": "Paramètres",

@@ -42,7 +42,7 @@ const OP_KIND = {
   add_intent: "new", add_sentences: "new", add_names: "new", set_list_value: "change",
   set_field: "change", remove_sentences: "remove", remove_names: "remove", remove_list_value: "remove",
 };
-const ORIGINS = ["new_devices", "starter", "monitor", "translation", "manual"];
+const ORIGINS = ["new_devices", "starter", "monitor", "correction", "translation", "manual"];
 const SAFETY = ["normal", "sensitive", "disabled"];
 // The backend's "no category" value (corpus.OTHER_CATEGORY). It is stored data,
 // so it stays as is; only its label is translated.
@@ -117,6 +117,9 @@ dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;margin:10p
 .langs{display:flex;flex-wrap:wrap;gap:8px}.langs label{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--divider-color);border-radius:999px;padding:4px 12px;cursor:pointer}
 .loading{padding:40px;text-align:center;color:var(--secondary-text-color)}
 `;
+
+// insight kinds (from the AI review of corrections) → label keys
+const INSIGHT_KINDS = { wrong_device: "monitor.kind_wrong_device", missing_command: "monitor.kind_missing_command", misheard: "monitor.kind_misheard", wrong_value: "monitor.kind_wrong_value", answer: "monitor.kind_answer", other: "monitor.kind_other" };
 
 // every label key spelled out (the i18n test checks literal keys)
 const TONE_LABELS = {
@@ -219,6 +222,16 @@ class PolyglotAssistPanel extends HTMLElement {
   _cat(c) { return c === OTHER ? this.t("categories.other") : c; }
   _origin(src) { return ORIGINS.includes(src) ? this.t("origins." + src) : ""; }
   _q(text) { return this.t("messages.quoted", { text }); }
+  // what a NEW command would switch — shown before anyone accepts it
+  _actionLine(action) {
+    const steps = Array.isArray(action) ? action : action ? [action] : [];
+    if (!steps.length) return "";
+    const nm = (e) => { const st = this._hass?.states?.[e]; return st?.attributes?.friendly_name ? `${st.attributes.friendly_name} (${e})` : e; };
+    const parts = steps.map((st) => { const ids = st?.target?.entity_id; const list = Array.isArray(ids) ? ids : ids ? [ids] : [];
+      const data = st?.data && Object.keys(st.data).length ? " " + Object.entries(st.data).map(([k, v]) => `${k}=${v}`).join(", ") : "";
+      return `${st?.action || "?"}${data} → ${list.length ? list.map(nm).join(", ") : this.t("proposals.no_target")}`; });
+    return `<div class="hint"><b>${esc(this.t("proposals.action_label"))}</b> ${esc(parts.join(" · "))}</div>`;
+  }
   _date(v) { try { return new Date(v).toLocaleString(this._uiLang); } catch (e) { return new Date(v).toLocaleString(); } }
 
   async _boot() {
@@ -344,7 +357,7 @@ class PolyglotAssistPanel extends HTMLElement {
         <div><span class="chip ${kind === "new" ? "ok" : kind === "remove" ? "warn" : "pri"}">${t("kinds." + kind)}</span> <b>${esc(i.title || i.op)}</b> <span class="chip ${st === "ok" ? "ok" : st === "warn" ? "warn" : "err"}">${stLabel}</span>
         <div class="hint"><b>${t("proposals.origin_label")}</b> ${esc(i.origin?.detail || this._origin(i.origin?.source))}</div>
         ${(i.check?.notes || []).length ? `<div class="hint">${esc(i.check.notes.join("; "))}</div>` : ""}
-        ${ex ? `<div class="ex">${esc(ex)}</div>` : ""}</div><span class="chip pri">${esc(this._origin(i.origin?.source))}</span></div>`;
+        ${ex ? `<div class="ex">${esc(ex)}</div>` : ""}${this._actionLine(p.intent?.action)}${i.origin?.wanted ? `<div class="hint"><b>${t("proposals.wanted_label")}</b> ${esc(i.origin.wanted)}</div>` : ""}</div><span class="chip pri">${esc(this._origin(i.origin?.source))}</span></div>`;
     }).join("");
     return `<section class="grid"><div class="card">
       <div class="row" style="justify-content:space-between"><h2 style="margin:0">${t("proposals.title")}${this._tip("proposals")}</h2>
@@ -484,12 +497,16 @@ class PolyglotAssistPanel extends HTMLElement {
     const sw = `<div class="set" style="padding-top:0"><div><div class="t">${t("monitor.title")}${this._tip("monitor")}</div><div class="hint">${t("monitor.daily_at")} <input type="time" id="mtime" value="${esc(opts.monitor_time || "03:00")}" aria-label="${t("monitor.time")}"></div></div>
       <button class="switch" role="switch" data-act="opt" data-k="monitor" aria-checked="${m.enabled ? "true" : "false"}" aria-label="${t("monitor.switch")}"></button></div>`;
     if (!m.enabled) return `<section class="grid"><div class="card">${sw}${this._msg("mon")}</div></section>`;
+    const rv = `<div class="set"><div><div class="t">${t("monitor.review")}${this._tip("monreview")}</div><div class="hint">${opts.translation_ai_task ? t("monitor.review_hint") : t("monitor.review_no_ai")}</div></div>
+      <button class="switch" role="switch" data-act="opt" data-k="monitor_review" aria-checked="${opts.monitor_review ? "true" : "false"}" aria-label="${t("monitor.review")}" ${opts.translation_ai_task ? "" : "disabled"}></button></div>`;
     const s = m.summary || {};
     const log = (m.log || []).slice(0, 40).map((e) => `<tr><td class="hint">${esc(this._date(e.ts))}</td><td>${esc(e.text)}</td><td><span class="chip ${e.error ? "err" : e.result === "hit" ? "ok" : "pri"}">${e.error ? t("monitor.result_error") : e.result === "hit" ? (e.builtin ? t("monitor.result_builtin") : t("monitor.result_hit")) : t("monitor.result_ai")}</span></td><td class="hint">${e.ms != null ? esc(this._sec(e.ms)) : ""}</td></tr>`).join("");
-    return `<section class="grid two"><div class="card">${sw}
+    const ins = (s.insights || []).map((x) => `<li><b>${esc(x.went_wrong)}</b>${x.wanted ? ` – ${t("monitor.wanted", { wanted: x.wanted })}` : ""} <span class="chip pri">${t(INSIGHT_KINDS[x.kind] || "monitor.kind_other")}</span>${(x.said || []).length ? `<div class="hint">${esc(x.said.map((z) => this._q(z)).join(" → "))}</div>` : ""}</li>`).join("");
+    return `<section class="grid two"><div class="card">${sw}${rv}
       <h2 style="margin-top:12px">${t("monitor.last_run")}</h2>
       ${s.when ? `<p class="hint">${t("monitor.summary", { when: this._date(s.when), total: s.total, hits: s.hits, assistant: s.assistant, proposals: s.proposals })}</p>
-      <ul class="hint" style="padding-left:18px">${(s.repeated || []).map((r) => `<li>${t("monitor.repeated", { text: r.text, count: r.count })}</li>`).join("")}${(s.corrections || []).map((c) => `<li>${t("monitor.correction", { before: c.before, after: c.correction })}</li>`).join("")}</ul>` : `<p class="hint">${t("monitor.no_run")}</p>`}
+      <ul class="hint" style="padding-left:18px">${(s.repeated || []).map((r) => `<li>${t("monitor.repeated", { text: r.text, count: r.count })}</li>`).join("")}${(s.insights || []).length ? "" : (s.corrections || []).map((c) => `<li>${t("monitor.correction", { before: c.before, after: c.correction })}</li>`).join("")}</ul>
+      ${ins ? `<h3>${t("monitor.insights")}</h3><ul style="padding-left:18px">${ins}</ul>` : ""}${s.error ? `<p class="hint">${t("monitor.run_error", { error: s.error })}</p>` : ""}` : `<p class="hint">${t("monitor.no_run")}</p>`}
       <button class="b" data-act="monrun">${t("buttons.analyse_now")}</button>${this._msg("mon")}</div>
       <div class="card"><h2>${t("monitor.log")}</h2><div class="tbl"><table><tbody>${log || `<tr><td class="hint">${t("monitor.no_log")}</td></tr>`}</tbody></table></div></div></section>`;
   }

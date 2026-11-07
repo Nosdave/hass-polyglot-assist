@@ -42,12 +42,17 @@ def dynamic_reason(hass: HomeAssistant, item: dict, sensitive: set[str], extra_n
     if op == "add_intent":
         if p.get("name") in registered:
             return "a command with this name already exists (e.g. intent_script)"
-        for step in (p.get("intent") or {}).get("action") or []:
-            entity = ((step or {}).get("target") or {}).get("entity_id")
-            if isinstance(entity, str):
-                reason = action_target_reason(hass, entity, sensitive=sensitive, extra_names=extra_names)
-                if reason:
-                    return reason
+        from homeassistant.components.homeassistant.exposed_entities import async_should_expose  # noqa: PLC0415
+
+        from .proposals import action_entity_reason  # noqa: PLC0415
+
+        def _reason(entity: str) -> str | None:
+            return action_target_reason(hass, entity, sensitive=sensitive, extra_names=extra_names) or (
+                None if async_should_expose(hass, "conversation", entity) else f"{entity} is not exposed to Assist")
+
+        reason = action_entity_reason((p.get("intent") or {}).get("action") or [], _reason)
+        if reason:
+            return reason
     if op == "set_list_value" and isinstance(p.get("out"), str) and "." in p["out"]:
         return protected_reason(hass, p["out"], sensitive_entities=sensitive, extra_names=extra_names)
     if op in ("add_names", "remove_names") and not str(p.get("target", "")).startswith("area."):

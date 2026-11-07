@@ -31,6 +31,7 @@ from .const import (
     CONF_LANGUAGES_ENABLED,
     CONF_MONITOR,
     CONF_MONITOR_TIME,
+    CONF_MONITOR_REVIEW,
     CONF_RESPONSE_MODE,
     CONF_TRANSLATION_AI_TASK,
     DOMAIN,
@@ -570,7 +571,7 @@ async def ws_monitor_run(hass: HomeAssistant, connection, msg) -> None:
 
     try:
         async with asyncio.timeout(TOTAL_BUDGET):
-            summary = await async_run_monitor(hass, runtime)
+            summary = await async_run_monitor(hass, runtime, budget_s=TOTAL_BUDGET - 10)
     except (ProposalError, TimeoutError) as err:
         connection.send_error(msg["id"], "failed", str(err) or "timeout")
         return
@@ -736,7 +737,7 @@ async def ws_names_set(hass: HomeAssistant, connection, msg) -> None:
 PANEL_OPTIONS = (
     CONF_LANGUAGES_ENABLED, CONF_RESPONSE_MODE, CONF_MONITOR, CONF_MONITOR_TIME,
     CONF_TRANSLATION_AI_TASK, CONF_CHAT_LOG_TOOLS, CONF_BUILTIN, CONF_CHIME_TTS,
-    CONF_VOICE_LEARN, CONF_VOICE_SATELLITES, CONF_CHIME_TONE,
+    CONF_VOICE_LEARN, CONF_VOICE_SATELLITES, CONF_CHIME_TONE, CONF_MONITOR_REVIEW,
 )
 
 TONE_SCHEMA = vol.Schema({
@@ -759,6 +760,7 @@ TONE_SCHEMA = vol.Schema({
         vol.Optional(CONF_RESPONSE_MODE): vol.In(["text", "chime"]),
         vol.Optional(CONF_MONITOR): bool,
         vol.Optional(CONF_MONITOR_TIME): vol.Match(r"^\d{2}:\d{2}$"),
+        vol.Optional(CONF_MONITOR_REVIEW): bool,
         vol.Optional(CONF_TRANSLATION_AI_TASK): vol.Any(None, vol.Match(r"^ai_task\.[a-z0-9_]+$")),
         vol.Optional(CONF_CHAT_LOG_TOOLS): bool,
         vol.Optional(CONF_BUILTIN): bool,

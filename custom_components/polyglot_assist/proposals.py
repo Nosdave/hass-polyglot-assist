@@ -412,7 +412,7 @@ OPS = (
     "add_names", "remove_names", "set_list_value", "remove_list_value",
 )
 SETTABLE_FIELDS = ("category", "kind", "safety", "response_mode", "description", "llm_equivalent")
-ORIGINS = ("new_devices", "starter", "monitor", "translation", "manual")
+ORIGINS = ("new_devices", "starter", "monitor", "correction", "translation", "manual")
 
 
 class QueueError(Exception):
@@ -553,37 +553,84 @@ def looks_protected(text: str) -> bool:
     return bool(text) and PROTECTED_WORDS.search(text.replace("_", " ").replace("-", " ").lower()) is not None
 
 
-def check_action_safe(action: Any) -> str | None:
-    """Static check: list of allowed one-entity steps, else the reason.
+MAX_STEPS = 4
+MAX_STEP_ENTITIES = 20
+# data a proposal step may carry, per action (everything else: no data at all)
+STEP_DATA = {
+    "light.turn_on": {"brightness_pct": (0, 100), "color_temp_kelvin": (1500, 9000)},
+}
 
-    The dynamic check against the real entity (domain, device class, names,
-    what a script/scene touches) happens when a proposal is accepted
-    (safety.action_target_reason).
+
+def iter_step_entities(step: Any) -> list[str] | None:
+    """The entity ids a step targets (string or list), or None if the target is not plain."""
+    if not isinstance(step, dict):
+        return None
+    target = step.get("target")
+    if not isinstance(target, dict) or set(target) - {"entity_id"}:
+        return None
+    entity = target.get("entity_id")
+    entities = [entity] if isinstance(entity, str) else entity
+    if not isinstance(entities, list) or not entities or not all(isinstance(e, str) for e in entities):
+        return None
+    return entities
+
+
+def action_entity_reason(action: Any, reason_of: Callable[[str], str | None]) -> str | None:
+    """First reason ``reason_of`` gives for ANY entity of ANY step (string or list targets).
+
+    A step whose target is not a plain entity list is refused as well — nothing
+    can slip past the per-entity check by its shape.
+    """
+    for step in action if isinstance(action, list) else [action]:
+        if not step:
+            continue
+        entities = iter_step_entities(step)
+        if entities is None:
+            return "only plain entity targets can be accepted from a proposal"
+        for entity in entities:
+            reason = reason_of(entity)
+            if reason:
+                return reason
+    return None
+
+
+def check_action_safe(action: Any) -> str | None:
+    """Static check: a few allowed steps on plain entity targets, else the reason.
+
+    The dynamic check against the real entities (domain, device class, names,
+    what a script/scene touches, exposure) happens when a proposal is accepted
+    (accept.dynamic_reason → safety.action_target_reason) — for EVERY entity
+    of every step (iter_step_entities).
     """
     steps = action if isinstance(action, list) else [action]
-    if not steps or len(steps) > 3:
-        return "a proposal may contain 1 to 3 simple steps"
+    if not steps or len(steps) > MAX_STEPS:
+        return f"a proposal may contain 1 to {MAX_STEPS} simple steps"
     for step in steps:
         if not isinstance(step, dict) or set(step) - {"action", "target", "data"}:
             return "only simple action steps are allowed in proposals"
         service = step.get("action")
         if service not in SAFE_ACTIONS:
             return f"{service} cannot be created by a proposal — add it by hand"
-        target = step.get("target") or {}
-        entity = target.get("entity_id") if isinstance(target, dict) else None
-        if not isinstance(target, dict) or set(target) - {"entity_id"} or not isinstance(entity, str):
-            return "a proposal step targets exactly one entity"
-        if not ENTITY_RE.match(entity) or entity.split(".", 1)[0] != service.split(".", 1)[0]:
-            return "the target must be one entity of the action's domain"
-        if looks_protected(entity):
-            return f"{entity} looks security-relevant — add it by hand"
-        data = step.get("data") or {}
-        if not isinstance(data, dict) or set(data) & TARGET_KEYS:
-            return "step data must not contain targets"
-        if any(not isinstance(v, (str, int, float, bool)) for v in data.values()):
-            return "step data must be simple values"
-        if any(isinstance(v, str) and ("{" in v or "%" in v) for v in data.values()):
-            return "templates are not allowed in proposal steps"
+        entities = iter_step_entities(step)
+        if entities is None:
+            return "a proposal step targets entities by id only (no areas, devices or labels)"
+        if len(entities) > MAX_STEP_ENTITIES or len(set(entities)) != len(entities):
+            return f"a proposal step targets 1 to {MAX_STEP_ENTITIES} different entities"
+        for entity in entities:
+            if not ENTITY_RE.match(entity) or entity.split(".", 1)[0] != service.split(".", 1)[0]:
+                return "every target must be an entity of the action's domain"
+            if looks_protected(entity):
+                return f"{entity} looks security-relevant — add it by hand"
+        data = step.get("data")
+        if data in (None, {}):
+            continue
+        allowed = STEP_DATA.get(service, {})
+        if not isinstance(data, dict) or set(data) - set(allowed):
+            return f"{service} may carry only {', '.join(sorted(allowed)) or 'no data'} in a proposal"
+        for key, value in data.items():
+            low, high = allowed[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
+                return f"{key} must be a number from {low} to {high}"
     return None
 
 

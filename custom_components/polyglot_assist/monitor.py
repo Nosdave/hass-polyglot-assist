@@ -160,29 +160,51 @@ class Monitor:
             "assistant_ms_p50": _p50([e.get("ms") for e in llm]),
         }
 
-    async def async_evaluate(self, runtime: dict[str, Any], propose) -> dict[str, Any]:
-        """Evaluate the last 24 h; ``propose(repeated)`` returns queue items."""
+    async def async_evaluate(self, runtime: dict[str, Any], propose, review=None, commands=None) -> dict[str, Any]:
+        """Evaluate the last 24 h.
+
+        Order (one shared time budget — whatever finished is kept, even on a timeout):
+        1. ``review(entries)`` → insights "what went wrong" (AI task, optional);
+        2. ``propose(repeated)`` → sentences for existing commands;
+        3. ``commands(insights)`` → new commands derived from corrections (optional).
+        """
         entries = self.window(24)
         repeated = self.find_repeated(entries)
         corrections = self.find_corrections(entries)
         items: list[dict[str, Any]] = []
-        error = None
-        if repeated:
-            try:
-                items = await propose(repeated)
-            except Exception as err:  # noqa: BLE001 — the summary still counts
-                error = str(err)[:200]
-                _LOGGER.warning("Polyglot Assist: monitoring proposals failed: %s", err)
-        self._summary = {
-            "when": dt_util.utcnow().isoformat(),
-            **self.stats(entries),
-            "repeated": repeated[:10],
-            "corrections": corrections[:10],
-            "proposals": len(items),
-            **({"error": error} if error else {}),
-        }
-        if self._active:
-            self._store.async_delay_save(lambda: {"log": self._log, "summary": self._summary}, 1)
+        insights: list[dict[str, Any]] = []
+        errors: list[str] = []
+        try:
+            if review is not None:
+                try:
+                    insights = await review(entries)
+                except Exception as err:  # noqa: BLE001
+                    errors.append(f"review: {str(err)[:150]}")
+                    _LOGGER.warning("Polyglot Assist: reviewing conversations failed: %s", err)
+            if repeated:
+                try:
+                    items += await propose(repeated)
+                except Exception as err:  # noqa: BLE001 — the summary still counts
+                    errors.append(str(err)[:200])
+                    _LOGGER.warning("Polyglot Assist: monitoring proposals failed: %s", err)
+            if commands is not None and insights:
+                try:
+                    items += await commands(insights)
+                except Exception as err:  # noqa: BLE001
+                    errors.append(f"commands: {str(err)[:150]}")
+                    _LOGGER.warning("Polyglot Assist: proposals from corrections failed: %s", err)
+        finally:  # also on cancellation (time budget): keep what was found
+            self._summary = {
+                "when": dt_util.utcnow().isoformat(),
+                **self.stats(entries),
+                "repeated": repeated[:10],
+                "corrections": corrections[:10],
+                "insights": insights[:10],
+                "proposals": len(items),
+                **({"error": "; ".join(errors)[:300]} if errors else {}),
+            }
+            if self._active:
+                self._store.async_delay_save(lambda: {"log": self._log, "summary": self._summary}, 1)
         return {"summary": self._summary, "items": items}
 
 

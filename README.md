@@ -486,6 +486,41 @@ built-in agent answered (and every target is in the satellite's area); a
 custom conversation agent cannot ask for it. The companion app never gets the
 tone (it would show the marker as text) — only voice satellites do.
 
+## Learning from corrections (optional, off by default)
+
+People correct a voice assistant the way they would correct a person, in their
+own language. Examples: "That's wrong, the bed light went off too." or "Nothing
+changed, I wanted it warmer." Polyglot uses no word lists for this, so it
+works in any language.
+
+- **Excerpts:** at night it cuts short excerpts from the monitoring log (up
+  to 12). An excerpt is where you spoke again within two minutes of something
+  being done. It contains what was said, what was answered and which entities
+  were actually switched.
+- **One AI call:** your AI task (it must have no tools) says for each excerpt
+  whether it was a correction, what went wrong and what was wanted. The
+  results appear in the panel under **Monitoring → What went wrong**.
+- **New commands, at most three a night:** for a wrong device or a missing
+  command, the AI may suggest a new command with a fixed list of devices,
+  e.g. "everything off except the reading lamp".
+  - It may only use devices from the room in question that are exposed to
+    Assist and unprotected, and only simple actions: turn lights, switches
+    and fans on, off or toggle them, or play/pause media. Lights may also get
+    brightness or colour temperature.
+  - The sentences are checked against the regression corpus.
+  - Such a suggestion is always marked "from a correction" and shows what it
+    would switch. It can only be accepted in the panel, never by voice.
+  - The device list is fixed, so new devices in that room are not added
+    automatically.
+  - A rejected suggestion does not come back under another name.
+- **Things a fixed command cannot do** (e.g. "warmer than now") stay an insight
+  without a suggestion.
+
+**Privacy:** turn on *Monitoring → Let the AI review corrections* only if you
+are fine with your AI task reading these short excerpts. They contain the
+spoken sentences, the answers and the names of switched devices. Use a local
+model if they should not leave your home.
+
 ## Learning by voice (optional, off by default)
 
 Talk about suggestions on approved voice satellites:

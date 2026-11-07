@@ -50,7 +50,8 @@
     "dry_run": "Shows what the starter set would suggest – without putting anything into the suggestions and without remembering devices. Good for trying out an AI.",
     "tone": "Home Assistant plays its own confirmation tone only for its built-in assistant. So that the tone works with any speech output, Polyglot brings a small speech output “Polyglot Assist (tone)”: it passes every text on to the speech output chosen here and only plays a short tone for switching commands. With Polyglot TTS you do not need this.",
     "voicelearn": "You can talk about suggestions: “What have you learned?”, “Tell me more about the first one”, “Accept it” – Polyglot asks back and only applies it after your “Yes”. By voice, only new sentences and names for harmless commands are possible; anything security-related, new commands and protection levels stay in the panel. At most 5 per hour, only on the chosen devices, and “Undo that” takes it back within 24 hours.",
-    "tonedesign": "How a successful command is confirmed. Classic is the tone used so far. Design: notes, direction, style, pitch, sound. Or your own tone from a file or a recording."
+    "tonedesign": "How a successful command is confirmed. Classic is the tone used so far. Design: notes, direction, style, pitch, sound. Or your own tone from a file or a recording.",
+    "monreview": "Language-independent: the AI reads conversations where you spoke again shortly after an action and recognises corrections such as “That's wrong, the bed light went off too”. Suggestions from them are always marked and can only be accepted in the panel – never by voice."
   },
   "kinds": {
     "new": "new",
@@ -62,7 +63,8 @@
     "starter": "Starter set",
     "monitor": "Monitoring",
     "translation": "Translation",
-    "manual": "Manual"
+    "manual": "Manual",
+    "correction": "From a correction"
   },
   "safety": {
     "normal": "normal",
@@ -145,7 +147,10 @@
     "all_origins": "All origins",
     "kind": "Kind",
     "all_kinds": "All kinds",
-    "empty": "No suggestions. Start with “{starter}” or “{new_devices}”."
+    "empty": "No suggestions. Start with “{starter}” or “{new_devices}”.",
+    "wanted_label": "Wanted:",
+    "action_label": "Switches:",
+    "no_target": "no device"
   },
   "groups": {
     "several_rooms": "Several rooms",
@@ -233,7 +238,19 @@
     "result_error": "Error",
     "result_builtin": "Basic command",
     "result_hit": "right away",
-    "result_ai": "AI"
+    "result_ai": "AI",
+    "review": "Let the AI review corrections",
+    "review_hint": "At night the AI task gets short conversation excerpts (what was said, answered and switched). It says what went wrong and suggests at most three new commands – as suggestions only.",
+    "review_no_ai": "First choose an AI task without tools under Settings.",
+    "insights": "What went wrong",
+    "wanted": "wanted: {wanted}",
+    "run_error": "Not everything was evaluated: {error}",
+    "kind_wrong_device": "wrong device",
+    "kind_missing_command": "command missing",
+    "kind_misheard": "misheard",
+    "kind_wrong_value": "wrong value",
+    "kind_answer": "answer",
+    "kind_other": "other"
   },
   "settings": {
     "title": "Settings",

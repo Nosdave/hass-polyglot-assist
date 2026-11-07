@@ -106,7 +106,7 @@ def _remaining(deadline: float | None) -> float:
 
 async def _generate(
     hass: HomeAssistant, entity_id: str, instructions: str, field: str, description: str,
-    context: Context | None, deadline: float | None = None,
+    context: Context | None, deadline: float | None = None, max_chars: int = MAX_SENTENCE_CHARS,
 ) -> list[str]:
     budget = _remaining(deadline)
     if budget <= 1:
@@ -136,7 +136,7 @@ async def _generate(
     if not isinstance(items, list):
         raise ProposalError("the AI task returned no list")
     cleaned = [" ".join(x.split()) for x in items if isinstance(x, str)]
-    return list(dict.fromkeys(x for x in cleaned if x and len(x) <= MAX_SENTENCE_CHARS))[:12]
+    return list(dict.fromkeys(x for x in cleaned if x and len(x) <= max_chars))[:12]
 
 
 def _list_examples(config: dict[str, Any], names: set[str], slot_lists: dict) -> str:
@@ -404,6 +404,7 @@ async def async_propose_from_monitor(
     repeated: list[dict[str, Any]],
     config: dict[str, Any],
     context: Context | None = None,
+    deadline: float | None = None,
 ) -> list[str]:
     """Lines ``INTENT | LANG | TEMPLATE`` for sentences the assistant kept handling."""
     if ai_task_has_tools(hass, ai_task_entity):
@@ -436,4 +437,93 @@ async def async_propose_from_monitor(
         "suggestions",
         "lines COMMAND | LANGUAGE_CODE | TEMPLATE",
         context,
+        deadline,
+    )
+
+
+async def async_review_episodes(
+    hass: HomeAssistant,
+    *,
+    ai_task_entity: str,
+    episode_lines: list[str],
+    count: int,
+    context: Context | None = None,
+    deadline: float | None = None,
+) -> list[str]:
+    """One call: which episodes contain a correction, what went wrong, what was wanted."""
+    if ai_task_has_tools(hass, ai_task_entity):
+        raise ProposalError("this AI task has tools (LLM API) — pick one without tools")
+    return await _generate(
+        hass,
+        ai_task_entity,
+        "\n".join([
+            "Below are short excerpts of conversations between people and a smart-home voice assistant, "
+            "in any language. In each excerpt, decide whether the person had to CORRECT the assistant "
+            "(it did the wrong thing, too much, too little, misunderstood, or did not change anything).",
+            "Answer one line per excerpt: E<number> | ok or correction | KIND | WHAT_WENT_WRONG | WHAT_WAS_WANTED",
+            "KIND is one of: wrong_device, missing_command, misheard, wrong_value, answer, other.",
+            "Write WHAT_WENT_WRONG and WHAT_WAS_WANTED in the language the person spoke, each under 140 characters. "
+            "Use ok when nothing needed correcting. Never invent device names.",
+            _FENCE,
+            "<data>",
+            *episode_lines,
+            "</data>",
+        ]),
+        "findings",
+        f"{count} lines E<n> | ok|correction | KIND | WHAT_WENT_WRONG | WHAT_WAS_WANTED",
+        context,
+        deadline,
+        max_chars=600,
+    )
+
+
+async def async_propose_correction_command(
+    hass: HomeAssistant,
+    *,
+    ai_task_entity: str,
+    insight: dict[str, Any],
+    episode_lines: list[str],
+    devices: list[str],
+    commands: list[str],
+    context: Context | None = None,
+    deadline: float | None = None,
+) -> list[str]:
+    """At most one NEW command that does what the person wanted — or NONE."""
+    if ai_task_has_tools(hass, ai_task_entity):
+        raise ProposalError("this AI task has tools (LLM API) — pick one without tools")
+    lang = insight.get("lang") or "en"
+    return await _generate(
+        hass,
+        ai_task_entity,
+        "\n".join([
+            _SYNTAX,
+            "",
+            "A person corrected the voice assistant (see the excerpt). If ONE fixed command with a fixed list "
+            "of devices would have done what the person wanted, write it as one line:",
+            f"NAME | {lang} | TEMPLATE ; TEMPLATE | ACTION_JSON",
+            "NAME: CamelCase, new. TEMPLATES: 1 to 4 sentence templates in the person's language, no {placeholders}. "
+            "ACTION_JSON: a JSON list of at most 4 steps "
+            '{"action": "light.turn_off", "target": {"entity_id": ["light.a", "light.b"]}} using ONLY entity ids from '
+            "the device list; allowed actions: light/switch/fan turn_on, turn_off, toggle; media_player media_play, "
+            "media_pause, turn_on, turn_off. light.turn_on may carry data brightness_pct (0-100) or "
+            "color_temp_kelvin (1500-9000), nothing else.",
+            "If the wish depends on the current state (e.g. 'warmer than now'), needs a condition, or needs "
+            "devices that are not listed: answer exactly NONE.",
+            _FENCE,
+            "<data>",
+            f"what went wrong: {insight.get('went_wrong')}",
+            f"what was wanted: {insight.get('wanted')}",
+            "excerpt:",
+            *episode_lines,
+            "devices (entity id = name, area):",
+            *devices[:40],
+            "existing commands (do not duplicate):",
+            *commands[:60],
+            "</data>",
+        ]),
+        "command",
+        "one line NAME | LANG | TEMPLATE ; TEMPLATE | ACTION_JSON, or NONE",
+        context,
+        deadline,
+        max_chars=2000,
     )
