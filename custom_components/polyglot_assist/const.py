@@ -38,6 +38,7 @@ RESPONSE_CHIME: Final = "chime"
 CHIME_MARKER: Final = "[[polyglot:chime]]"
 # speech output behind the "Polyglot Assist (tone)" TTS entity
 CONF_CHIME_TTS: Final = "chime_tts"
+CONF_CHIME_TONE: Final = "chime_tone"  # how the tone sounds (tone.normalize)
 # learning by voice ("What have you learned?" → "Accept it" → "Yes"): off by default
 CONF_VOICE_LEARN: Final = "voice_learn"
 CONF_VOICE_SATELLITES: Final = "voice_learn_satellites"

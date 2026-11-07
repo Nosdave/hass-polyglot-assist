@@ -12,7 +12,6 @@ Polyglot's options ("Speech output behind the tone").
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from pathlib import Path
 from typing import Any
 
 from homeassistant.components import tts
@@ -23,9 +22,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CHIME_MARKER, CONF_CHIME_TTS, DOMAIN
-
-CHIME_FILE = Path(__file__).parent / "sounds" / "chime.wav"
+from .const import CHIME_MARKER, CONF_CHIME_TONE, CONF_CHIME_TTS, DOMAIN
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
@@ -45,6 +42,8 @@ def inner_tts_error(hass: HomeAssistant, entity_id: str | None) -> str | None:
 
 
 INNER_OPTION = "polyglot_inner_tts"  # part of the cache key: changing the inner TTS must not replay old audio
+TONE_OPTION = "polyglot_tone"  # hash of the tone: a changed tone must not replay the old one
+OWN_OPTIONS = (INNER_OPTION, TONE_OPTION)
 
 
 def _silence_wav() -> bytes:
@@ -68,7 +67,6 @@ class PolyglotToneTTS(TextToSpeechEntity):
         self.hass = hass
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_tone_tts"
-        self._chime: bytes | None = None
         self._unsub_state = None
 
     # ── the TTS behind the tone ────────────────────────────────────────────
@@ -130,12 +128,15 @@ class PolyglotToneTTS(TextToSpeechEntity):
     @property
     def supported_options(self) -> list[str] | None:
         inner = self._inner()
-        return [*(getattr(inner, "supported_options", None) or []), INNER_OPTION]
+        return [*(getattr(inner, "supported_options", None) or []), *OWN_OPTIONS]
 
     @property
     def default_options(self) -> dict[str, Any] | None:
         inner = self._inner()
-        return {**(getattr(inner, "default_options", None) or {}), INNER_OPTION: self._inner_id or ""}
+        from .tone import tone_hash  # noqa: PLC0415
+
+        return {**(getattr(inner, "default_options", None) or {}), INNER_OPTION: self._inner_id or "",
+                TONE_OPTION: tone_hash(self._entry.options.get(CONF_CHIME_TONE))}
 
     def async_get_supported_voices(self, language: str) -> list[Voice] | None:
         inner = self._inner()
@@ -144,16 +145,16 @@ class PolyglotToneTTS(TextToSpeechEntity):
 
     # ── audio ──────────────────────────────────────────────────────────────
     async def _tone(self) -> tuple[str, bytes]:
-        if self._chime is None:
-            self._chime = await self.hass.async_add_executor_job(CHIME_FILE.read_bytes)
-        return "wav", self._chime
+        from .tone import async_tone_audio  # noqa: PLC0415
+
+        return await async_tone_audio(self.hass, self._entry.entry_id, self._entry.options.get(CONF_CHIME_TONE))
 
     async def _inner_stream(self, language: str, options: dict[str, Any], text_gen: AsyncGenerator[str]) -> TTSAudioResponse:
         """Ask the inner TTS directly: its own format comes back and HA converts once."""
         inner = self._inner()
         if inner is None:
             raise HomeAssistantError("Polyglot Assist (tone): choose the speech output behind the tone in Polyglot's options")
-        opts = {k: v for k, v in (options or {}).items() if k != INNER_OPTION}
+        opts = {k: v for k, v in (options or {}).items() if k not in OWN_OPTIONS}
         if isinstance(inner, TextToSpeechEntity):
             return await inner.internal_async_stream_tts_audio(TTSAudioRequest(language, opts, text_gen))
         message = "".join([chunk async for chunk in text_gen])  # legacy provider

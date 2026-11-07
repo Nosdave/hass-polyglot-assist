@@ -139,6 +139,20 @@ class VoiceLearn:
         return [i for i in items if check_voice_item(self.hass, i, config, approved_satellites=approved,
                                                       entry_id=self.entry_id, runtime_lists=rt_lists) is None][:MAX_LISTED]
 
+    @staticmethod
+    def _nothing_by_voice(waiting: int, runtime: dict[str, Any], lang: str) -> str:
+        """Nothing may be accepted by voice — say why, and what the user can do."""
+        from .const import CONF_MONITOR, CONF_MONITOR_TIME, CONF_TRANSLATION_AI_TASK  # noqa: PLC0415
+
+        opts = runtime["entry"].options
+        if waiting:
+            return say("learn_none_panel_one" if waiting == 1 else "learn_none_panel", lang, count=str(waiting))
+        if not opts.get(CONF_MONITOR):
+            return say("learn_none_monitor_off", lang)
+        if not opts.get(CONF_TRANSLATION_AI_TASK):
+            return say("learn_none_no_ai", lang)
+        return say("learn_none_listening", lang, time=str(opts.get(CONF_MONITOR_TIME) or "03:00"))
+
     def _describe(self, item: dict[str, Any], lang: str, config: dict[str, Any] | None = None) -> str:
         """Spoken description: an example sentence (not the template syntax) and what it does."""
         p = item.get("payload") or {}
@@ -204,16 +218,20 @@ class VoiceLearn:
 
         if kind == "list":
             if runtime["source"].kind != SOURCE_CATALOG:
-                return say("learn_none", lang), lang, False
+                return say("learn_none_yaml", lang), lang, False
+            waiting = await queue.async_items()
             offer = await self.hass.async_add_executor_job(
-                self._offerable, await queue.async_items(), config, approved, rt_lists)
+                self._offerable, waiting, config, approved, rt_lists)
             self.listing[key] = (time.monotonic() + LISTING_SECONDS, [i["id"] for i in offer])
             self.focus.pop(key, None)
             if not offer:
-                return say("learn_none", lang), lang, False
+                return self._nothing_by_voice(len(waiting), runtime, lang), lang, False
             parts = [f"{n}. {self._describe(i, lang, config)}." for n, i in enumerate(offer, 1)]
-            return say("learn_list_one" if len(offer) == 1 else "learn_list", lang,
-                       count=str(len(offer)), items=" ".join(parts)), lang, False
+            text = say("learn_list_one" if len(offer) == 1 else "learn_list", lang,
+                       count=str(len(offer)), items=" ".join(parts))
+            if (more := len(waiting) - len(offer)) > 0:
+                text += " " + say("learn_more_in_panel", lang, count=str(more))
+            return text, lang, False
         if kind == "later":
             self.pending.pop(key, None)
             return say("learn_later", lang), lang, False

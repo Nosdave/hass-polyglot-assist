@@ -375,6 +375,36 @@ the marker `[[polyglot:chime]]` to TTS. Questions are always spoken.
   Every text — streamed answers of your AI included — is passed on unchanged;
   only the marker becomes a short tone.
 
+### Designing the tone (panel → Settings → Confirmation tone)
+
+Only for *Polyglot Assist (tone)*. If Polyglot TTS answers the marker by itself,
+its own tone sounds.
+
+- **Classic**: the tone Polyglot shipped so far. It is the default, so nothing
+  changes unless you pick something else.
+- **Design**: choose these settings, try them with *Listen*, then press *Apply*:
+  - single, double or triple;
+  - rising, falling or the same pitch;
+  - separate notes or one flowing (gliding) tone;
+  - low, medium or high pitch;
+  - a soft, bright or bell-like sound;
+  - volume.
+  Polyglot generates the tone itself in pure Python, in a few milliseconds even
+  on small hardware, and caches it.
+- **Own tone**: upload a WAV, MP3, OGG or FLAC file (≤ 512 KB), or record up to
+  3 s in the panel. Recording needs HTTPS or the companion app.
+  - The file is converted once with Home Assistant's ffmpeg to a short mono
+    WAV (cut to 4 s, normalised). It is stored privately in
+    `/config/polyglot_assist/tones/`, not under `/local`, which anyone can open.
+  - Without ffmpeg only 16-bit mono WAV is accepted.
+- **Play on the device** plays the *applied* tone on a voice satellite, through
+  the same path as a real answer and without the pre-announce sound.
+
+A changed tone takes effect immediately: its hash is part of the TTS cache key,
+so an old tone is never replayed. Side effect: cached spoken answers made
+through *Polyglot Assist (tone)* are produced again once. The options dialog
+keeps the tone but does not edit it — that is done in the panel.
+
 Why this detour: Home Assistant plays its own acknowledge sound only when its
 built-in agent answered (and every target is in the satellite's area); a
 custom conversation agent cannot ask for it. The companion app never gets the

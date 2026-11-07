@@ -410,7 +410,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove catalog, proposals and monitoring log of a deleted entry (intents.yaml is kept)."""
+    """Remove catalog, proposals, monitoring log and own tone of a deleted entry (intents.yaml is kept)."""
     await IntentSource(hass, entry).async_remove_catalog()
     await ProposalQueue(hass, entry.entry_id).async_clear()
     await Monitor(hass, entry.entry_id).async_clear()
@@ -423,6 +423,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .voice_rules import VoiceRate  # noqa: PLC0415
 
     await VoiceRate(hass, entry.entry_id).async_clear()
+    from .tone import delete_custom  # noqa: PLC0415
+
+    await hass.async_add_executor_job(delete_custom, hass.config.config_dir, entry.entry_id)
 
 
 async def async_run_monitor(hass: HomeAssistant, data: dict) -> dict:

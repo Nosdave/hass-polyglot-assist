@@ -118,6 +118,17 @@ dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;margin:10p
 .loading{padding:40px;text-align:center;color:var(--secondary-text-color)}
 `;
 
+// every label key spelled out (the i18n test checks literal keys)
+const TONE_LABELS = {
+  source: { "classic": "tone.v_source_classic", "preset": "tone.v_source_preset", "custom": "tone.v_source_custom" },
+  count: { "1": "tone.v_count_1", "2": "tone.v_count_2", "3": "tone.v_count_3" },
+  contour: { "up": "tone.v_contour_up", "down": "tone.v_contour_down", "same": "tone.v_contour_same" },
+  flow: { "separate": "tone.v_flow_separate", "glide": "tone.v_flow_glide" },
+  pitch: { "low": "tone.v_pitch_low", "mid": "tone.v_pitch_mid", "high": "tone.v_pitch_high" },
+  timbre: { "soft": "tone.v_timbre_soft", "bright": "tone.v_timbre_bright", "bell": "tone.v_timbre_bell" },
+};
+const TONE_ERRORS = { "tone_type": "tone.err_type", "tone_empty": "tone.err_empty", "tone_too_big": "tone.err_too_big", "tone_format": "tone.err_format", "tone_convert": "tone.err_convert", "tone_silent": "tone.err_silent", "tone_no_satellite": "tone.err_no_satellite", "tone_no_announce": "tone.err_no_announce", "tone_tts_unavailable": "tone.err_tts_unavailable", "no_custom_tone": "tone.err_no_custom_tone" };
+
 class PolyglotAssistPanel extends HTMLElement {
   constructor() {
     super();
@@ -490,7 +501,7 @@ class PolyglotAssistPanel extends HTMLElement {
     const aiTasks = Object.keys(this._hass.states).filter((e) => e.startsWith("ai_task."));
     const mode = opts.response_mode || "text";
     return `<section class="grid two"><div class="grid" style="gap:16px;align-content:start">
-      ${this._card_fallback()}${this._card_pipelines()}${this._card_languages()}${this._card_uitexts()}</div>
+      ${this._card_fallback()}${mode === "chime" ? this._card_tone() : ""}${this._card_pipelines()}${this._card_languages()}${this._card_uitexts()}</div>
       <div class="grid" style="gap:16px;align-content:start"><div class="card"><h2>${t("settings.title")}</h2>
       <div class="set"><div><div class="t">${t("settings.confirmation")}${this._tip("answer")}</div></div>
         <div class="seg" role="group" aria-label="${t("settings.confirmation_label")}"><button data-act="opt" data-k="response_mode" data-v="text" aria-pressed="${mode === "text"}">${t("answer.text")}</button><button data-act="opt" data-k="response_mode" data-v="chime" aria-pressed="${mode === "chime"}">${t("answer.chime")}</button></div></div>
@@ -628,6 +639,100 @@ class PolyglotAssistPanel extends HTMLElement {
       </tbody></table></div>` : ""}</div>`;
   }
 
+  // ── confirmation tone designer ────────────────────────────────────────────
+  _toneDraft() {
+    const saved = ((this.s.overview || {}).options || {}).chime_tone || {};
+    if (!this.s.toneDraft) this.s.toneDraft = { source: "classic", count: 2, contour: "up", flow: "separate", pitch: "mid", timbre: "soft", volume: 0.6, ...saved };
+    return this.s.toneDraft;
+  }
+
+  _card_tone() {
+    const t = (k, v) => esc(this.t(k, v));
+    const d = this._toneDraft();
+    const saved = ((this.s.overview || {}).options || {}).chime_tone || {};
+    const seg = (k, vals, label) => `<div class="seg" role="group" aria-label="${t(label)}">${vals.map((v) => `<button data-act="tonepick" data-k="${k}" data-v="${v}" aria-pressed="${String(d[k]) === String(v)}">${t(TONE_LABELS[k][String(v)])}</button>`).join("")}</div>`;
+    const row = (label, body) => `<div class="set"><div><div class="t">${t(label)}</div></div>${body}</div>`;
+    const sats = Object.keys(this._hass.states).filter((e) => e.startsWith("assist_satellite."));
+    const busy = this.s.toneBusy;
+    const changed = JSON.stringify({ ...d, custom_hash: undefined }) !== JSON.stringify({ source: "classic", count: 2, contour: "up", flow: "separate", pitch: "mid", timbre: "soft", volume: 0.6, ...saved, custom_hash: undefined });
+    return `<div class="card"><h2>${t("tone.title")}${this._tip("tonedesign")}</h2>
+      ${row("tone.source", seg("source", ["classic", "preset", "custom"], "tone.source"))}
+      ${d.source === "preset" ? `${row("tone.count", seg("count", [1, 2, 3], "tone.count"))}
+        ${d.count > 1 ? row("tone.contour", seg("contour", ["up", "down", "same"], "tone.contour")) : ""}
+        ${row("tone.flow", seg("flow", ["separate", "glide"], "tone.flow"))}
+        ${row("tone.pitch", seg("pitch", ["low", "mid", "high"], "tone.pitch"))}
+        ${row("tone.timbre", seg("timbre", ["soft", "bright", "bell"], "tone.timbre"))}
+        ${row("tone.volume", `<input type="range" min="0.2" max="1" step="0.05" data-tonevol value="${esc(String(d.volume))}" aria-label="${t("tone.volume")}">`)}` : ""}
+      ${d.source === "custom" ? `<p class="hint">${saved.custom_hash ? t("tone.custom_have") : t("tone.custom_none")}</p>
+        <div class="row"><label class="b">${t("tone.upload")}<input type="file" accept=".wav,.mp3,.ogg,.flac,audio/wav,audio/mpeg,audio/ogg,audio/flac" data-act="toneupload" hidden></label>
+        <button class="b" data-act="tonerec" ${busy ? "disabled" : ""}>${this.s.toneRec ? `<span class="spin"></span>${t("tone.recording", { seconds: this.s.toneRec })}` : t("tone.record")}</button>
+        ${saved.custom_hash ? `<button class="b" data-act="tonedel" ${busy ? "disabled" : ""}>${t("tone.delete")}</button>` : ""}</div>
+        <p class="hint">${t("tone.custom_hint")}</p>` : ""}
+      <div class="row"><button class="b" data-act="tonepreview" ${busy ? "disabled" : ""}>${t("tone.preview")}</button>
+        ${d.source !== "custom" ? `<button class="b primary" data-act="tonesave" ${busy || !changed ? "disabled" : ""}>${t("tone.apply")}</button>` : ""}</div>
+      ${sats.length ? `<div class="row"><select data-bind="toneSat" aria-label="${t("tone.device")}">${sats.map((e) => `<option value="${esc(e)}" ${this.s.toneSat === e ? "selected" : ""}>${esc(this._hass.states[e]?.attributes?.friendly_name || e)}</option>`).join("")}</select>
+        <button class="b" data-act="toneplay" ${busy || changed ? "disabled" : ""}>${t("tone.play_device")}</button></div>${changed ? `<p class="hint">${t("tone.play_saved_only")}</p>` : ""}` : ""}
+      ${this._msg("tone")}</div>`;
+  }
+
+  _toneErr(err) {
+    const code = String(err.code || "");
+    this._setMsg("tone", TONE_ERRORS[code] ? this.t(TONE_ERRORS[code]) : this.t("messages.error", { error: err.message || code }), "err");
+  }
+
+  async _tonePlayLocal() {
+    const d = this._toneDraft();
+    const tone = { ...d }; delete tone.custom_hash;
+    const r = await this.ws("tone/preview", { tone });
+    const bin = Uint8Array.from(atob(r.data_b64), (c) => c.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bin], { type: r.ext === "wav" ? "audio/wav" : "audio/" + r.ext }));
+    const audio = new Audio(url);
+    audio.onended = () => URL.revokeObjectURL(url);
+    await audio.play();
+  }
+
+  async _toneUploadBytes(bytes, ext) {
+    let bin = ""; const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    const r = await this.ws("tone/upload", { ext, data_b64: btoa(bin) });
+    this.s.toneDraft = { ...this._toneDraft(), ...r.tone };
+    await this._reload(["overview"]);
+    this._setMsg("tone", this.t("tone.saved_custom"), "ok");
+  }
+
+  // record ≤3 s straight as PCM (no MediaRecorder codecs), mono, trimmed, faded → WAV
+  async _toneRecord() {
+    if (!navigator.mediaDevices?.getUserMedia) { this._setMsg("tone", this.t("tone.err_no_mic"), "err"); return; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } }); }
+    catch (err) { this._setMsg("tone", this.t("tone.err_no_mic"), "err"); return; }
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    await ctx.resume();
+    const src = ctx.createMediaStreamSource(stream);
+    const proc = ctx.createScriptProcessor(4096, 1, 1);
+    const parts = [];
+    proc.onaudioprocess = (ev) => parts.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+    src.connect(proc); proc.connect(ctx.destination);
+    for (let s = 3; s > 0; s--) { this.s.toneRec = s; this._render(); await new Promise((res) => setTimeout(res, 1000)); }
+    proc.disconnect(); src.disconnect(); stream.getTracks().forEach((tr) => tr.stop());
+    const rate = ctx.sampleRate; await ctx.close();
+    this.s.toneRec = 0;
+    let all = new Float32Array(parts.reduce((n, p) => n + p.length, 0)); let o = 0; for (const p of parts) { all.set(p, o); o += p.length; }
+    const peak = all.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+    if (peak < 0.01) { this._setMsg("tone", this.t("tone.err_silent"), "err"); return; }
+    const thr = peak * 0.0316; // −30 dB relative to the peak
+    let a = all.findIndex((v) => Math.abs(v) > thr), b = all.length - 1; while (b > a && Math.abs(all[b]) <= thr) b--;
+    all = all.slice(Math.max(0, a), b + 1);
+    const fade = Math.min(Math.floor(rate * 0.005), Math.floor(all.length / 2));
+    for (let i = 0; i < fade; i++) { all[i] *= i / fade; all[all.length - 1 - i] *= i / fade; }
+    const buf = new ArrayBuffer(44 + all.length * 2), dv = new DataView(buf);
+    const str = (off, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i)); };
+    str(0, "RIFF"); dv.setUint32(4, 36 + all.length * 2, true); str(8, "WAVE"); str(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+    dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); str(36, "data"); dv.setUint32(40, all.length * 2, true);
+    for (let i = 0; i < all.length; i++) dv.setInt16(44 + i * 2, Math.max(-1, Math.min(1, all[i] / peak * 0.89)) * 32767, true);
+    await this._toneUploadBytes(new Uint8Array(buf), "wav");
+  }
+
   // ── messages ──────────────────────────────────────────────────────────────
   _corpusStatus(r) { return r.corpus_cases ? this.t("messages.all_passed", { count: r.corpus_cases }) : this.t("messages.active"); }
   _problems(r) { return r.problems ? " – " + r.problems.slice(0, 2).join("; ") : ""; }
@@ -720,6 +825,26 @@ class PolyglotAssistPanel extends HTMLElement {
         this._setMsg("names", t("messages.suggesting_names"));
         const r = await this.ws("suggest_names", { ids, languages: langs });
         this.s.nameSugg = r.proposals; this._setMsg("names", t("messages.names_suggested"), "ok");
+      } else if (a === "tonepick") {
+        const d = this._toneDraft(); const k = el.dataset.k;
+        d[k] = k === "count" ? Number(el.dataset.v) : el.dataset.v; this._render();
+      } else if (a === "tonepreview") {
+        this.s.toneBusy = true; this._render();
+        try { await this._tonePlayLocal(); this._setMsg("tone", ""); } catch (err) { this._toneErr(err); } finally { this.s.toneBusy = false; this._render(); }
+      } else if (a === "tonesave") {
+        const tone = { ...this._toneDraft() }; delete tone.custom_hash;
+        this.s.toneBusy = true; this._render();
+        try { await this.ws("options", { chime_tone: tone }); await this._reload(["overview"]); this._setMsg("tone", t("tone.saved"), "ok"); } catch (err) { this._toneErr(err); } finally { this.s.toneBusy = false; this._render(); }
+      } else if (a === "toneplay") {
+        const sat = this.s.toneSat || Object.keys(this._hass.states).find((x) => x.startsWith("assist_satellite."));
+        this.s.toneBusy = true; this._setMsg("tone", t("tone.playing"));
+        try { await this.ws("tone/play", { satellite: sat }); this._setMsg("tone", t("tone.played"), "ok"); } catch (err) { this._toneErr(err); } finally { this.s.toneBusy = false; this._render(); }
+      } else if (a === "tonerec") {
+        this.s.toneBusy = true; this._render();
+        try { await this._toneRecord(); } catch (err) { this._toneErr(err); } finally { this.s.toneBusy = false; this.s.toneRec = 0; this._render(); }
+      } else if (a === "tonedel") {
+        this.s.toneBusy = true; this._render();
+        try { const r = await this.ws("tone/delete"); this.s.toneDraft = { ...r.tone }; await this._reload(["overview"]); this._setMsg("tone", t("tone.deleted"), "ok"); } catch (err) { this._toneErr(err); } finally { this.s.toneBusy = false; this._render(); }
       } else if (a === "opt") {
         const k = el.dataset.k; const v = el.dataset.v !== undefined ? el.dataset.v : el.getAttribute("aria-checked") !== "true";
         const extra = k === "monitor" ? { monitor_time: (this.shadowRoot.getElementById("mtime")?.value || "03:00").slice(0, 5) } : {};
@@ -817,6 +942,14 @@ class PolyglotAssistPanel extends HTMLElement {
       catch (err) { this._setMsg("set", this.t("messages.error", { error: err.message || err.code }), "err"); }
       return;
     }
+    if (el.dataset.act === "toneupload" && el.files && el.files[0]) {
+      const f = el.files[0]; const ext = (f.name.split(".").pop() || "").toLowerCase();
+      if (!["wav", "mp3", "ogg", "flac"].includes(ext)) { this._setMsg("tone", this.t("tone.err_type"), "err"); return; }
+      if (f.size > 512 * 1024) { this._setMsg("tone", this.t("tone.err_too_big"), "err"); return; }
+      this.s.toneBusy = true; this._setMsg("tone", this.t("tone.uploading"));
+      try { await this._toneUploadBytes(new Uint8Array(await f.arrayBuffer()), ext); } catch (err) { this._toneErr(err); } finally { this.s.toneBusy = false; el.value = ""; this._render(); }
+      return;
+    }
     if (el.dataset.act === "chimetts") {
       try { await this.ws("options", { chime_tts: el.value || null }); this._setMsg("set", this.t("messages.saved"), "ok"); setTimeout(() => this._reload(["overview"]), 1500); }
       catch (err) { this._setMsg("set", err.code === "chime_tts_is_polyglot" ? this.t("tone.is_polyglot") : this.t("messages.error", { error: err.message || err.code }), "err"); }
@@ -874,6 +1007,7 @@ class PolyglotAssistPanel extends HTMLElement {
   }
 
   _input(e) {
+    if (e.target.dataset.tonevol !== undefined) { this._toneDraft().volume = Number(e.target.value); return; }
     if (e.target.dataset.uikey) { // keep what is typed: a re-render while another row saves must not lose it
       this.s.uiDraft = { ...(this.s.uiDraft || {}), [e.target.dataset.l + "|" + e.target.dataset.uikey]: e.target.value };
       return;

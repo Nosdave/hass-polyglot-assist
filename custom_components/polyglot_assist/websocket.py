@@ -23,6 +23,7 @@ from homeassistant.helpers import intent
 from .const import (
     CONF_BUILTIN,
     CONF_CHAT_LOG_TOOLS,
+    CONF_CHIME_TONE,
     CONF_CHIME_TTS,
     CONF_FALLBACK_AGENT,
     CONF_VOICE_LEARN,
@@ -68,6 +69,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_history_list, ws_history_diff, ws_history_restore,
         ws_fallback_set, ws_pipelines, ws_languages_check, ws_stt_test, ws_ai_task_check,
         ws_ui_texts_get, ws_ui_texts_languages, ws_ui_texts_set, ws_ui_texts_translate, ws_ui_texts_export,
+        ws_tone_preview, ws_tone_upload, ws_tone_delete, ws_tone_play,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -734,8 +736,18 @@ async def ws_names_set(hass: HomeAssistant, connection, msg) -> None:
 PANEL_OPTIONS = (
     CONF_LANGUAGES_ENABLED, CONF_RESPONSE_MODE, CONF_MONITOR, CONF_MONITOR_TIME,
     CONF_TRANSLATION_AI_TASK, CONF_CHAT_LOG_TOOLS, CONF_BUILTIN, CONF_CHIME_TTS,
-    CONF_VOICE_LEARN, CONF_VOICE_SATELLITES,
+    CONF_VOICE_LEARN, CONF_VOICE_SATELLITES, CONF_CHIME_TONE,
 )
+
+TONE_SCHEMA = vol.Schema({
+    vol.Optional("source"): vol.In(["classic", "preset", "custom"]),
+    vol.Optional("count"): vol.In([1, 2, 3]),
+    vol.Optional("contour"): vol.In(["up", "down", "same"]),
+    vol.Optional("flow"): vol.In(["separate", "glide"]),
+    vol.Optional("pitch"): vol.In(["low", "mid", "high"]),
+    vol.Optional("timbre"): vol.In(["soft", "bright", "bell"]),
+    vol.Optional("volume"): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=1.0)),
+})
 
 
 @websocket_api.require_admin
@@ -751,6 +763,7 @@ PANEL_OPTIONS = (
         vol.Optional(CONF_CHAT_LOG_TOOLS): bool,
         vol.Optional(CONF_BUILTIN): bool,
         vol.Optional(CONF_CHIME_TTS): vol.Any(None, vol.Match(r"^tts\.[a-z0-9_]+$")),
+        vol.Optional(CONF_CHIME_TONE): TONE_SCHEMA,
         vol.Optional(CONF_VOICE_LEARN): bool,
         vol.Optional(CONF_VOICE_SATELLITES): [vol.Match(r"^assist_satellite\.[a-z0-9_]+$")],
     }
@@ -772,6 +785,15 @@ async def ws_options(hass: HomeAssistant, connection, msg) -> None:
 
         if err := inner_tts_error(hass, changes[CONF_CHIME_TTS]):
             connection.send_error(msg["id"], f"chime_tts_{err}", "this speech output cannot be used behind the tone")
+            return
+    if CONF_CHIME_TONE in changes:
+        from .tone import normalize  # noqa: PLC0415
+
+        # the own file's hash is only ever set by tone/upload — never by the client
+        stored = (entry.options.get(CONF_CHIME_TONE) or {}).get("custom_hash")
+        changes[CONF_CHIME_TONE] = normalize({**changes[CONF_CHIME_TONE], "custom_hash": stored})
+        if changes[CONF_CHIME_TONE]["source"] != (msg[CONF_CHIME_TONE].get("source") or "classic"):
+            connection.send_error(msg["id"], "no_custom_tone", "upload or record your own tone first")
             return
     new_options = {**entry.options, **changes}
     if CONF_TRANSLATION_AI_TASK in changes and not ai_task:
@@ -1070,3 +1092,130 @@ async def ws_stt_test(hass: HomeAssistant, connection, msg) -> None:
 def ws_ai_task_check(hass: HomeAssistant, connection, msg) -> None:
     """Whether an AI task may receive foreign text (it must have no tools)."""
     connection.send_result(msg["id"], {"entity_id": msg["entity_id"], "has_tools": ai_task_has_tools(hass, msg["entity_id"])})
+
+
+# ── confirmation tone ────────────────────────────────────────────────────────
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/tone/preview", vol.Optional("entry_id"): str,
+     vol.Optional("tone"): TONE_SCHEMA}
+)
+@websocket_api.async_response
+async def ws_tone_preview(hass: HomeAssistant, connection, msg) -> None:
+    """The tone as base64 for listening in the panel (unsaved settings allowed)."""
+    import base64  # noqa: PLC0415
+
+    from .tone import async_tone_audio, normalize, tone_hash  # noqa: PLC0415
+
+    entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    stored = runtime["entry"].options.get(CONF_CHIME_TONE) or {}
+    tone = normalize({**stored, **(msg.get("tone") or {}), "custom_hash": stored.get("custom_hash")})
+    ext, data = await async_tone_audio(hass, entry_id, tone)
+    connection.send_result(msg["id"], {"ext": ext, "data_b64": base64.b64encode(data).decode(),
+                                       "tone": tone, "hash": tone_hash(tone)})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/tone/upload", vol.Optional("entry_id"): str,
+     vol.Required("ext"): vol.In(["wav", "mp3", "ogg", "flac"]),
+     vol.Required("data_b64"): vol.All(str, vol.Length(max=800_000))}
+)
+@websocket_api.async_response
+async def ws_tone_upload(hass: HomeAssistant, connection, msg) -> None:
+    """Store the user's own tone (not public: /config/polyglot_assist/tones) and use it."""
+    import base64  # noqa: PLC0415
+    import binascii  # noqa: PLC0415
+
+    from .tone import ToneFileError, data_hash, normalize, to_tone_wav, write_custom  # noqa: PLC0415
+
+    entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    try:
+        data = base64.b64decode(msg["data_b64"], validate=True)
+    except (binascii.Error, ValueError):
+        connection.send_error(msg["id"], "tone_format", "not valid base64")
+        return
+    try:
+        from homeassistant.components.ffmpeg import get_ffmpeg_manager  # noqa: PLC0415
+
+        ffmpeg = get_ffmpeg_manager(hass).binary
+    except Exception:  # noqa: BLE001 — without ffmpeg only plain WAV is accepted
+        ffmpeg = None
+    try:
+        wav = await hass.async_add_executor_job(to_tone_wav, data, msg["ext"], ffmpeg)
+        await hass.async_add_executor_job(write_custom, hass.config.config_dir, entry_id, wav)
+    except ToneFileError as err:
+        connection.send_error(msg["id"], f"tone_{err.args[0]}", "this file cannot be used as a tone")
+        return
+    entry = runtime["entry"]
+    tone = normalize({**(entry.options.get(CONF_CHIME_TONE) or {}), "source": "custom", "custom_hash": data_hash(wav)})
+    hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_CHIME_TONE: tone})
+    connection.send_result(msg["id"], {"tone": tone})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/tone/delete", vol.Optional("entry_id"): str}
+)
+@websocket_api.async_response
+async def ws_tone_delete(hass: HomeAssistant, connection, msg) -> None:
+    """Remove the own tone; the designed tone sounds again."""
+    from .tone import delete_custom, normalize  # noqa: PLC0415
+
+    entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    await hass.async_add_executor_job(delete_custom, hass.config.config_dir, entry_id)
+    entry = runtime["entry"]
+    old = dict(entry.options.get(CONF_CHIME_TONE) or {})
+    old.pop("custom_hash", None)
+    tone = normalize({**old, "source": "classic" if old.get("source") in (None, "classic", "custom") else "preset"})
+    hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_CHIME_TONE: tone})
+    connection.send_result(msg["id"], {"tone": tone})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/tone/play", vol.Optional("entry_id"): str,
+     vol.Required("satellite"): vol.Match(r"^assist_satellite\.[a-z0-9_]+$")}
+)
+@websocket_api.async_response
+async def ws_tone_play(hass: HomeAssistant, connection, msg) -> None:
+    """Play the SAVED tone on a voice device — through the real path (our TTS entity), no pre-announce."""
+    from homeassistant.components import tts  # noqa: PLC0415
+    from homeassistant.components.assist_satellite import AssistSatelliteEntityFeature  # noqa: PLC0415
+
+    from .const import CHIME_MARKER  # noqa: PLC0415
+
+    entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    state = hass.states.get(msg["satellite"])
+    if state is None or state.state == "unavailable":
+        connection.send_error(msg["id"], "tone_no_satellite", "this voice device is not available")
+        return
+    if not (state.attributes.get("supported_features") or 0) & AssistSatelliteEntityFeature.ANNOUNCE:
+        connection.send_error(msg["id"], "tone_no_announce", "this voice device cannot play announcements")
+        return
+    tone_tts = er.async_get(hass).async_get_entity_id("tts", DOMAIN, f"{entry_id}_tone_tts")
+    tts_state = hass.states.get(tone_tts) if tone_tts else None
+    if tts_state is None or tts_state.state == "unavailable":
+        connection.send_error(msg["id"], "tone_tts_unavailable", "choose the speech output behind the tone first")
+        return
+    media_id = tts.generate_media_source_id(hass, CHIME_MARKER, engine=tone_tts, cache=True)
+    try:
+        async with asyncio.timeout(20):
+            await hass.services.async_call(
+                "assist_satellite", "announce",
+                {"entity_id": msg["satellite"], "media_id": media_id, "preannounce": False}, blocking=True)
+    except TimeoutError:
+        connection.send_error(msg["id"], "timeout", "the voice device did not finish in time")
+        return
+    except Exception as err:  # noqa: BLE001
+        connection.send_error(msg["id"], "failed", str(err)[:200])
+        return
+    connection.send_result(msg["id"], {"played": True})
