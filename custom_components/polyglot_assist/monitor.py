@@ -160,18 +160,21 @@ class Monitor:
             "assistant_ms_p50": _p50([e.get("ms") for e in llm]),
         }
 
-    async def async_evaluate(self, runtime: dict[str, Any], propose, review=None, commands=None) -> dict[str, Any]:
+    async def async_evaluate(self, runtime: dict[str, Any], propose, review=None, commands=None, *, add=None) -> dict[str, Any]:
         """Evaluate the last 24 h.
 
         Order (one shared time budget — whatever finished is kept, even on a timeout):
         1. ``review(entries)`` → insights "what went wrong" (AI task, optional);
         2. ``propose(repeated)`` → sentences for existing commands;
-        3. ``commands(insights)`` → new commands derived from corrections (optional).
+        3. ``commands(insights, add)`` → new commands derived from corrections (optional).
+        ``add(items)`` puts proposals into the queue right away and returns how many
+        were new; ``proposals`` in the summary counts only those.
         """
         entries = self.window(24)
         repeated = self.find_repeated(entries)
         corrections = self.find_corrections(entries)
         items: list[dict[str, Any]] = []
+        added = 0
         insights: list[dict[str, Any]] = []
         errors: list[str] = []
         try:
@@ -183,13 +186,16 @@ class Monitor:
                     _LOGGER.warning("Polyglot Assist: reviewing conversations failed: %s", err)
             if repeated:
                 try:
-                    items += await propose(repeated)
+                    new = await propose(repeated)
+                    items += new
+                    if add is not None:
+                        added += await add(new)
                 except Exception as err:  # noqa: BLE001 — the summary still counts
                     errors.append(str(err)[:200])
                     _LOGGER.warning("Polyglot Assist: monitoring proposals failed: %s", err)
-            if commands is not None and insights:
+            if commands is not None and insights and add is not None:
                 try:
-                    items += await commands(insights)
+                    added += await commands(insights, add)
                 except Exception as err:  # noqa: BLE001
                     errors.append(f"commands: {str(err)[:150]}")
                     _LOGGER.warning("Polyglot Assist: proposals from corrections failed: %s", err)
@@ -200,7 +206,7 @@ class Monitor:
                 "repeated": repeated[:10],
                 "corrections": corrections[:10],
                 "insights": insights[:10],
-                "proposals": len(items),
+                "proposals": added if add is not None else len(items),
                 **({"error": "; ".join(errors)[:300]} if errors else {}),
             }
             if self._active:

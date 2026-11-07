@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 MAX_EPISODES = 12
@@ -30,10 +30,12 @@ LANG_RE = re.compile(r"^[a-z]{2,3}(-[a-z]{2,4})?$")
 
 
 def _ts(entry: dict[str, Any]) -> datetime | None:
+    """Timestamp as an aware datetime (naive values count as UTC), or None."""
     try:
-        return datetime.fromisoformat(str(entry.get("ts")))
+        value = datetime.fromisoformat(str(entry.get("ts")))
     except ValueError:
         return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def _gap(a: dict[str, Any], b: dict[str, Any]) -> float:
@@ -96,8 +98,9 @@ def format_episodes(episodes: list[list[dict[str, Any]]], name_of: Callable[[str
         lines.append(f"E{n}:")
         for turn in episode:
             how = "own command" if turn.get("result") == "hit" else "AI"
-            lines.append(f"  user [{turn.get('lang') or '?'}]: {_clip(turn.get('text'))}")
-            done = [name_of(e) for e in (turn.get("switched") or [])][:10]
+            lang = turn.get("lang") if isinstance(turn.get("lang"), str) and LANG_RE.match(turn["lang"]) else "?"
+            lines.append(f"  user [{lang}]: {_clip(turn.get('text'))}")
+            done = [_clip(name_of(e), 80) for e in (turn.get("switched") or []) if isinstance(e, str)][:10]
             calls = [f"{t.get('tool')}({_clip(t.get('args'), 120)})" for t in (turn.get("targets") or [])][:5]
             what = "; ".join(x for x in ("switched: " + ", ".join(done) if done else "",
                                          "tool calls: " + ", ".join(calls) if calls else "") if x)
@@ -127,7 +130,8 @@ def parse_review(lines: list[str], episodes: list[list[dict[str, Any]]]) -> list
         episode = episodes[idx]
         out.append({
             "episode": idx, "kind": kind, "went_wrong": went_wrong, "wanted": wanted,
-            "ts": episode[-1].get("ts"), "lang": next((t.get("lang") for t in episode if t.get("lang")), None),
+            "ts": episode[-1].get("ts"),
+            "lang": next((t["lang"] for t in episode if isinstance(t.get("lang"), str) and LANG_RE.match(t["lang"])), None),
             "said": [_clip(t.get("text"), 120) for t in episode][-4:],
             "satellites": sorted({t["satellite"] for t in episode if t.get("satellite")}),
         })
@@ -141,7 +145,7 @@ def parse_command(line: str) -> dict[str, Any] | None:
     from the left, the JSON from its opening bracket after the LAST "| [" / "| {".
     """
     text = str(line).strip()
-    if text.upper().startswith("NONE"):
+    if re.fullmatch(r"NONE\.?", text, re.I):
         return None
     head = text.split("|", 2)
     if len(head) != 3:
@@ -168,7 +172,10 @@ def parse_command(line: str) -> dict[str, Any] | None:
 
 
 def action_fingerprint(action: Any, lang: str) -> str:
-    """Same switching in the same language = same proposal, whatever name the AI picks."""
+    """Same switching in the same language = same proposal, whatever name the AI picks.
+
+    Entities within a step are sorted; the order of the steps is kept.
+    """
     steps = []
     for step in action if isinstance(action, list) else [action]:
         if not isinstance(step, dict):
@@ -176,5 +183,5 @@ def action_fingerprint(action: Any, lang: str) -> str:
         target = (step.get("target") or {}).get("entity_id") if isinstance(step.get("target"), dict) else None
         ents = sorted([target] if isinstance(target, str) else [e for e in (target or []) if isinstance(e, str)])
         steps.append([step.get("action"), ents, json.dumps(step.get("data") or {}, sort_keys=True)])
-    raw = json.dumps([lang, sorted(steps)], sort_keys=True)
+    raw = json.dumps([lang, steps], sort_keys=True)  # step ORDER matters (on→off ≠ off→on)
     return "fp:" + hashlib.sha256(raw.encode()).hexdigest()[:12]

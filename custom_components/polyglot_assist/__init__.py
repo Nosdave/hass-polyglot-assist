@@ -433,7 +433,12 @@ NIGHT_BUDGET_S = 600
 
 
 async def async_run_monitor(hass: HomeAssistant, data: dict, budget_s: float = NIGHT_BUDGET_S) -> dict:
-    """Evaluate the last 24 h and put the proposals into the queue (one shared time budget)."""
+    """Evaluate the last 24 h; proposals go into the queue AS THEY ARE FOUND (one shared time budget).
+
+    Every AI call gets the same deadline; local checks stop when less than
+    LOCAL_RESERVE_S is left, so the outer timeout of "run now" never cuts a
+    finished proposal off before it reached the queue.
+    """
     import time as _time  # noqa: PLC0415
 
     deadline = _time.monotonic() + budget_s
@@ -444,6 +449,21 @@ async def async_run_monitor(hass: HomeAssistant, data: dict, budget_s: float = N
     monitor: Monitor = data["monitor"]
     ai_task = entry.options.get(CONF_TRANSLATION_AI_TASK)
     matcher = data["matcher"]
+    queue = data.get("queue") or ProposalQueue(hass, entry.entry_id)
+    data["queue"] = queue
+    builtin = data.get("builtin")
+    builtin_lists = data["builtin_lists"].async_get() if data.get("builtin_lists") is not None else {}
+
+    def _builtin_match(text: str, lang: str):
+        # every enabled language: at runtime a catalog sentence is tried in all of them first
+        for candidate in ([lang, *[x for x in builtin.languages if x != lang]] if builtin is not None else []):
+            hit = builtin.recognize(text, candidate, builtin_lists)
+            if hit:
+                return f"{hit[0].intent.name}/{candidate}"
+        return None
+
+    async def _add(items: list) -> int:
+        return len(await queue.async_add(items)) if items else 0
 
     async def _propose(repeated: list) -> list:
         if not ai_task:
@@ -464,17 +484,6 @@ async def async_run_monitor(hass: HomeAssistant, data: dict, budget_s: float = N
             ent = reg.async_get(st.entity_id)
             names[st.entity_id] = [st.name, *[a for a in ((ent.aliases if ent else None) or []) if isinstance(a, str)],
                                    *extra.get(st.entity_id, [])]
-        builtin = data.get("builtin")
-        builtin_lists = data["builtin_lists"].async_get() if data.get("builtin_lists") is not None else {}
-
-        def _builtin_match(text: str, lang: str):
-            # every enabled language: at runtime a catalog sentence is tried in all of them first
-            for candidate in ([lang, *[x for x in builtin.languages if x != lang]] if builtin is not None else []):
-                hit = builtin.recognize(text, candidate, builtin_lists)
-                if hit:
-                    return f"{hit[0].intent.name}/{candidate}"
-            return None
-
         return await hass.async_add_executor_job(
             build_monitor_items, repeated, lines, matcher.config,
             lambda t, lang: matcher.match_all(t, lang, slot_lists), slot_lists,
@@ -483,18 +492,22 @@ async def async_run_monitor(hass: HomeAssistant, data: dict, budget_s: float = N
 
     review = commands = None
     if ai_task and entry.options.get(CONF_MONITOR_REVIEW):
-        review, commands = _correction_review(hass, data, ai_task, deadline)
-    result = await monitor.async_evaluate(data, _propose, review, commands)
-    queue = data.get("queue") or ProposalQueue(hass, entry.entry_id)
-    data["queue"] = queue
-    await queue.async_add(result["items"])
+        review, commands = _correction_review(hass, data, ai_task, deadline, _builtin_match)
+    result = await monitor.async_evaluate(data, _propose, review, commands, add=_add)
     return result["summary"]
 
 
-def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: float):
+LOCAL_RESERVE_S = 15
+
+
+def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: float, builtin_match):
     """The two AI steps of "learning from corrections" (see review.py for the pure part)."""
+    import re as _re  # noqa: PLC0415
+    import time as _time  # noqa: PLC0415
+
     from homeassistant.components.homeassistant.exposed_entities import async_should_expose  # noqa: PLC0415
     from homeassistant.helpers import area_registry as ar  # noqa: PLC0415
+    from homeassistant.helpers import device_registry as dr  # noqa: PLC0415
     from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
     from homeassistant.helpers import intent as ha_intent  # noqa: PLC0415
 
@@ -509,6 +522,9 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
 
     matcher = data["matcher"]
     state: dict = {}
+
+    def _left() -> float:
+        return deadline - _time.monotonic()
 
     def _name(entity_id: str) -> str:
         st = hass.states.get(entity_id)
@@ -525,77 +541,56 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
             hass, ai_task_entity=ai_task, episode_lines=lines, count=len(episodes), deadline=deadline)
         return parse_review(answer, episodes)
 
-    async def commands(insights: list) -> list:
-        config = matcher.config
-        sensitive = sensitive_entities(config)
-        extra = names_table(config)
-        ents = er.async_get(hass)
-        areas = {a.id: a.name for a in ar.async_get(hass).async_list_areas()}
-        registered = {h.intent_type for h in ha_intent.async_get(hass)} | set(config.get("intents") or {})
-        slot_lists = {**matcher.static_slot_lists(), **data["lists"].async_get()}
-        command_lines = []
-        for name, cfg in list((config.get("intents") or {}).items())[:60]:
-            if isinstance(cfg, dict):
-                sample = next(iter((cfg.get("sentences") or {}).values()), [])[:1]
-                command_lines.append(f"- {name}: {' / '.join(sample)}")
-
-        def area_of(entity_id: str) -> str | None:
-            entry = ents.async_get(entity_id)
-            if entry is None:
-                return None
-            if entry.area_id:
-                return entry.area_id
-            if entry.device_id:
-                from homeassistant.helpers import device_registry as dr  # noqa: PLC0415
-
-                dev = dr.async_get(hass).async_get(entry.device_id)
-                return dev.area_id if dev else None
-            return None
-
-        def allowed(entity_id: str) -> bool:
-            return (entity_id.split(".", 1)[0] in ("light", "switch", "fan", "media_player")
-                    and async_should_expose(hass, "conversation", entity_id)
-                    and action_target_reason(hass, entity_id, sensitive=sensitive, extra_names=extra) is None)
-
-        items: list = []
-        for insight in [i for i in insights if i["kind"] in COMMAND_KINDS][:MAX_COMMAND_PROPOSALS]:
+    def _bind_one(config, registered, enabled, slot_lists, existing_fps, command_lines, area_of, allowed, area_words, areas):
+        async def one(insight: dict):
             episode = state["episodes"][insight["episode"]]
             touched = {e for t in episode for e in (t.get("switched") or [])}
             area_ids = {a for a in (area_of(e) for e in touched) if a}
-            area_names = {areas[a].lower(): a for a in areas}
-            for turn in episode:  # rooms named in what was said or in the tool calls
+            for turn in episode:  # rooms named in what was said or in the tool calls (whole words only)
                 text = " ".join([str(turn.get("text") or "")] + [str(c.get("args")) for c in (turn.get("targets") or [])]).lower()
-                area_ids |= {aid for aname, aid in area_names.items() if aname and aname in text}
+                area_ids |= {aid for aid, rx in area_words.items() if rx.search(text)}
             offered = sorted({st.entity_id for st in hass.states.async_all()
                               if area_of(st.entity_id) in area_ids and allowed(st.entity_id)} | {e for e in touched if allowed(e)})
             if not offered:
-                continue
+                return None
             devices = [f"{e} = {hass.states.get(e).name if hass.states.get(e) else e}, {areas.get(area_of(e) or '', '–')}"
                        for e in offered[:40]]
-            try:
-                answer = await async_propose_correction_command(
-                    hass, ai_task_entity=ai_task, insight=insight, episode_lines=state["per_episode"][insight["episode"]],
-                    devices=devices, commands=command_lines, deadline=deadline)
-            except TimeoutError:
-                break
+            answer = await async_propose_correction_command(
+                hass, ai_task_entity=ai_task, insight=insight, episode_lines=state["per_episode"][insight["episode"]],
+                devices=devices, commands=command_lines, deadline=deadline)
             parsed = parse_command(answer[0]) if answer else None
             if parsed is None or parsed["name"] in registered:
-                continue
+                return None
+            lang = parsed["lang"]
+            if lang not in enabled or (insight.get("lang") and lang != insight["lang"]):
+                return None
+            if any("{" in t or "<" in t for t in parsed["sentences"]):
+                return None  # fixed devices → no placeholders (also none hidden in <rules>)
             if check_action_safe(parsed["action"]):
-                continue
+                return None
             used = [e for step in parsed["action"] for e in (iter_step_entities(step) or [])]
             if not used or any(e not in offered for e in used):
-                continue  # only devices we offered — never anything the AI made up
-            lang = parsed["lang"]
+                return None  # only devices we offered — never anything the AI made up
+            fp = action_fingerprint(parsed["action"], lang)
+            if fp in existing_fps:
+                return None  # a command doing exactly this already exists
+            if _left() < LOCAL_RESERVE_S:
+                return None
 
-            def _check(sentences=parsed["sentences"], name=parsed["name"], lang=lang):
-                return [check_proposal(name, clean_alternatives(t), [], lambda x: matcher.match_all(x, lang, slot_lists),
-                                       slot_lists, string_rules(config), lang) for t in sentences]
+            def _check(sentences=parsed["sentences"], name=parsed["name"]):
+                out = []
+                for t in sentences:
+                    r = check_proposal(name, clean_alternatives(t), [], lambda x: matcher.match_all(x, lang, slot_lists),
+                                       slot_lists, string_rules(config), lang)
+                    if r["status"] != "error" and builtin_match(r["sentence"], lang):
+                        r = {**r, "status": "error"}  # HA already handles it (in the speaker's room) — never take it over
+                    out.append(r)
+                return out
 
             checked = await hass.async_add_executor_job(_check)
             good = [r["sentence"] for r in checked if r["status"] != "error"]
             if not good:
-                continue
+                return None
             item = {
                 "op": "add_intent",
                 "payload": {"name": parsed["name"], "intent": {
@@ -608,11 +603,63 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
                     "derived from a correction — check what it switches before accepting",
                     "fixed device list — new devices in the room are not added automatically",
                     *[n for r in checked for n in r.get("notes", [])[:1]][:3]]},
-                "fp": action_fingerprint(parsed["action"], lang),
+                "fp": fp,
             }
-            if check_item(item) is None:
-                items.append(item)
-                registered.add(parsed["name"])
-        return items
+            return item if check_item(item) is None else None
 
-    return review, commands
+        return one
+
+    async def commands_entry(insights: list, add) -> int:
+        config = matcher.config
+        sensitive = sensitive_entities(config)
+        extra = names_table(config)
+        ents = er.async_get(hass)
+        devs = dr.async_get(hass)
+        areas = {a.id: a.name for a in ar.async_get(hass).async_list_areas()}
+        registered = {h.intent_type for h in ha_intent.async_get(hass)} | set(config.get("intents") or {})
+        slot_lists = {**matcher.static_slot_lists(), **data["lists"].async_get()}
+        existing_fps: set = set()
+        command_lines: list = []
+        for name, cfg in list((config.get("intents") or {}).items()):
+            if isinstance(cfg, dict):
+                if cfg.get("action"):
+                    for lang in (cfg.get("sentences") or {}):
+                        existing_fps.add(action_fingerprint(cfg["action"], lang))
+                if len(command_lines) < 60:
+                    sample = next(iter((cfg.get("sentences") or {}).values()), [])[:1]
+                    command_lines.append(f"- {name}: {' / '.join(sample)}")
+
+        def area_of(entity_id: str) -> str | None:
+            entry = ents.async_get(entity_id)
+            if entry is None:
+                return None
+            if entry.area_id:
+                return entry.area_id
+            dev = devs.async_get(entry.device_id) if entry.device_id else None
+            return dev.area_id if dev else None
+
+        def allowed(entity_id: str) -> bool:
+            return (entity_id.split(".", 1)[0] in ("light", "switch", "fan", "media_player")
+                    and async_should_expose(hass, "conversation", entity_id)
+                    and action_target_reason(hass, entity_id, sensitive=sensitive, extra_names=extra) is None)
+
+        area_words = {aid: _re.compile(r"(?<!\w)" + _re.escape(name.lower()) + r"(?!\w)") for aid, name in areas.items() if name}
+        one = _bind_one(config, registered, set(matcher.languages), slot_lists, existing_fps, command_lines,
+                        area_of, allowed, area_words, areas)
+        added = 0
+        for insight in [i for i in insights if i["kind"] in COMMAND_KINDS][:MAX_COMMAND_PROPOSALS]:
+            if _left() < LOCAL_RESERVE_S * 2:
+                break
+            try:
+                item = await one(insight)
+            except TimeoutError:
+                break
+            except Exception as err:  # noqa: BLE001 — one failing correction must not lose the others
+                _LOGGER.warning("Polyglot Assist: proposal from a correction failed: %s", err)
+                continue
+            if item is not None:
+                added += await add([item])
+                registered.add(item["payload"]["name"])
+        return added
+
+    return review, commands_entry

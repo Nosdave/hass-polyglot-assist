@@ -107,6 +107,7 @@ def _remaining(deadline: float | None) -> float:
 async def _generate(
     hass: HomeAssistant, entity_id: str, instructions: str, field: str, description: str,
     context: Context | None, deadline: float | None = None, max_chars: int = MAX_SENTENCE_CHARS,
+    split_lines: bool = False,
 ) -> list[str]:
     budget = _remaining(deadline)
     if budget <= 1:
@@ -135,7 +136,10 @@ async def _generate(
     items = data.get(field) if isinstance(data, dict) else None
     if not isinstance(items, list):
         raise ProposalError("the AI task returned no list")
-    cleaned = [" ".join(x.split()) for x in items if isinstance(x, str)]
+    raw = [x for x in items if isinstance(x, str)]
+    if split_lines:  # some models put every answer line into ONE string
+        raw = [line for x in raw for line in x.splitlines()]
+    cleaned = [" ".join(x.split()) for x in raw]
     return list(dict.fromkeys(x for x in cleaned if x and len(x) <= max_chars))[:12]
 
 
@@ -474,6 +478,7 @@ async def async_review_episodes(
         context,
         deadline,
         max_chars=600,
+        split_lines=True,
     )
 
 
@@ -526,4 +531,5 @@ async def async_propose_correction_command(
         context,
         deadline,
         max_chars=2000,
+        split_lines=True,
     )

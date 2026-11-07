@@ -199,7 +199,9 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                     error=result.response.response_type == intent.IntentResponseType.ERROR,
                     device=user_input.device_id, satellite=user_input.satellite_id,
                     conversation=chat_log.conversation_id,
-                    speech=_speech(result.response), switched=_switched(result.response),
+                    speech=_speech(result.response),
+                    switched=_switched(result.response) or _catalog_entities(
+                        (matcher.config.get("intents") or {}).get(match.intent_name)),
                 )
             return result
 
@@ -513,21 +515,34 @@ def _tool_result_entities(contents) -> list[str]:
     """Entity ids in the tool RESULTS of an AI turn (what was actually switched)."""
     found: list[str] = []
 
-    def walk(value, depth=0):
+    def walk(value, depth=0, in_success=False):
+        """Entities only from "success" lists (HA intent results) — not the requested targets or failures."""
         if depth > 6 or len(found) >= MAX_SWITCHED:
             return
         if isinstance(value, dict):
-            if value.get("type") == "entity" and isinstance(value.get("id"), str) and "." in value["id"]:
+            if in_success and value.get("type") == "entity" and isinstance(value.get("id"), str) and "." in value["id"]:
                 if value["id"] not in found:
                     found.append(value["id"])
             for key, inner in value.items():
-                if key != "failed":  # only what succeeded
-                    walk(inner, depth + 1)
+                walk(inner, depth + 1, in_success or key == "success")
         elif isinstance(value, list):
             for inner in value:
-                walk(inner, depth + 1)
+                walk(inner, depth + 1, in_success)
 
     for content in contents:
         if getattr(content, "role", None) == "tool_result":
             walk(getattr(content, "tool_result", None))
     return found[:MAX_SWITCHED]
+
+
+def _catalog_entities(intent_cfg) -> list[str]:
+    """Literal entity ids a catalog command's action targets (its handler reports no results)."""
+    from .proposals import iter_step_entities  # noqa: PLC0415
+
+    action = (intent_cfg or {}).get("action") if isinstance(intent_cfg, dict) else None
+    out: list[str] = []
+    for step in action if isinstance(action, list) else ([action] if action else []):
+        for entity in iter_step_entities(step) or []:
+            if "{" not in entity and entity not in out:
+                out.append(entity)
+    return out[:MAX_SWITCHED]

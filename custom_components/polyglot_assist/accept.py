@@ -46,9 +46,14 @@ def dynamic_reason(hass: HomeAssistant, item: dict, sensitive: set[str], extra_n
 
         from .proposals import action_entity_reason  # noqa: PLC0415
 
+        # commands derived from a correction may only switch what Assist may switch
+        needs_exposure = (item.get("origin") or {}).get("source") == "correction"
+
         def _reason(entity: str) -> str | None:
-            return action_target_reason(hass, entity, sensitive=sensitive, extra_names=extra_names) or (
-                None if async_should_expose(hass, "conversation", entity) else f"{entity} is not exposed to Assist")
+            reason = action_target_reason(hass, entity, sensitive=sensitive, extra_names=extra_names)
+            if reason or not needs_exposure or async_should_expose(hass, "conversation", entity):
+                return reason
+            return f"{entity} is not exposed to Assist"
 
         reason = action_entity_reason((p.get("intent") or {}).get("action") or [], _reason)
         if reason:

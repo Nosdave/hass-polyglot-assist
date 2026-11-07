@@ -267,7 +267,7 @@ class VoiceLearn:
         if kind == "detail":
             origin = (item.get("origin") or {}).get("source") or "?"
             return say("learn_detail", lang, what=self._describe(item, lang, config),
-                       origin=say("origin_" + origin, lang) if origin in ("monitor", "translation", "starter", "new_devices") else origin), lang, False
+                       origin=say("origin_" + origin, lang) if origin in ("monitor", "correction", "translation", "starter", "new_devices") else origin), lang, False
         from .voice_rules import check_voice_item  # noqa: PLC0415
 
         reason = await self.hass.async_add_executor_job(

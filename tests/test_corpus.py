@@ -391,6 +391,8 @@ def test_proposal_actions_are_restricted():
     assert P.check_action_safe([{"action": "switch.turn_on", "target": {"entity_id": "switch.garage_door"}}])
     assert P.check_action_safe([{"action": "light.turn_on", "target": {"area_id": "kitchen"}}])
     assert P.check_action_safe([{"action": "light.turn_on", "target": {"entity_id": "light.a"}, "data": {"x": "{{ states('lock.a') }}"}}])
+    # a template in an otherwise allowed data key is refused too
+    assert P.check_action_safe([{"action": "light.turn_on", "target": {"entity_id": "light.a"}, "data": {"brightness_pct": "{{ 50 }}"}}])
     item = {"op": "add_intent", "payload": {"name": "X", "intent": {"action": [{"action": "cover.open_cover", "target": {"entity_id": "cover.x"}}]}}}
     assert P.check_item(item)
 
