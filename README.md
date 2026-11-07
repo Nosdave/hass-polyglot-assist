@@ -9,11 +9,11 @@
 
 **Many languages. One Home Assistant pipeline. One wake word.**
 
-Speak German, English or French to the same voice satellite, without
-switching the wake word or the pipeline. The same command runs locally in a
-few milliseconds and answers in the language you spoke. "Licht Küche an",
-"Turn on the kitchen light" and "Allume la lumière de la cuisine" are one
-command, not three setups.
+Speak any language your speech recognition and TTS understand — and several
+of them to the same voice satellite, without switching the wake word or the
+pipeline. The same command runs locally in a few milliseconds and answers in
+the language you spoke. "Licht Küche an", "Turn on the kitchen light" and
+"Enciende la luz de la cocina" are one command, not three setups.
 
 **New: local intents that teach themselves.** Polyglot notices which
 sentences keep ending up at your AI agent. Your **AI task** turns the
@@ -45,16 +45,43 @@ without an LLM.
   - suggestions with their origin and check;
   - version history with restore;
   - all settings, including the fallback agent, the language check
-    (STT, AI, Polyglot, TTS) and the interface language (English, German,
-    French — more as files or translated by your AI).
+    (STT, AI, Polyglot, TTS) and the interface language (ships with English,
+    German and French; any other language as a file or translated by your AI).
 - **Safe by design.** Every command has a safety level, and doors, locks and
   alarms are protected. The AI task used for learning must have no tools.
   Every change runs against the corpus before it is saved.
 - **Confirmation tone like HA's own, with any TTS.** Choose classic, design
   your own (single/double/triple, rising/falling, flowing, bell …), or upload
   or record a tone.
-- **Light.** About 16 MB for 3 languages and about 2 ms per hit. Runs on
+- **Light.** About 16 MB with 3 languages enabled (≈ 37 MB with 8) and about 2 ms per hit. Runs on
   typical HA hardware.
+
+## Which languages?
+
+Any. Polyglot Assist has no language list of its own — it matches the
+sentences you (or your AI) write, in whatever languages you enable. What a
+language needs is the rest of the chain:
+
+| Part | Needed for | Required? |
+|---|---|---|
+| **Speech-to-text** that recognises the language | hearing it | yes |
+| **Text-to-speech** that speaks it | answering in it | yes |
+| **AI task** (an LLM without tools) that knows it | translations, suggestions, self-learning | recommended |
+| **Fallback conversation agent** that knows it | everything no command matches | recommended |
+| HA's own sentences for the language | built-in commands (turn on, timers, …) | optional |
+
+The panel's **language check** shows this per language (STT, AI round trip,
+Polyglot, TTS) and an STT test speaks a sentence and listens to it again.
+
+A few small built-in word lists ship for German, English and French today:
+- Polyglot's own short answers; other languages get English.
+- The spoken learning commands ("What have you learned?").
+- The extra safety *keywords* for names such as "garage door". Locks, alarms,
+  valves, sirens, cameras and garage/door/gate covers are protected by their
+  device type in every language.
+- The correction words the monitor recognises.
+
+Contributions for more languages are welcome; each one is a small table.
 
 ## The multilingual voice stack
 
@@ -79,7 +106,7 @@ A custom **conversation agent** sits in front of your LLM agent on the voice
 pipeline. For each spoken sentence it tries the following in order:
 
 1. **Your commands.** A fast, deterministic per-language Hassil match
-   against the catalog (DE, EN, FR or any language you add). On a match it
+   against the catalog, in every language you enable. On a match it
    runs the command and answers in the matched language.
 2. **HA's built-in commands**, in every language, with the targets checked
    (optional).
@@ -464,7 +491,7 @@ tone (it would show the marker as text) — only voice satellites do.
 Talk about suggestions on approved voice satellites:
 “What have you learned?” → “Tell me more about the first one” → “Accept it” →
 Polyglot asks back (“Shall I accept … ? Say yes.”) → “Yes”. “Undo that” takes
-the last acceptance back. Works in German, English and French.
+the last acceptance back. The voice commands ship in German, English and French.
 
 Because anyone in earshot can say “yes”, voice may only add **new sentences
 and names for harmless commands**: commands Polyglot runs itself with a
