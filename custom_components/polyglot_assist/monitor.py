@@ -211,21 +211,28 @@ def _other_samples(config: dict[str, Any], slot_lists: dict, parsed_rules: dict,
     return out
 
 
-def _all_list_refs(expr: Any, parsed_rules: dict, _depth: int = 0) -> list[str]:
-    """List references of a sentence, following referenced <rules> (bounded)."""
+def _all_list_refs(expr: Any, parsed_rules: dict, slot_lists: dict | None = None, _depth: int = 0) -> list[str]:
+    """List references of a sentence, following referenced <rules> and the input
+    expressions of text lists (a list value may itself contain a placeholder) — bounded."""
     from hassil.expression import ListReference, RuleReference, Sentence  # noqa: PLC0415
+    from hassil.intents import TextSlotList  # noqa: PLC0415
 
-    if expr is None or _depth > 10:
+    if expr is None or _depth > 12:
         return []
     if isinstance(expr, Sentence):
-        return _all_list_refs(expr.expression, parsed_rules, _depth + 1)
+        return _all_list_refs(expr.expression, parsed_rules, slot_lists, _depth + 1)
     if isinstance(expr, ListReference):
-        return [expr.list_name]
+        out = [expr.list_name]
+        lst = (slot_lists or {}).get(expr.list_name)
+        if isinstance(lst, TextSlotList):
+            for value in lst.values:
+                out += _all_list_refs(getattr(value, "text_in", None), parsed_rules, slot_lists, _depth + 1)
+        return out
     if isinstance(expr, RuleReference):
-        return _all_list_refs(parsed_rules.get(expr.rule_name), parsed_rules, _depth + 1)
+        return _all_list_refs(parsed_rules.get(expr.rule_name), parsed_rules, slot_lists, _depth + 1)
     out: list[str] = []
     for item in getattr(expr, "items", None) or []:
-        out += _all_list_refs(item, parsed_rules, _depth + 1)
+        out += _all_list_refs(item, parsed_rules, slot_lists, _depth + 1)
     return out
 
 
@@ -257,7 +264,7 @@ def _harden(check: dict[str, Any], *, name: str, cfg: dict[str, Any], template: 
         parsed = parse_sentence(template)
     except Exception:  # noqa: BLE001
         return fail("not parsable")
-    if any(isinstance(slot_lists.get(r), WildcardSlotList) for r in _all_list_refs(parsed, parse_rules(rules))):
+    if any(isinstance(slot_lists.get(r), WildcardSlotList) for r in _all_list_refs(parsed, parse_rules(rules), slot_lists)):
         return fail("free-text placeholders are not allowed in learned sentences")
     # bound to the evidence: the template must recognise a sentence that was really said,
     # and only THOSE sentences count for the target check below
@@ -322,7 +329,9 @@ def _action_entities(action: Any) -> list[str] | None:
     (templates, nested blocks such as parallel/choose, area/device/floor/label targets)."""
     found: list[str] = []
     for step in action if isinstance(action, list) else [action]:
-        if not isinstance(step, dict) or set(step) - _PLAIN_STEP_KEYS:
+        if isinstance(step, dict) and step.get("enabled") is False:
+            continue  # skipped by the script runner
+        if not isinstance(step, dict) or set(step) - _PLAIN_STEP_KEYS or step.get("enabled", True) is not True:
             return None
         service = str(step.get("action") or step.get("service") or "")
         if service.split(".", 1)[0] in ("script", "scene", "automation", "homeassistant"):
