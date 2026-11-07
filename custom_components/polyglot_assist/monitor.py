@@ -191,7 +191,7 @@ def _p50(values: list[Any]) -> float | None:
     return round(nums[len(nums) // 2], 1) if nums else None
 
 
-_ENTITY_IN_TEXT = re.compile(r"\b[a-z_]+\.[a-z0-9_]+\b")
+_ENTITY_ID = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 
 
 def _other_samples(config: dict[str, Any], slot_lists: dict, parsed_rules: dict, lang: str, skip: str) -> list[tuple[str, str]]:
@@ -270,16 +270,62 @@ def _harden(check: dict[str, Any], *, name: str, cfg: dict[str, Any], template: 
             if (hit := builtin_match(sample, lang)) is not None:
                 return fail(f"would take over a Home Assistant command ({hit}) for “{sample}”")
     # the command must switch what the assistant switched back then
-    targets = " ".join(str(t.get("args", "")) for e in evidence for t in (e.get("targets") or [])).casefold()
-    entities = sorted(set(_ENTITY_IN_TEXT.findall(str(cfg.get("action") or ""))))
-    if not cfg.get("action"):
+    def warn(note: str) -> dict[str, Any]:
         return {**check, "status": "warn" if check.get("status") == "ok" else check.get("status"),
-                "notes": [*check.get("notes", []), "what this command switches is not known (intent_script) — review it"]}
-    if entities and targets and names_of is not None:
-        names = {n.casefold() for e in entities for n in [e, *names_of(e)] if n}
-        if not any(n in targets for n in names):
+                "notes": [*check.get("notes", []), note]}
+
+    if not cfg.get("action"):
+        return warn("what this command switches is not known (intent_script) — review it")
+    entities = _action_entities(cfg.get("action"))
+    if entities is None:
+        return warn("the command's target comes from a placeholder or template — review it")
+    if not entities:
+        return warn("the command names no device (e.g. it runs a script) — review it")
+    said = {_n(v) for e in evidence for t in (e.get("targets") or []) for v in _target_values(t.get("args"))}
+    if entities and said and names_of is not None:
+        names = {_n(n) for e in entities for n in [e, *names_of(e)] if n}
+        if not names & said:  # complete names / ids only — "couch" is not "couch strip"
             return fail("this command switches something else than the assistant did")
+    elif entities and not said:
+        return warn("the assistant's tool calls name no target — review it")
     return check
+
+
+def _n(text: Any) -> str:
+    return " ".join(str(text).casefold().split())
+
+
+def _action_entities(action: Any) -> list[str] | None:
+    """Plain entity ids in target/data entity_id of the steps; None if any is templated."""
+    found: list[str] = []
+    for step in action if isinstance(action, list) else [action]:
+        if not isinstance(step, dict):
+            continue
+        for container in (step, step.get("target") or {}, step.get("data") or {}):
+            value = container.get("entity_id") if isinstance(container, dict) else None
+            for v in value if isinstance(value, list) else ([value] if value is not None else []):
+                if not isinstance(v, str) or "{" in v or not _ENTITY_ID.match(v.strip()):
+                    return None
+                found.append(v.strip())
+    return sorted(set(found))
+
+
+def _target_values(args: Any) -> list[str]:
+    """Target words of one recorded tool call (names, areas, entity ids), as complete values."""
+    import ast  # noqa: PLC0415
+
+    data: Any = args
+    if isinstance(args, str):
+        try:
+            data = ast.literal_eval(args)
+        except (ValueError, SyntaxError):
+            return [a or b for a, b in re.findall(r"'([^']+)'|\"([^\"]+)\"", args)]
+    out: list[str] = []
+    if isinstance(data, dict):
+        for key in ("name", "entity_id", "area", "floor"):
+            v = data.get(key)
+            out += [x for x in (v if isinstance(v, list) else [v]) if isinstance(x, str)]
+    return out
 
 
 def build_monitor_items(

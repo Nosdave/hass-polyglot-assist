@@ -455,8 +455,12 @@ async def async_run_monitor(hass: HomeAssistant, data: dict) -> dict:
         builtin_lists = data["builtin_lists"].async_get() if data.get("builtin_lists") is not None else {}
 
         def _builtin_match(text: str, lang: str):
-            hit = builtin.recognize(text, lang, builtin_lists) if builtin is not None else None
-            return hit[0].intent.name if hit else None
+            # every enabled language: at runtime a catalog sentence is tried in all of them first
+            for candidate in ([lang, *[x for x in builtin.languages if x != lang]] if builtin is not None else []):
+                hit = builtin.recognize(text, candidate, builtin_lists)
+                if hit:
+                    return f"{hit[0].intent.name}/{candidate}"
+            return None
 
         return await hass.async_add_executor_job(
             build_monitor_items, repeated, lines, matcher.config,
