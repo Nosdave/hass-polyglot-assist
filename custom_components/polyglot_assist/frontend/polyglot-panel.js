@@ -146,6 +146,9 @@ class PolyglotAssistPanel extends HTMLElement {
     return vars ? s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k] ?? "") : m)) : s;
   }
 
+  /** Language the panel shows now: a deliberate choice, else HA's language. */
+  _activeUi() { return okLang(this._uiPref) ? this._uiPref : this._haLang(); }
+
   /** Language the panel would use without a manual choice: HA's language. */
   _haLang() {
     const h = this._hass || {};
@@ -763,7 +766,7 @@ class PolyglotAssistPanel extends HTMLElement {
         }
         const own = await this._hass.callWS({ type: "polyglot_assist/ui_texts/get", lang });
         this.s.uiOwn = { lang, texts: flatten(own.texts), machine: own.machine || [] };
-        if (lang === this._uiPref) await this._loadTexts();
+        if (lang === this._activeUi()) await this._loadTexts();
         this._render();
       }
       else if (a === "export") { const r = await this._hass.callService("polyglot_assist", "export_yaml", {}, undefined, false, true); this._setMsg("backup", t("messages.exported", { file: Object.values(r.response || {})[0]?.file || "?" }), "ok"); }
@@ -794,7 +797,7 @@ class PolyglotAssistPanel extends HTMLElement {
         if (this.s.uiDraft && this.s.uiDraft[draftKey] === value) { const d = { ...this.s.uiDraft }; delete d[draftKey]; this.s.uiDraft = d; }
         const own = await this._hass.callWS({ type: "polyglot_assist/ui_texts/get", lang: el.dataset.l });
         this.s.uiOwn = { lang: el.dataset.l, texts: flatten(own.texts), machine: own.machine || [] };
-        if (el.dataset.l === this._uiPref) await this._loadTexts();
+        if (el.dataset.l === this._activeUi()) await this._loadTexts();
         this._setMsg("ui", this.t("messages.saved"), "ok"); }
       catch (err) { this._setMsg("ui", this.t("messages.error", { error: err.message || err.code }), "err"); }
       return;
