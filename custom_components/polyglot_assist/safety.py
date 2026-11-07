@@ -109,10 +109,20 @@ def sensitive_entities(config: dict[str, Any]) -> set[str]:
     return out
 
 
-SCRIPT_SERVICE_DOMAINS = {
-    "light", "switch", "fan", "media_player", "cover", "climate", "input_boolean",
-    "input_number", "input_select", "input_text", "number", "select", "scene", "script",
-    "tts", "notify", "persistent_notification", "timer", "counter", "vacuum", "humidifier",
+# Exact services a script in a proposal may call (scene.apply/create, which
+# can set any entity's state incl. locks, are NOT allowed)
+SCRIPT_SERVICES = {
+    *(f"{d}.{v}" for d in ("light", "switch", "fan", "input_boolean", "media_player", "humidifier", "vacuum")
+      for v in ("turn_on", "turn_off", "toggle")),
+    "cover.open_cover", "cover.close_cover", "cover.stop_cover", "cover.set_cover_position",
+    "climate.set_temperature", "climate.set_hvac_mode", "climate.turn_on", "climate.turn_off",
+    "media_player.media_play", "media_player.media_pause", "media_player.media_stop",
+    "media_player.volume_set", "media_player.select_source",
+    "input_number.set_value", "input_select.select_option", "input_text.set_value",
+    "number.set_value", "select.select_option", "fan.set_percentage",
+    "scene.turn_on", "script.turn_on", "script.turn_off",
+    "timer.start", "timer.cancel", "counter.increment",
+    "tts.speak", "notify.persistent_notification", "persistent_notification.create",
 }
 _ENTITY = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 _TARGET_KEYS = ("area_id", "device_id", "floor_id", "label_id")
@@ -177,13 +187,15 @@ def script_reason(
         if _contains(step, _TARGET_KEYS):
             return f"{entity_id} targets areas/devices/floors/labels — add it by hand"
         domain = service.split(".", 1)[0]
-        if domain not in SCRIPT_SERVICE_DOMAINS:
+        if service not in SCRIPT_SERVICES and not (domain == "script" and _ENTITY.match(service)):
             return f"{entity_id} calls {service} — add it by hand"
         entities = _entities_of(step)
         if entities is None:
             return f"{entity_id}: targets are not plain entity ids — add it by hand"
-        if domain == "script" and service not in ("script.turn_on", "script.turn_off", "script.toggle"):
+        if domain == "script" and service not in ("script.turn_on", "script.turn_off"):
             entities = [service]  # script.<name> called as an action
+        if service in ("scene.turn_on", "script.turn_on") and not entities:
+            return f"{entity_id}: {service} without a plain entity target — add it by hand"
         for inner in entities:
             inner_domain = inner.split(".", 1)[0]
             if inner_domain == "script":

@@ -519,7 +519,9 @@ TARGET_KEYS = {"entity_id", "device_id", "area_id", "floor_id", "label_id"}
 # Ventilator/Sektor …
 PROTECTED_WORDS = re.compile(
     r"tür|tuer|schloss|schlöss|garage|öffner|oeffner|riegel|"
-    r"(?<![aiouck])tor(e|en|s)?(?![a-zäöü])|(?<![a-zäöü])tor(?!te|tel|f|nad|nist)|"
+    r"(?<![aiouck])tor(e|en|s)?(?=$|[^a-zäöü]|antrieb|steuer|öffn|oeffn|motor|relais|schalt|kontakt|sensor)|"
+    r"(?<![a-zäöü])tor(?!te|tel|f|nad|nist)|"
+    r"einfahrt|pforte|schranke|driveway|barrier|portillon|barrière|"
     r"door|(?<![a-z])gates?(?![a-z])|(?<![c])lock|unlock|opener|deadbolt|"
     r"(?<![a-z])porte|portail|serrure|verrou|"
     r"alarm|sirene|siren|"
