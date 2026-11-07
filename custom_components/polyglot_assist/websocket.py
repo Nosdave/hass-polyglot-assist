@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -14,9 +15,19 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from .const import CONF_LANGUAGES_ENABLED, CONF_TRANSLATION_AI_TASK, DOMAIN, SOURCE_CATALOG
+from .const import (
+    CONF_CHAT_LOG_TOOLS,
+    CONF_LANGUAGES_ENABLED,
+    CONF_MONITOR,
+    CONF_MONITOR_TIME,
+    CONF_RESPONSE_MODE,
+    CONF_TRANSLATION_AI_TASK,
+    DOMAIN,
+    SOURCE_CATALOG,
+)
 from .corpus import count_summary, validate
 from .guard import GuardError, async_guarded_update, revision
 from .source import SourceError
@@ -28,6 +39,7 @@ from .translate import (
     async_propose_languages,
     async_propose_names,
     async_propose_sentences,
+    ai_task_has_tools,
     valid_languages,
 )
 
@@ -40,6 +52,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_proposals_list, ws_proposals_accept, ws_proposals_reject,
         ws_proposals_generate, ws_suggest_languages,
         ws_monitor_status, ws_monitor_run,
+        ws_overview, ws_categories, ws_names_set, ws_options,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -556,3 +569,191 @@ async def ws_monitor_run(hass: HomeAssistant, connection, msg) -> None:
         connection.send_error(msg["id"], "failed", str(err) or "timeout")
         return
     connection.send_result(msg["id"], {"summary": summary})
+
+
+# ── panel helpers: per-command meta, categories, names, options ──────────────
+
+
+def intent_meta(hass: HomeAssistant, config: dict, hits: dict[str, int]) -> dict[str, Any]:
+    """Category, kind, safety, rooms and devices per command (for grouping)."""
+    ents = er.async_get(hass)
+    devs = dr.async_get(hass)
+    areas = {a.id: a.name for a in ar.async_get(hass).async_list_areas()}
+    static = {k: v for k, v in (config.get("lists") or {}).items() if isinstance(v, dict) and isinstance(v.get("values"), list)}
+    out: dict[str, Any] = {}
+    for name, cfg in (config.get("intents") or {}).items():
+        if not isinstance(cfg, dict):
+            continue
+        sentences = cfg.get("sentences") or {}
+        texts = [s for lst in sentences.values() if isinstance(lst, list) for s in lst if isinstance(s, str)]
+        refs = {m for t in texts for m in re.findall(r"(?<!\{)\{([^{}:]+)", t)}
+        targets: set[str] = set()
+        for ref in refs:
+            for value in static.get(ref.strip(), {}).get("values", []):
+                out_value = value.get("out") if isinstance(value, dict) else None
+                if isinstance(out_value, str) and "." in out_value:
+                    targets.add(out_value)
+        for step in cfg.get("action") or []:
+            entity = ((step or {}).get("target") or {}).get("entity_id") if isinstance(step, dict) else None
+            if isinstance(entity, str):
+                targets.add(entity)
+        room_names, device_names = set(), set()
+        for entity_id in targets:
+            entry = ents.async_get(entity_id)
+            area_id = entry.area_id if entry else None
+            if area_id is None and entry is not None and entry.device_id:
+                device = devs.async_get(entry.device_id)
+                area_id = device.area_id if device else None
+            if area_id in areas:
+                room_names.add(areas[area_id])
+            state = hass.states.get(entity_id)
+            device_names.add(state.name if state else entity_id)
+        out[name] = {
+            "description": cfg.get("description", ""),
+            "category": cfg.get("category"),
+            "kind": cfg.get("kind"),
+            "safety": cfg.get("safety", "normal"),
+            "response_mode": cfg.get("response_mode"),
+            "has_action": bool(cfg.get("action")),
+            "sentences": {lang: len(lst) for lang, lst in sentences.items() if isinstance(lst, list)},
+            "rooms": sorted(room_names),
+            "devices": sorted(device_names)[:8],
+            "hits": hits.get(name, 0),
+        }
+    return out
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/overview", vol.Optional("entry_id"): str}
+)
+@callback
+def ws_overview(hass: HomeAssistant, connection, msg) -> None:
+    """Everything the panel's start page and command list need in one call."""
+    entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    entry = runtime["entry"]
+    config = runtime["matcher"].config
+    hits = dict(runtime.get("hits") or {})
+    connection.send_result(
+        msg["id"],
+        {
+            "entry_id": entry_id,
+            "title": entry.title,
+            "rev": revision(config),
+            "source": runtime["source"].kind,
+            "languages": runtime["matcher"].languages,
+            "builtin_languages": runtime["builtin"].loaded if runtime.get("builtin") else [],
+            "summary": count_summary(config),
+            "problems": validate(config, extra_lists=runtime["lists"].names)[:50],
+            "categories": list(config.get("categories") or []),
+            "intents": intent_meta(hass, config, hits),
+            "options": {k: v for k, v in entry.options.items() if k in PANEL_OPTIONS},
+            "fallback_agent": runtime.get("fallback_agent"),
+            "monitor": runtime.get("monitor") is not None,
+        },
+    )
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "polyglot_assist/categories",
+        vol.Optional("entry_id"): str,
+        vol.Required("categories"): [vol.All(str, vol.Length(min=1, max=40))],
+        vol.Optional("renames", default={}): {str: vol.All(str, vol.Length(min=1, max=40))},
+        vol.Optional("base_rev"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_categories(hass: HomeAssistant, connection, msg) -> None:
+    """Set the category list; renamed/deleted categories update the commands."""
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    wanted = list(dict.fromkeys(c.strip() for c in msg["categories"] if c.strip()))
+    renames = {k: v.strip() for k, v in msg["renames"].items()}
+
+    def _mutate(data: dict) -> None:
+        data["categories"] = wanted
+        for cfg in (data.get("intents") or {}).values():
+            if not isinstance(cfg, dict) or not cfg.get("category"):
+                continue
+            cat = renames.get(cfg["category"], cfg["category"])
+            if cat in wanted:
+                cfg["category"] = cat
+            else:
+                cfg.pop("category", None)  # deleted → "Sonstiges"
+
+    await _guarded(hass, connection, msg, runtime, _mutate)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "polyglot_assist/names/set",
+        vol.Optional("entry_id"): str,
+        vol.Required("target"): vol.Match(r"^[a-z_]+\.[a-z0-9_]+$"),
+        vol.Required("lang"): vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$"),
+        vol.Required("names"): [vol.All(str, vol.Length(min=1, max=40))],
+        vol.Optional("base_rev"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_names_set(hass: HomeAssistant, connection, msg) -> None:
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    names = list(dict.fromkeys(n.strip() for n in msg["names"] if n.strip()))
+
+    def _mutate(data: dict) -> None:
+        per_lang = data.setdefault("names", {}).setdefault(msg["target"], {})
+        if names:
+            per_lang[msg["lang"]] = names
+        else:
+            per_lang.pop(msg["lang"], None)
+            if not per_lang:
+                data["names"].pop(msg["target"], None)
+
+    await _guarded(hass, connection, msg, runtime, _mutate)
+
+
+PANEL_OPTIONS = (
+    CONF_LANGUAGES_ENABLED, CONF_RESPONSE_MODE, CONF_MONITOR, CONF_MONITOR_TIME,
+    CONF_TRANSLATION_AI_TASK, CONF_CHAT_LOG_TOOLS,
+)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "polyglot_assist/options",
+        vol.Optional("entry_id"): str,
+        vol.Optional(CONF_LANGUAGES_ENABLED): [vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$")],
+        vol.Optional(CONF_RESPONSE_MODE): vol.In(["text", "chime"]),
+        vol.Optional(CONF_MONITOR): bool,
+        vol.Optional(CONF_MONITOR_TIME): vol.Match(r"^\d{2}:\d{2}$"),
+        vol.Optional(CONF_TRANSLATION_AI_TASK): vol.Any(None, vol.Match(r"^ai_task\.[a-z0-9_]+$")),
+        vol.Optional(CONF_CHAT_LOG_TOOLS): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_options(hass: HomeAssistant, connection, msg) -> None:
+    """Change panel settings (same options as the options flow)."""
+    entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    entry = runtime["entry"]
+    changes = {k: msg[k] for k in PANEL_OPTIONS if k in msg}
+    ai_task = changes.get(CONF_TRANSLATION_AI_TASK)
+    if ai_task and ai_task_has_tools(hass, ai_task):
+        connection.send_error(msg["id"], "ai_task_has_tools", "this AI task has tools — choose one without tools")
+        return
+    new_options = {**entry.options, **changes}
+    if CONF_TRANSLATION_AI_TASK in changes and not ai_task:
+        new_options.pop(CONF_TRANSLATION_AI_TASK, None)
+    hass.config_entries.async_update_entry(entry, options=new_options)
+    if any(k in changes for k in (CONF_LANGUAGES_ENABLED, CONF_MONITOR, CONF_MONITOR_TIME, CONF_CHAT_LOG_TOOLS)):
+        hass.async_create_task(hass.config_entries.async_reload(entry_id))
+    connection.send_result(msg["id"], {"options": {k: v for k, v in new_options.items() if k in PANEL_OPTIONS}})

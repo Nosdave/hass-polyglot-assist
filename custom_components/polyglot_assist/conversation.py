@@ -152,6 +152,8 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                 },
             )
             result = await self._handle_match(match, user_input, chat_log, matcher.config)
+            hits = runtime.setdefault("hits", {})
+            hits[match.intent_name] = hits.get(match.intent_name, 0) + 1
             if (monitor := runtime.get("monitor")) is not None:
                 monitor.async_record(
                     text=user_input.text, lang=match.lang, result="hit", intent=match.intent_name,

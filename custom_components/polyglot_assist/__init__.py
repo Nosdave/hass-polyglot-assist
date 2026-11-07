@@ -12,6 +12,7 @@ scope-creep red lines.
 """
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -72,6 +73,9 @@ class _CorpusError(Exception):
     """Corpus file problem (message is safe to return to the caller)."""
 
 
+# read once at import (integrations are imported in the executor)
+MANIFEST_VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text("utf-8"))["version"]
+
 PLATFORMS: list[Platform] = [Platform.CONVERSATION, Platform.SENSOR]
 
 
@@ -121,6 +125,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     clear_tool_cache()
+    try:
+        from .panel import async_register as async_register_panel  # noqa: PLC0415
+
+        await async_register_panel(hass, MANIFEST_VERSION)
+    except Exception:  # noqa: BLE001 — the voice path must work without the panel
+        _LOGGER.exception("Polyglot Assist: panel could not be registered")
     if entry.options.get(CONF_BUILTIN, True):
         await async_setup_builtin(hass, hass.data[DOMAIN][entry.entry_id], matcher)
     if entry.options.get(CONF_MONITOR, False):
@@ -367,6 +377,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 data["monitor"].async_stop()
         # Last entry → unregister services
         if not hass.data[DOMAIN]:
+            from .panel import async_unregister as async_unregister_panel  # noqa: PLC0415
+
+            async_unregister_panel(hass)
             hass.services.async_remove(DOMAIN, SERVICE_RELOAD)
             hass.services.async_remove(DOMAIN, SERVICE_TEST_MATCH)
             hass.services.async_remove(DOMAIN, SERVICE_RUN_TESTS)

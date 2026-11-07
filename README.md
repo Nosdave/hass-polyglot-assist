@@ -301,6 +301,48 @@ synthetic corpus in `tests/corpus_example.yaml`. Keep real household sentences
 (names, places) out of the repository — they belong in your local
 `tests.yaml`.
 
+## The Polyglot panel
+
+A sidebar entry **Polyglot** (admins only) for everything above, written for
+people without developer knowledge — every option has an info button:
+
+- **Start** — what works in which language, open proposals, problems.
+- **Proposals** — new, changed and removed commands, sentences and names,
+  each with its origin (new devices, starter set, monitoring, translation)
+  and check result; select several and accept them in one checked step.
+  *Starter set* and *Check new devices* let the AI task propose commands for
+  scripts, scenes and buttons Polyglot does not cover yet, names in every
+  enabled language and categories for existing commands.
+- **Commands** — grouped by category, room or device; protection level,
+  category, kind (switching command / question), answer (speech / tone) and
+  sentences per language; translate missing languages; categories editable.
+- **Try it** — test a sentence (nothing is executed) and run the test
+  sentences.
+- **Names** — spoken names per language for rooms and devices.
+- **Monitoring** — optional local log and a daily evaluation by your AI task.
+- **Settings** — languages (the AI task can tell which it handles well),
+  answer to commands, AI task for proposals (must have no tools), follow-ups.
+
+Editing in the panel needs the catalog as intents source (the YAML file stays
+as backup).
+
+## Built-in commands in every language
+
+Home Assistant pipelines run in one language. Polyglot also understands Home
+Assistant's own commands (lights, switches, covers, timers, time, weather,
+shopping list, media …) in every enabled language, using Home Assistant's
+sentence collection with Polyglot's lists — so the name table works for them
+too. Locks, alarms, valves, garage/door/gate covers, area-only switching and
+free-text timer names are never handled this way; such sentences go on to
+your assistant. Order: Polyglot commands → built-in commands → assistant.
+
+## Answer as a tone
+
+With *Answer to commands = Tone*, successful switching commands
+(`kind: command`) answer with a short tone instead of speech. Polyglot sends
+the marker `[[polyglot:chime]]` to TTS; Polyglot TTS turns it into a tone. With
+other TTS engines keep *Speech*. Questions are always spoken.
+
 ## Events
 
 | Event | When | Payload |
