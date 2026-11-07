@@ -285,13 +285,19 @@ def _harden(check: dict[str, Any], *, name: str, cfg: dict[str, Any], template: 
     if any(_area_only(args) for args in calls):
         return warn("the assistant switched a whole area or floor — review which devices it means")
     # per sentence: each sentence the template recognises must have switched ALL targets itself
-    per_sentence = [{_n(v) for t in (e.get("targets") or []) for v in _target_values(t.get("args"))} for e in evidence]
-    said = set().union(*per_sentence) if per_sentence else set()
+    per_sentence = [[_call_target(t.get("args")) for t in (e.get("targets") or [])] for e in evidence]
+    said = {n for one in per_sentence for call in one for n in call["names"]}
     if entities and said and names_of is not None:
         # EVERY target of the command must be one the assistant switched for these sentences
         # (complete names / ids only — "couch" is not "couch strip")
-        extra = [e for e in entities
-                 if any(not {_n(n) for n in [e, *names_of(e)] if n} & one for one in per_sentence)]
+        def covers(call: dict[str, Any], entity: str) -> bool:
+            # the name AND the domain the assistant used must fit (a fan "Ceiling" is no light "Ceiling")
+            return bool({_n(n) for n in [entity, *names_of(entity)] if n} & call["names"]) and (
+                not call["domains"] or entity.split(".", 1)[0] in call["domains"])
+
+        extra = [e for e in entities if any(not any(covers(c, e) for c in one) for one in per_sentence)]
+        if not extra and any(c["area"] for one in per_sentence for c in one if any(covers(c, e) for e in entities)):
+            return warn("the assistant named the device together with an area — review that it is this one")
         if extra:
             return fail(f"this command switches something else than the assistant did ({', '.join(extra[:3])})")
     elif entities and not said:
@@ -340,6 +346,24 @@ def _area_only(args: Any) -> bool:
     except (ValueError, SyntaxError):
         return False
     return isinstance(data, dict) and any(data.get(k) for k in ("area", "floor")) and not any(data.get(k) for k in ("name", "entity_id"))
+
+
+def _call_target(args: Any) -> dict[str, Any]:
+    """Names, domains and area/floor constraint of one recorded tool call."""
+    import ast  # noqa: PLC0415
+
+    data: Any = args
+    if isinstance(args, str):
+        try:
+            data = ast.literal_eval(args)
+        except (ValueError, SyntaxError):
+            data = None
+    if not isinstance(data, dict):
+        return {"names": {_n(v) for v in _target_values(args)}, "domains": set(), "area": False}
+    dom = data.get("domain")
+    return {"names": {_n(v) for v in _target_values(data)},
+            "domains": {d for d in (dom if isinstance(dom, list) else [dom]) if isinstance(d, str)},
+            "area": bool(data.get("area") or data.get("floor"))}
 
 
 def _target_values(args: Any) -> list[str]:
