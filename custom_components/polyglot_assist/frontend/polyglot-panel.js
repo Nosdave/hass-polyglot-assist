@@ -460,6 +460,11 @@ class PolyglotAssistPanel extends HTMLElement {
   async _change(e) {
     const el = e.target;
     if (el.dataset.bind) { this.s[el.dataset.bind] = el.value; this._render(); return; }
+    if (el.id === "mtime") {
+      try { await this.ws("options", { monitor_time: (el.value || "03:00").slice(0, 5) }); this._setMsg("mon", "Uhrzeit gespeichert.", "ok"); setTimeout(() => this._reload(["overview", "monitor"]), 1500); }
+      catch (err) { this._setMsg("mon", `Fehler: ${err.message || err}`, "err"); }
+      return;
+    }
     if (el.dataset.cat !== undefined) { this.s.catEdit[+el.dataset.cat].to = el.value.trim() || this.s.catEdit[+el.dataset.cat].to; return; }
     if (el.dataset.act === "safety") { await this._patchIntent(el.dataset.name, { safety: el.value === "normal" ? undefined : el.value }, "cmd"); return; }
     if (el.dataset.act === "aitask") {

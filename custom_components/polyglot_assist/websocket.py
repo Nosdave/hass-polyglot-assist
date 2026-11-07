@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import re
+import time
 from typing import Any
 
 import voluptuous as vol
@@ -237,6 +238,11 @@ TOTAL_BUDGET = 180
 CALL_BUDGET = 70
 
 
+def _enabled_or_none(hass: HomeAssistant, entry_id: str) -> list[str] | None:
+    entry = hass.config_entries.async_get_entry(entry_id)
+    return (entry.options.get(CONF_LANGUAGES_ENABLED) if entry else None) or None
+
+
 def enabled_languages(hass: HomeAssistant, entry_id: str, available: list[str]) -> list[str]:
     entry = hass.config_entries.async_get_entry(entry_id)
     chosen = (entry.options.get(CONF_LANGUAGES_ENABLED) if entry else None) or []
@@ -269,29 +275,27 @@ async def ws_translate(hass: HomeAssistant, connection, msg) -> None:
     if not isinstance(intent_cfg, dict):
         connection.send_error(msg["id"], "not_found", "unknown intent")
         return
-    languages = valid_languages(msg["languages"], matcher.languages)
+    languages = valid_languages(msg["languages"], _enabled_or_none(hass, entry_id))
     if not languages:
-        connection.send_error(msg["id"], "invalid_language", "no supported language requested")
+        connection.send_error(msg["id"], "invalid_language", "no valid or enabled language requested")
         return
     slot_lists = {**matcher.static_slot_lists(), **runtime["lists"].async_get()}
     try:
-        async with asyncio.timeout(TOTAL_BUDGET):
-            proposals = await async_propose_sentences(
-                hass,
-                ai_task_entity=ai_task,
-                intent_name=msg["name"],
-                intent_cfg=intent_cfg,
-                config=config,
-                languages=languages,
-                matcher=matcher,
-                slot_lists=slot_lists,
-                context=connection.context(msg),
-            )
+        # per-call deadlines keep the results that are finished
+        proposals = await async_propose_sentences(
+            hass,
+            ai_task_entity=ai_task,
+            intent_name=msg["name"],
+            intent_cfg=intent_cfg,
+            config=config,
+            languages=languages,
+            matcher=matcher,
+            slot_lists=slot_lists,
+            context=connection.context(msg),
+            deadline=time.monotonic() + TOTAL_BUDGET,
+        )
     except ProposalError as err:
         connection.send_error(msg["id"], "refused", str(err))
-        return
-    except TimeoutError:
-        connection.send_error(msg["id"], "timeout", "the AI task took too long")
         return
     queued = 0
     if msg.get("to_queue"):
@@ -335,7 +339,7 @@ async def ws_suggest_names(hass: HomeAssistant, connection, msg) -> None:
         connection.send_error(msg["id"], "not_configured", "choose an AI task for proposals in the options")
         return
     matcher = runtime["matcher"]
-    languages = valid_languages(msg["languages"], matcher.languages)
+    languages = valid_languages(msg["languages"], _enabled_or_none(hass, entry_id))
     ids = list(dict.fromkeys(msg["ids"]))
     if not languages or not ids:
         connection.send_error(msg["id"], "invalid", "no valid ids or languages")
@@ -356,22 +360,20 @@ async def ws_suggest_names(hass: HomeAssistant, connection, msg) -> None:
             targets[target] = (state.name, f"{state.domain} device", area.name if area else "")
     slot_lists = {**matcher.static_slot_lists(), **runtime["lists"].async_get()}
     try:
-        async with asyncio.timeout(TOTAL_BUDGET):
-            names = await async_propose_names(
-                hass,
-                ai_task_entity=ai_task,
-                targets=targets,
-                languages=languages,
-                matcher=matcher,
-                slot_lists=slot_lists,
-                source_language=hass.config.language,
-                context=connection.context(msg),
-            )
+        # per-call deadlines keep the results that are finished
+        names = await async_propose_names(
+            hass,
+            ai_task_entity=ai_task,
+            targets=targets,
+            languages=languages,
+            matcher=matcher,
+            slot_lists=slot_lists,
+            source_language=hass.config.language,
+            context=connection.context(msg),
+            deadline=time.monotonic() + TOTAL_BUDGET,
+        )
     except ProposalError as err:
         connection.send_error(msg["id"], "refused", str(err))
-        return
-    except TimeoutError:
-        connection.send_error(msg["id"], "timeout", "the AI task took too long")
         return
     connection.send_result(msg["id"], {"proposals": names, "unknown_ids": sorted(set(ids) - set(targets))})
 
@@ -502,16 +504,13 @@ async def ws_proposals_generate(hass: HomeAssistant, connection, msg) -> None:
         return
     languages = enabled_languages(hass, entry_id, runtime["matcher"].languages)
     try:
-        async with asyncio.timeout(TOTAL_BUDGET * 2):
-            found = await async_discover(
-                hass, runtime, ai_task=ai_task, languages=languages,
-                only_new=msg["what"] == "new_devices", context=connection.context(msg),
-            )
+        found = await async_discover(
+            hass, runtime, ai_task=ai_task, languages=languages,
+            only_new=msg["what"] == "new_devices", context=connection.context(msg),
+            deadline=time.monotonic() + TOTAL_BUDGET * 2,
+        )
     except ProposalError as err:
         connection.send_error(msg["id"], "refused", str(err))
-        return
-    except TimeoutError:
-        connection.send_error(msg["id"], "timeout", "the AI task took too long")
         return
     added = await _queue(hass, runtime).async_add(found["items"])
     connection.send_result(msg["id"], {"added": len(added), "errors": found["errors"]})

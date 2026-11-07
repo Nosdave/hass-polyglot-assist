@@ -137,8 +137,11 @@ class DynamicLists:
 
         @callback
         def _state_filter(event_data: dict[str, Any]) -> bool:
-            # added or removed entities only (names come from the registry)
-            return not event_data.get("old_state") or not event_data.get("new_state")
+            # added/removed entities, or a changed friendly name (template entities)
+            old, new = event_data.get("old_state"), event_data.get("new_state")
+            if not old or not new:
+                return True
+            return old.attributes.get("friendly_name") != new.attributes.get("friendly_name")
 
         self._unsubs = [
             self.hass.bus.async_listen(ar.EVENT_AREA_REGISTRY_UPDATED, self._invalidate),

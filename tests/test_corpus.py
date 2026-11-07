@@ -393,3 +393,21 @@ def test_proposal_actions_are_restricted():
     assert P.check_action_safe([{"action": "light.turn_on", "target": {"entity_id": "light.a"}, "data": {"x": "{{ states('lock.a') }}"}}])
     item = {"op": "add_intent", "payload": {"name": "X", "intent": {"action": [{"action": "cover.open_cover", "target": {"entity_id": "cover.x"}}]}}}
     assert P.check_item(item)
+
+
+def test_codex_findings_pure_parts():
+    # references inside static list values are runtime dependencies
+    data = {"lists": {"target": {"values": [{"in": "lights in {area}", "out": "x"}]}},
+            "intents": {"S": {"sentences": {"en": ["turn on {target}"]}}}}
+    assert corpus.referenced_lists(data) == {"target", "area"}
+    # fixed words may come from an expansion rule
+    lists = corpus.build_intents({"lists": {"name": {"values": ["lamp"]}}, "intents": {"x": {"sentences": {"en": ["x"]}}}})["en"].slot_lists
+    ok = proposals.check_proposal("S", "<verb> {name}", [], lambda _t: set(), lists, {"verb": "(turn|switch) on"}, "en")
+    assert ok["status"] != "error", ok
+    # order-sensitive comparison of documents
+    a = {"intents": {"A": {}, "B": {}}}
+    b = {"intents": {"B": {}, "A": {}}}
+    assert a == b and not corpus.same_document(a, b)
+    # all commands switched off is a valid (empty) document
+    off = {"intents": {"A": {"safety": "disabled", "sentences": {"de": ["a"]}}}}
+    assert corpus.bucket_by_language(off) == {}

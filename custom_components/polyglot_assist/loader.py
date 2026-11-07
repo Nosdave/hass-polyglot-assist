@@ -89,8 +89,9 @@ class MatcherLoader:
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Failed to build Hassil Intents for lang=%s", lang)
 
-        if not result:
+        if not result and bucket_by_language(data):
             raise ValueError(f"No language groups successfully loaded from {origin}")
+        # every command switched off on purpose → a matcher that always misses
 
         matcher = MultilangMatcher(result)
         matcher.config = data

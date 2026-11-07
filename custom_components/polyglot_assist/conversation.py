@@ -125,7 +125,8 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
     @property
     def supported_languages(self) -> list[str]:
         runtime = self._runtime()
-        return runtime["matcher"].languages if runtime else list(DEFAULT_LANGUAGES)
+        langs = runtime["matcher"].languages if runtime else []
+        return langs or list(DEFAULT_LANGUAGES)
 
     # NOTE: we override _async_handle_message, NOT async_process. The base
     # ConversationEntity.async_process sets up the chat session + ChatLog
@@ -319,7 +320,8 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         langs = builtin.languages
         pipeline_lang = (user_input.language or "").split("-")[0]
         detected = guess_language(user_input.text, langs)
-        candidates = [lang for lang in dict.fromkeys([detected, pipeline_lang]) if lang in langs]
+        # detected and pipeline language first, then every other enabled language
+        candidates = [lang for lang in dict.fromkeys([detected, pipeline_lang, *langs]) if lang in langs]
         if not candidates:
             return None
         slot_lists = runtime["builtin_lists"].async_get()

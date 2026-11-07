@@ -96,9 +96,13 @@ def sensitive_entities(config: dict[str, Any]) -> set[str]:
         if not isinstance(cfg, dict) or cfg.get("safety") in (None, "normal"):
             continue
         for step in cfg.get("action") or []:
-            entity = ((step or {}).get("target") or {}).get("entity_id") if isinstance(step, dict) else None
-            if isinstance(entity, str):
-                out.add(entity)
+            if not isinstance(step, dict):
+                continue
+            for container in (step, step.get("target") or {}, step.get("data") or {}):
+                value = container.get("entity_id") if isinstance(container, dict) else None
+                for entity in value if isinstance(value, list) else [value]:
+                    if isinstance(entity, str):
+                        out.update(e.strip() for e in entity.split(",") if e.strip())
         texts = [s for lst in (cfg.get("sentences") or {}).values() if isinstance(lst, list) for s in lst if isinstance(s, str)]
         for ref in {m for t in texts for m in re.findall(r"(?<!\{)\{([^{}:]+)", t)}:
             spec = lists.get(ref.strip())

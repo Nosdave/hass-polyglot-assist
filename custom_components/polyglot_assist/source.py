@@ -21,6 +21,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 from homeassistant.util.file import write_utf8_file_atomic
 
+from .corpus import same_document
 from .const import (
     CONF_INTENTS_FILE,
     CONF_SOURCE,
@@ -108,7 +109,7 @@ class IntentSource:
         await self._store.async_save(
             {"catalog": copy.deepcopy(data), "saved": dt_util.utcnow().isoformat()}
         )
-        if await self.async_load_catalog() != data:
+        if not same_document(await self.async_load_catalog(), data):
             raise SourceError("catalog write could not be verified (see log)")
 
     async def async_remove_catalog(self) -> None:
@@ -193,7 +194,7 @@ class IntentSource:
                 "the catalog is the active source — importing would replace its "
                 "edits; use overwrite (the catalog is exported first)"
             )
-        if previous is not None and previous != data:
+        if previous is not None and not same_document(previous, data):
             await self.async_export_yaml()  # never lose a differing catalog
         try:
             await self.async_save_catalog(data)

@@ -39,8 +39,11 @@ DEFAULT_SPEECH = {"de": "Erledigt.", "en": "Done.", "fr": "C'est fait.", "nl": "
 class CatalogIntentHandler(intent.IntentHandler):
     """Runs the catalog action of one intent and answers in the hit language."""
 
-    def __init__(self, hass: HomeAssistant, intent_type: str, script: Script, speech: dict[str, str]) -> None:
+    def __init__(
+        self, hass: HomeAssistant, intent_type: str, script: Script, speech: dict[str, str], owner: str
+    ) -> None:
         self.intent_type = intent_type
+        self.owner = owner  # config entry id
         self.platforms = {DOMAIN}
         self.description = f"Polyglot catalog command {intent_type}"
         self._script = script
@@ -60,10 +63,15 @@ class CatalogIntentHandler(intent.IntentHandler):
 
 
 async def async_prepare_catalog_actions(
-    hass: HomeAssistant, config: dict[str, Any], own: list[str] | None = None
+    hass: HomeAssistant, config: dict[str, Any], owner: str
 ) -> list[CatalogIntentHandler]:
     """Validate every catalog action (async) without registering anything."""
-    taken = {h.intent_type for h in intent.async_get(hass) if not isinstance(h, CatalogIntentHandler)}
+    # names taken by anything that is not OUR catalog handler (intent_scripts,
+    # built-ins, other Polyglot entries)
+    taken = {
+        h.intent_type for h in intent.async_get(hass)
+        if not (isinstance(h, CatalogIntentHandler) and h.owner == owner)
+    }
     handlers: list[CatalogIntentHandler] = []
     for name, cfg in (config.get("intents") or {}).items():
         if not isinstance(cfg, dict) or not cfg.get("action"):
@@ -80,21 +88,21 @@ async def async_prepare_catalog_actions(
         except Exception as err:  # noqa: BLE001 — one broken action must not break the rest
             _LOGGER.error("Polyglot Assist: action of %s is invalid: %s", name, err)
             continue
-        handlers.append(CatalogIntentHandler(hass, name, script, cfg.get("speech") or {}))
+        handlers.append(CatalogIntentHandler(hass, name, script, cfg.get("speech") or {}, owner))
     return handlers
 
 
 def async_swap_catalog_actions(
-    hass: HomeAssistant, old: list[str], handlers: list[CatalogIntentHandler]
+    hass: HomeAssistant, old: list[str], handlers: list[CatalogIntentHandler], owner: str
 ) -> list[str]:
     """Replace the previous handlers in one synchronous step (no gap)."""
     new_names = {h.intent_type for h in handlers}
-    async_unregister_catalog_actions(hass, [n for n in old if n not in new_names])
+    async_unregister_catalog_actions(hass, [n for n in old if n not in new_names], owner)
     registered: list[str] = []
     for handler in handlers:
         current = next((h for h in intent.async_get(hass) if h.intent_type == handler.intent_type), None)
-        if current is not None and not isinstance(current, CatalogIntentHandler):
-            continue  # an intent_script registered meanwhile: it wins
+        if current is not None and not (isinstance(current, CatalogIntentHandler) and current.owner == owner):
+            continue  # an intent_script or another entry registered meanwhile: it wins
         if current is not None:
             intent.async_remove(hass, handler.intent_type)  # avoid the overwrite warning
         intent.async_register(hass, handler)
@@ -102,13 +110,16 @@ def async_swap_catalog_actions(
     return sorted(registered)
 
 
-async def async_register_catalog_actions(hass: HomeAssistant, config: dict[str, Any]) -> list[str]:
+async def async_register_catalog_actions(
+    hass: HomeAssistant, config: dict[str, Any], owner: str
+) -> list[str]:
     """Register handlers for intents with an ``action``. Returns registered names."""
-    return async_swap_catalog_actions(hass, [], await async_prepare_catalog_actions(hass, config))
+    return async_swap_catalog_actions(hass, [], await async_prepare_catalog_actions(hass, config, owner), owner)
 
 
-def async_unregister_catalog_actions(hass: HomeAssistant, names: list[str]) -> None:
+def async_unregister_catalog_actions(hass: HomeAssistant, names: list[str], owner: str) -> None:
+    """Remove only handlers this entry owns."""
     for name in names:
         handler = next((h for h in intent.async_get(hass) if h.intent_type == name), None)
-        if isinstance(handler, CatalogIntentHandler):
+        if isinstance(handler, CatalogIntentHandler) and handler.owner == owner:
             intent.async_remove(hass, name)

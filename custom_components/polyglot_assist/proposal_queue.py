@@ -18,6 +18,7 @@ Operations (``op``)::
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -40,12 +41,15 @@ class ProposalQueue:
         )
         self._items: list[dict[str, Any]] | None = None
         self._rejected: list[str] = []
+        self._load_lock = asyncio.Lock()
 
     async def async_items(self) -> list[dict[str, Any]]:
         if self._items is None:
-            stored = await self._store.async_load() or {}
-            self._items = list(stored.get("items") or [])
-            self._rejected = list(stored.get("rejected") or [])
+            async with self._load_lock:  # one load; a late load never overwrites live changes
+                if self._items is None:
+                    stored = await self._store.async_load() or {}
+                    self._items = list(stored.get("items") or [])
+                    self._rejected = list(stored.get("rejected") or [])
         return self._items
 
     async def _save(self) -> None:

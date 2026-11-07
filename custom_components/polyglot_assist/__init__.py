@@ -35,6 +35,7 @@ from .const import (
     CONF_MONITOR,
     CONF_MONITOR_TIME,
     CONF_TRANSLATION_AI_TASK,
+    DEFAULT_LANGUAGES,
     DEFAULT_MONITOR_TIME,
     DEFAULT_TESTS_FILE,
     DOMAIN,
@@ -60,6 +61,7 @@ from .monitor import Monitor
 from .proposal_queue import ProposalQueue
 from .loader import MatcherLoader
 from . import websocket
+from .guard import write_lock
 from .source import IntentSource, SourceError
 from .matcher import MultilangMatcher
 
@@ -114,7 +116,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     lists = DynamicLists(hass, matcher.config)
     lists.async_start()
-    actions = await async_register_catalog_actions(hass, matcher.config)
+    actions = await async_register_catalog_actions(hass, matcher.config, entry.entry_id)
     hass.data[DOMAIN][entry.entry_id] = {
         "actions": actions,
         "matcher": matcher,
@@ -155,8 +157,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if failed.get("builtin_lists") is not None:
             failed["builtin_lists"].async_stop()
         if failed.get("monitor") is not None:
-            failed["monitor"].async_stop()
-        async_unregister_catalog_actions(hass, actions)
+            failed["monitor"].async_deactivate()
+        async_unregister_catalog_actions(hass, actions, entry.entry_id)
         raise
 
     # Reload service (no per-entry needed for v0.1 — one global service)
@@ -273,15 +275,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async def _import_yaml(call: ServiceCall) -> dict:
             out = {}
             for entry_id, data in list(hass.data[DOMAIN].items()):
-                try:
-                    imported = await data["source"].async_import_yaml(
-                        overwrite=call.data.get("overwrite", False)
-                    )
-                except SourceError as err:
-                    out[entry_id] = {"error": str(err)}
-                    continue
-                if data["source"].kind == SOURCE_CATALOG:
-                    await async_reload_entry_matcher(hass, data)
+                async with write_lock(data):  # never interleave with guarded writes
+                    try:
+                        imported = await data["source"].async_import_yaml(
+                            overwrite=call.data.get("overwrite", False)
+                        )
+                    except SourceError as err:
+                        out[entry_id] = {"error": str(err)}
+                        continue
+                    if data["source"].kind == SOURCE_CATALOG:
+                        await async_reload_entry_matcher(hass, data)
                 out[entry_id] = {"intents": len(imported.get("intents") or {})}
             if out and all("error" in v for v in out.values()):
                 raise ServiceValidationError(next(iter(out.values()))["error"])
@@ -315,7 +318,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_setup_builtin(hass: HomeAssistant, data: dict, matcher: MultilangMatcher) -> None:
     """Home Assistant's built-in commands in every enabled language."""
-    builtin = BuiltinIntents(matcher.languages)
+    entry = data["entry"]
+    languages = matcher.languages or entry.options.get(CONF_LANGUAGES_ENABLED) or list(DEFAULT_LANGUAGES)
+    builtin = BuiltinIntents(languages)
     await hass.async_add_executor_job(builtin.load)
     if not builtin.loaded:
         return
@@ -347,13 +352,13 @@ async def async_reload_entry_matcher(hass: HomeAssistant, data: dict) -> bool:
         return False
     if data.get("generation") != generation:
         return False  # a newer reload started meanwhile; it wins
-    handlers = await async_prepare_catalog_actions(hass, new_matcher.config, data.get("actions", []))
+    handlers = await async_prepare_catalog_actions(hass, new_matcher.config, entry.entry_id)
     if data.get("generation") != generation:
         return False
     new_lists = DynamicLists(hass, new_matcher.config)
     new_lists.async_start()
     data["lists"].async_stop()
-    data["actions"] = async_swap_catalog_actions(hass, data.get("actions", []), handlers)
+    data["actions"] = async_swap_catalog_actions(hass, data.get("actions", []), handlers, entry.entry_id)
     data["matcher"] = new_matcher
     if data.get("builtin") is not None:
         await async_setup_builtin(hass, data, new_matcher)
@@ -379,10 +384,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             data["lists"].async_stop()
             if data.get("builtin_lists") is not None:
                 data["builtin_lists"].async_stop()
-            async_unregister_catalog_actions(hass, data.get("actions", []))
+            async_unregister_catalog_actions(hass, data.get("actions", []), entry.entry_id)
             if data.get("monitor") is not None:
-                data["monitor"].async_stop()
                 await data["monitor"].async_flush()
+                data["monitor"].async_deactivate()
         # Last entry → unregister services
         if not hass.data[DOMAIN]:
             from .panel import async_unregister as async_unregister_panel  # noqa: PLC0415

@@ -105,6 +105,7 @@ async def async_discover(
     languages: list[str],
     only_new: bool,
     context: Context | None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Generate proposals for uncovered devices (and, with only_new, just new ones)."""
     matcher = runtime["matcher"]
@@ -151,7 +152,7 @@ async def async_discover(
         what = f"{state.domain} named {state.name!r}"
         proposals = await async_propose_new_command(
             hass, ai_task_entity=ai_task, name=name, what=what, languages=languages,
-            matcher=matcher, slot_lists=slot_lists, context=context,
+            matcher=matcher, slot_lists=slot_lists, context=context, deadline=deadline,
         )
         sentences = {}
         notes: list[str] = []
@@ -204,6 +205,7 @@ async def async_discover(
         names = await async_propose_names(
             hass, ai_task_entity=ai_task, targets=targets, languages=other_langs,
             matcher=matcher, slot_lists=slot_lists, source_language=primary, context=context,
+            deadline=deadline,
         )
         for target, per_lang in names.items():
             for lang, res in per_lang.items():

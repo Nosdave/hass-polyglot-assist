@@ -66,9 +66,16 @@ async def _load_cases(hass: HomeAssistant) -> list:
         raise GuardError("corpus_unreadable", f"{DEFAULT_TESTS_FILE} is not readable: {err}") from None
 
 
+def _lists_for(hass: HomeAssistant, data: dict):
+    """Runtime lists built from THIS document (its lists and name table)."""
+    from .dynlists import DynamicLists  # noqa: PLC0415
+
+    return DynamicLists(hass, data)  # not started: async_get() builds once
+
+
 async def _report(hass: HomeAssistant, runtime: dict[str, Any], data: dict, cases: list) -> dict:
     matcher = await MatcherLoader.load_data(hass, data, "candidate")
-    slot_lists = runtime["lists"].async_get()
+    slot_lists = _lists_for(hass, data).async_get()
 
     def _match(text: str, hint: str | None):
         res = matcher.match(text, hint, slot_lists)
@@ -101,9 +108,8 @@ async def async_guarded_update(
         candidate = copy.deepcopy(current)
         mutate(candidate)
 
-        names = runtime["lists"].names
-        before = set(validate(current, extra_lists=names))
-        problems = validate(candidate, extra_lists=names)
+        before = set(validate(current, extra_lists=_lists_for(hass, current).names))
+        problems = validate(candidate, extra_lists=_lists_for(hass, candidate).names)
         new_problems = [p for p in problems if p not in before]
         if new_problems:
             raise GuardError("invalid", "the change has errors", {"problems": new_problems[:50]})

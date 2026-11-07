@@ -129,21 +129,24 @@ def _list_refs(expr: Any, _depth: int = 0) -> list[str]:
     return [r for c in _children(expr) for r in _list_refs(c, _depth + 1)]
 
 
-def _has_required_literal(expr: Any, _depth: int = 0) -> bool:
+def _has_required_literal(expr: Any, _depth: int = 0, rules: dict[str, Sentence] | None = None) -> bool:
     """True if some word is mandatory (not optional, not a slot)."""
     if _depth > 20:
         return False
     if isinstance(expr, Sentence):
-        return _has_required_literal(expr.expression, _depth + 1)
+        return _has_required_literal(expr.expression, _depth + 1, rules)
+    if isinstance(expr, RuleReference):
+        rule = (rules or {}).get(expr.rule_name)
+        return _has_required_literal(rule, _depth + 1, rules) if rule else False
     if isinstance(expr, TextChunk):
         return bool(expr.text.strip())
     if isinstance(expr, Alternative):
         if expr.is_optional:
             return False
         kids = _children(expr)
-        return bool(kids) and all(_has_required_literal(c, _depth + 1) for c in kids)
+        return bool(kids) and all(_has_required_literal(c, _depth + 1, rules) for c in kids)
     if isinstance(expr, (Sequence, Group, Permutation)):
-        return any(_has_required_literal(c, _depth + 1) for c in _children(expr))
+        return any(_has_required_literal(c, _depth + 1, rules) for c in _children(expr))
     return False
 
 
@@ -279,10 +282,10 @@ def check_proposal(
     missing = [r for r in refs if r not in slot_lists]
     if missing:
         return _err(f"unknown placeholder {{{missing[0]}}}")
-    if not _has_required_literal(parsed):
+    parsed_rules = parse_rules(rules or {})
+    if not _has_required_literal(parsed, rules=parsed_rules):
         return _err("needs at least one fixed word (not only optional parts or placeholders)")
 
-    parsed_rules = parse_rules(rules or {})
     wanted = slot_paths(parsed, parsed_rules)
     source_paths: set[frozenset[tuple[str, str]]] = set()
     for src in source_sentences:

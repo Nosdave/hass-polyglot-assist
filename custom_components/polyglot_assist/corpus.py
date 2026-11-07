@@ -37,6 +37,13 @@ DYNAMIC_KEYS = ("entities", "areas", "template")
 BUILTIN_LISTS = ("area", "name")
 
 
+def same_document(a: Any, b: Any) -> bool:
+    """Equality INCLUDING mapping order (order = match priority)."""
+    import json  # noqa: PLC0415
+
+    return json.dumps(a, ensure_ascii=False, default=str) == json.dumps(b, ensure_ascii=False, default=str)
+
+
 def dynamic_lists(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Lists declared with ``entities``/``areas``/``template``."""
     return {
@@ -73,14 +80,28 @@ def static_lists(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def referenced_lists(data: dict[str, Any]) -> set[str]:
-    """List names used by any sentence or expansion rule (not slot aliases)."""
+    """List names used by sentences, expansion rules and (recursively) by the
+    input expressions of the static lists they use — not slot aliases."""
     texts: list[str] = list(string_rules(data).values())
     for cfg in (data.get("intents") or {}).values():
         if isinstance(cfg, dict) and isinstance(cfg.get("sentences"), dict):
             for lst in cfg["sentences"].values():
                 if isinstance(lst, list):
                     texts.extend(x for x in lst if isinstance(x, str))
-    return {ref for t in texts for ref in _LIST_REF.findall(t)}
+    lists = data.get("lists") or {}
+    found = {ref.strip() for t in texts for ref in _LIST_REF.findall(t)}
+    todo = list(found)
+    while todo:
+        spec = lists.get(todo.pop())
+        values = spec.get("values") if isinstance(spec, dict) else None
+        for value in values or []:
+            text = value.get("in") if isinstance(value, dict) else value
+            if isinstance(text, str):
+                for ref in _LIST_REF.findall(text):
+                    if ref.strip() not in found:
+                        found.add(ref.strip())
+                        todo.append(ref.strip())
+    return found
 
 
 def runtime_list_names(data: dict[str, Any]) -> set[str]:

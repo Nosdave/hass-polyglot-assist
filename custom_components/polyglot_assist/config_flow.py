@@ -49,7 +49,7 @@ from .const import (
     SOURCE_CATALOG,
     SOURCE_YAML,
 )
-from .corpus import validate
+from .corpus import same_document, validate
 from .guard import GuardError, async_guarded_update, write_lock
 from .loader import MatcherLoader
 from .source import IntentSource, SourceError
@@ -248,18 +248,18 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
             elif wanted == SOURCE_CATALOG:
                 yaml_data = await src.async_load_yaml()
                 catalog = await src.async_load_catalog()
-                if catalog is None or (catalog != yaml_data and choice == "use_yaml"):
+                if catalog is None or (not same_document(catalog, yaml_data) and choice == "use_yaml"):
                     if catalog is not None:
                         await src.async_export_yaml()  # keep the replaced catalog as a file
                     await src.async_save_catalog(yaml_data)  # verified write
                     catalog = await src.async_load_catalog()
-                elif catalog != yaml_data and choice != "keep_other":
+                elif not same_document(catalog, yaml_data) and choice != "keep_other":
                     errors["base"] = "sources_differ"
                 target = catalog
             else:  # catalog → yaml
                 catalog = await src.async_load_catalog()
                 yaml_data = await src.async_load_yaml()
-                if catalog is not None and catalog != yaml_data:
+                if catalog is not None and not same_document(catalog, yaml_data):
                     if choice == "ask":
                         errors["base"] = "sources_differ"
                     else:
@@ -699,7 +699,10 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                     data = await self._source.async_load()
                 except SourceError:
                     data = {"intents": {}}
-                before = set(validate(data))
+                try:
+                    before = set(validate(data))
+                except Exception:  # noqa: BLE001 — the broken document is what we repair
+                    before = set()
                 mutate(data)
                 new = [p for p in validate(data) if p not in before]
                 if new:

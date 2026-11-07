@@ -51,6 +51,7 @@ class Monitor:
         self._log: list[dict[str, Any]] | None = None
         self._summary: dict[str, Any] = {}
         self._unsub: CALLBACK_TYPE | None = None
+        self._active = True
 
     async def async_load(self) -> None:
         stored = await self._store.async_load() or {}
@@ -68,7 +69,7 @@ class Monitor:
     @callback
     def async_record(self, **entry: Any) -> None:
         """Add one request (event loop; saved with a delay)."""
-        if self._log is None:
+        if self._log is None or not self._active:
             return
         self._log.append({"ts": dt_util.utcnow().isoformat(), **entry})
         del self._log[:-MAX_LOG]
@@ -90,9 +91,15 @@ class Monitor:
             self._unsub()
             self._unsub = None
 
+    @callback
+    def async_deactivate(self) -> None:
+        """No more recording or saving (unload, opt-out); in-flight requests too."""
+        self.async_stop()
+        self._active = False
+
     async def async_flush(self) -> None:
         """Write pending changes now (on unload) so no timer writes later."""
-        if self._log is not None:
+        if self._log is not None and self._active:
             await self._store.async_save({"log": self._log, "summary": self._summary})
 
     async def async_clear(self) -> None:
@@ -163,7 +170,8 @@ class Monitor:
             "proposals": len(items),
             **({"error": error} if error else {}),
         }
-        self._store.async_delay_save(lambda: {"log": self._log, "summary": self._summary}, 1)
+        if self._active:
+            self._store.async_delay_save(lambda: {"log": self._log, "summary": self._summary}, 1)
         return {"summary": self._summary, "items": items}
 
 
@@ -184,7 +192,7 @@ def build_monitor_items(
     evidence = "; ".join(f"„{r['text']}“ {r['count']}×" for r in repeated[:5])
     items: list[dict[str, Any]] = []
     for line in suggestions[:20]:
-        parts = [p.strip() for p in line.split("|")]
+        parts = [p.strip() for p in line.split("|", 2)]  # the template may contain |
         if len(parts) != 3:
             continue
         name, lang, template = parts

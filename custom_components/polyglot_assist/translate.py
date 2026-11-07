@@ -85,18 +85,31 @@ def ai_task_has_tools(hass: HomeAssistant, entity_id: str) -> bool:
     return any(_has_llm_api(dict(src)) for src in sources)
 
 
-def valid_languages(requested: list[str], allowed: list[str]) -> list[str]:
+def valid_languages(requested: list[str], allowed: list[str] | None = None) -> list[str]:
+    """Valid codes; ``allowed`` (the enabled languages) restricts if given.
+
+    A language that has no sentences yet is fine — that is what proposals
+    are for."""
     out = [lang for lang in dict.fromkeys(requested) if LANG_RE.match(lang)]
     if allowed:
         out = [lang for lang in out if lang in allowed]
     return out[:6]
 
 
+def _remaining(deadline: float | None) -> float:
+    import time  # noqa: PLC0415
+
+    return CALL_TIMEOUT if deadline is None else max(0.0, min(CALL_TIMEOUT, deadline - time.monotonic()))
+
+
 async def _generate(
     hass: HomeAssistant, entity_id: str, instructions: str, field: str, description: str,
-    context: Context | None,
+    context: Context | None, deadline: float | None = None,
 ) -> list[str]:
-    async with asyncio.timeout(CALL_TIMEOUT):
+    budget = _remaining(deadline)
+    if budget <= 1:
+        raise TimeoutError("time budget used up")
+    async with asyncio.timeout(budget):
         response = await hass.services.async_call(
             "ai_task",
             "generate_data",
@@ -151,6 +164,7 @@ async def async_propose_sentences(
     matcher,
     slot_lists: dict,
     context: Context | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Return {lang: [validated proposals] | {"error": ...}} — nothing is saved."""
     if ai_task_has_tools(hass, ai_task_entity):
@@ -203,13 +217,14 @@ async def async_propose_sentences(
             )
             proposals = await _generate(
                 hass, ai_task_entity, instructions, "sentences",
-                "sentence templates in hassil syntax", context,
+                "sentence templates in hassil syntax", context, deadline,
             )
             existing_norm = {norm(s) for s in existing}
 
             def _other_samples(lang: str = lang) -> list[tuple[str, str]]:
+                # all languages: runtime matching crosses language borders too
                 out: list[tuple[str, str]] = []
-                for name, cfg in per_lang.get(lang, {}).items():
+                for name, cfg in [(n, c) for bucket in per_lang.values() for n, c in bucket.items()]:
                     for s in cfg["data"][0]["sentences"][:6]:
                         try:
                             for t in bounded_samples(parse_sentence(s), slot_lists, parsed_rules, lang, 2):
@@ -259,6 +274,7 @@ async def async_propose_names(
     slot_lists: dict,
     source_language: str,
     context: Context | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Name proposals {target_id: {lang: [names] | {"error"}}} for the name table.
 
@@ -292,6 +308,7 @@ async def async_propose_names(
                     "names",
                     "spoken names only, no verbs",
                     context,
+                    deadline,
                 )
 
                 def _filter(values: list[str], lang: str = lang) -> list[dict[str, Any]]:
@@ -317,6 +334,7 @@ async def async_propose_new_command(
     matcher,
     slot_lists: dict,
     context: Context | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Sentence templates for a NEW command (no placeholders) per language."""
     if ai_task_has_tools(hass, ai_task_entity):
@@ -344,6 +362,7 @@ async def async_propose_new_command(
                 "sentences",
                 "sentence templates in hassil syntax",
                 context,
+                deadline,
             )
 
             def _check(p: str, lang: str = lang) -> dict[str, Any]:
