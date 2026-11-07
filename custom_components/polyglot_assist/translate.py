@@ -521,7 +521,7 @@ async def async_propose_correction_command(
             "excerpt:",
             *episode_lines,
             "devices (entity id = name, area):",
-            *devices[:40],
+            *devices,
             "existing commands (do not duplicate):",
             *commands[:60],
             "</data>",

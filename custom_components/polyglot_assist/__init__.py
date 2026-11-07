@@ -498,6 +498,7 @@ async def async_run_monitor(hass: HomeAssistant, data: dict, budget_s: float = N
 
 
 LOCAL_RESERVE_S = 15
+MAX_OFFERED = 40  # devices shown to the AI for one correction — and the only ones it may use
 
 
 def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: float, builtin_match):
@@ -549,12 +550,15 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
             for turn in episode:  # rooms named in what was said or in the tool calls (whole words only)
                 text = " ".join([str(turn.get("text") or "")] + [str(c.get("args")) for c in (turn.get("targets") or [])]).lower()
                 area_ids |= {aid for aid, rx in area_words.items() if rx.search(text)}
-            offered = sorted({st.entity_id for st in hass.states.async_all()
-                              if area_of(st.entity_id) in area_ids and allowed(st.entity_id)} | {e for e in touched if allowed(e)})
+            touched_ok = sorted(e for e in touched if allowed(e))
+            in_rooms = sorted({st.entity_id for st in hass.states.async_all()
+                               if area_of(st.entity_id) in area_ids and allowed(st.entity_id)} - set(touched_ok))
+            # exactly what the AI is shown is what it may use (touched devices first)
+            offered = (touched_ok + in_rooms)[:MAX_OFFERED]
             if not offered:
                 return None
             devices = [f"{e} = {hass.states.get(e).name if hass.states.get(e) else e}, {areas.get(area_of(e) or '', '–')}"
-                       for e in offered[:40]]
+                       for e in offered]
             answer = await async_propose_correction_command(
                 hass, ai_task_entity=ai_task, insight=insight, episode_lines=state["per_episode"][insight["episode"]],
                 devices=devices, commands=command_lines, deadline=deadline)
