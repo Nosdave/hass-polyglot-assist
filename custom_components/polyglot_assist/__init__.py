@@ -454,11 +454,15 @@ async def async_run_monitor(hass: HomeAssistant, data: dict, budget_s: float = N
     builtin = data.get("builtin")
     builtin_lists = data["builtin_lists"].async_get() if data.get("builtin_lists") is not None else {}
 
-    def _builtin_match(text: str, lang: str):
+    def _builtin_match(text: str, lang: str, usable_only: bool = False):
         # every enabled language: at runtime a catalog sentence is tried in all of them first
+        from .builtin import is_blocked  # noqa: PLC0415
+
         for candidate in ([lang, *[x for x in builtin.languages if x != lang]] if builtin is not None else []):
             hit = builtin.recognize(text, candidate, builtin_lists)
-            if hit:
+            # usable_only: a result Polyglot itself refuses at runtime (free text, area-only, protected …)
+            # never runs — the sentence goes to the AI — so a catalog sentence takes nothing over
+            if hit and not (usable_only and is_blocked(hass, hit[0])):
                 return f"{hit[0].intent.name}/{candidate}"
         return None
 
@@ -519,7 +523,7 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
     )
     from .review import (  # noqa: PLC0415
         COMMAND_KINDS, MAX_COMMAND_PROPOSALS, action_fingerprint, find_episodes, format_episodes,
-        parse_command, parse_review,
+        parse_command, parse_review, switched_along,
     )
     from .safety import action_target_reason, sensitive_entities  # noqa: PLC0415
     from .translate import async_propose_correction_command, async_review_episodes  # noqa: PLC0415
@@ -529,6 +533,12 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
 
     def _left() -> float:
         return deadline - _time.monotonic()
+
+    def _members(entity_id: str) -> set[str]:
+        """Members of a group entity (light groups, Hue rooms/zones, old-style groups); empty otherwise."""
+        st = hass.states.get(entity_id)
+        value = st.attributes.get("entity_id") if st else None
+        return {m for m in value if isinstance(m, str)} if isinstance(value, (list, tuple)) else set()
 
     def _name(entity_id: str) -> str:
         st = hass.states.get(entity_id)
@@ -560,12 +570,26 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
             offered = (touched_ok + in_rooms)[:MAX_OFFERED]
             if not offered:
                 return None
-            devices = [f"{e} = {hass.states.get(e).name if hass.states.get(e) else e}, {areas.get(area_of(e) or '', '–')}"
-                       for e in offered]
+            members = {e: _members(e) for e in offered}
+
+            def _inside(group: str) -> list[str]:
+                return switched_along(group, offered, members)
+
+            def _label(e: str) -> str:
+                st = hass.states.get(e)
+                line = f"{e} = {st.name if st else e}, {areas.get(area_of(e) or '', '–')}"
+                along = _inside(e)
+                if along:
+                    line += " — GROUP, also switches: " + ", ".join(
+                        (hass.states.get(o).name if hass.states.get(o) else o) for o in along[:12])
+                return line
+
+            devices = [_label(e) for e in offered]
             answer = await async_propose_correction_command(
                 hass, ai_task_entity=ai_task, insight=insight, episode_lines=state["per_episode"][insight["episode"]],
                 devices=devices, commands=command_lines, deadline=deadline)
-            parsed = parse_command(answer[0]) if answer else None
+            # some models split the line into several items — try it whole, then joined
+            parsed = (parse_command(answer[0]) or parse_command(" | ".join(answer))) if answer else None
             if parsed is None or parsed["name"] in registered:
                 return None
             lang = parsed["lang"]
@@ -578,6 +602,12 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
             used = [e for step in parsed["action"] for e in (iter_step_entities(step) or [])]
             if not used or any(e not in offered for e in used):
                 return None  # only devices we offered — never anything the AI made up
+            # a group in the command switches devices that are NOT in it → say so loudly
+            group_notes = []
+            for g in dict.fromkeys(used):
+                along = [o for o in _inside(g) if o not in used]
+                if along:
+                    group_notes.append(f"{g} is a group and also switches {', '.join(along[:6])}")
             fp = action_fingerprint(parsed["action"], lang)
             if fp in existing_fps:
                 return None  # a command doing exactly this already exists
@@ -599,7 +629,7 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
                                                       parse_rules(string_rules(config)), lang)
                         except Exception:  # noqa: BLE001
                             samples = None
-                        if samples is None or any(builtin_match(x, lang) for x in samples):
+                        if samples is None or any(builtin_match(x, lang, True) for x in samples):
                             r = {**r, "status": "error"}
                     out.append(r)
                 return out
@@ -619,6 +649,7 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
                 "check": {"status": "warn", "notes": [
                     "derived from a correction — check what it switches before accepting",
                     "fixed device list — new devices in the room are not added automatically",
+                    *group_notes[:3],
                     *[n for r in checked for n in r.get("notes", [])[:1]][:3]]},
                 "fp": fp,
             }

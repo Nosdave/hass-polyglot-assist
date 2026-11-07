@@ -152,18 +152,24 @@ def parse_command(line: str) -> dict[str, Any] | None:
     if len(head) != 3:
         return None
     name, lang, rest = head[0].strip(), head[1].strip(), head[2]
-    cut = max(rest.rfind("| ["), rest.rfind("|["), rest.rfind("| {"), rest.rfind("|{"))
-    if cut < 0:
+    # the JSON part: after the LAST "|" whose remainder (an optional "action_json:" label
+    # stripped) is valid JSON — templates themselves contain "|" in (a|b) alternatives
+    templates = action = None
+    for cut in [i for i, ch in enumerate(rest) if ch == "|"][::-1]:
+        tail = re.sub(r"^\s*action[_ ]?json\s*:\s*", "", rest[cut + 1:], flags=re.I).strip()
+        if tail[:1] in ("[", "{"):
+            try:
+                action = json.loads(tail)
+            except ValueError:
+                continue
+            templates = rest[:cut]
+            break
+    if templates is None:
         return None
-    templates, action_raw = rest[:cut], rest[cut + 1:].strip()
     if not NAME_RE.match(name) or not LANG_RE.match(lang):
         return None
     sentences = [" ".join(t.split()) for t in templates.split(";") if t.strip()][:6]
     if not sentences or any(len(t) > 160 for t in sentences):
-        return None
-    try:
-        action = json.loads(action_raw)
-    except ValueError:
         return None
     if isinstance(action, dict):
         action = [action]
@@ -186,3 +192,14 @@ def action_fingerprint(action: Any, lang: str) -> str:
         steps.append([step.get("action"), ents, json.dumps(step.get("data") or {}, sort_keys=True)])
     raw = json.dumps([lang, steps], sort_keys=True)  # step ORDER matters (on→off ≠ off→on)
     return "fp:" + hashlib.sha256(raw.encode()).hexdigest()[:12]
+
+
+def switched_along(group: str, offered: list[str], members: dict[str, set[str]]) -> list[str]:
+    """Offered devices a group switches along: the device is a member, or ALL its members are.
+
+    ``members`` maps entity id → its member entity ids (empty for a plain device).
+    """
+    g = members.get(group) or set()
+    if not g:
+        return []
+    return [o for o in offered if o != group and (o in g or (bool(members.get(o)) and members[o] <= g))]

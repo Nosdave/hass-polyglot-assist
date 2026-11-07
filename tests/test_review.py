@@ -205,3 +205,23 @@ def test_insight_language_is_that_of_the_correction():
           {**_turn(20, "Non, la cuisine"), "lang": "fr"}]
     out = R.parse_review(["E1 | correction | wrong_device | mauvaise pièce | la cuisine"], [ep])
     assert out[0]["lang"] == "fr"
+
+
+def test_groups_name_what_they_switch_along():
+    # invented example: a room group contains the bed strips; the "bed" group is those strips
+    members = {"light.room": {"light.strip_a", "light.strip_b", "light.spot_1"},
+               "light.bed": {"light.strip_a", "light.strip_b"}, "light.hall": {"light.spot_1"},
+               "light.lamp": set()}
+    offered = ["light.room", "light.bed", "light.hall", "light.lamp"]
+    assert R.switched_along("light.room", offered, members) == ["light.bed", "light.hall"]
+    assert R.switched_along("light.bed", offered, members) == []  # the bed group does not switch the whole room
+    assert R.switched_along("light.lamp", offered, members) == []
+
+
+def test_parse_command_tolerates_split_answers_and_a_json_label():
+    parts = ['SchlafzimmerAusserBett | de | schalt alle lichter außer dem bett aus ; lichter außer bett aus',
+             'action_json: [ { "action": "light.turn_off", "target": { "entity_id": [ "light.a", "light.b" ] } } ]']
+    p = R.parse_command(" | ".join(parts))
+    assert p and p["action"][0]["target"]["entity_id"] == ["light.a", "light.b"] and len(p["sentences"]) == 2
+    alt = R.parse_command('LichtAus | de | schalt (alle|die) licht[er] aus | [{"action":"light.turn_off","target":{"entity_id":["light.a"]}}]')
+    assert alt and alt["sentences"] == ["schalt (alle|die) licht[er] aus"]

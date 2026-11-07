@@ -513,6 +513,8 @@ async def async_propose_correction_command(
             "media_player media_play, "
             "media_pause, turn_on, turn_off. light.turn_on may carry data brightness_pct (0-100) or "
             "color_temp_kelvin (1500-9000), nothing else.",
+            "A GROUP switches every device it contains: never use a group that also switches a device the "
+            "person wanted to keep or exclude — list the individual devices instead.",
             "If the wish depends on the current state (e.g. 'warmer than now'), needs a condition, or needs "
             "devices that are not listed: answer exactly NONE.",
             _FENCE,
