@@ -180,7 +180,8 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                     text=user_input.text, lang=match.lang, result="hit", intent=match.intent_name,
                     ms=round((time.perf_counter() - t0) * 1000.0, 1),
                     error=result.response.response_type == intent.IntentResponseType.ERROR,
-                    device=user_input.device_id,
+                    device=user_input.device_id, satellite=user_input.satellite_id,
+                    conversation=chat_log.conversation_id,
                 )
             return result
 
@@ -215,7 +216,8 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                 speech=speech[:200],
                 ms=round((time.perf_counter() - t0) * 1000.0, 1),
                 error=result.response.response_type == intent.IntentResponseType.ERROR,
-                device=user_input.device_id,
+                device=user_input.device_id, satellite=user_input.satellite_id,
+                conversation=chat_log.conversation_id,
             )
         return result
 
@@ -371,6 +373,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                 monitor.async_record(
                     text=user_input.text, lang=lang, result="hit", intent=result.intent.name,
                     builtin=True, ms=round(t_ms, 1), device=user_input.device_id,
+                    satellite=user_input.satellite_id, conversation=chat_log.conversation_id,
                     error=response.response_type == intent.IntentResponseType.ERROR,
                 )
             return ConversationResult(response=response, conversation_id=chat_log.conversation_id)

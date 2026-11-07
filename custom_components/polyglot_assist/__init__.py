@@ -439,9 +439,29 @@ async def async_run_monitor(hass: HomeAssistant, data: dict) -> dict:
         lines = await async_propose_from_monitor(
             hass, ai_task_entity=ai_task, repeated=repeated, config=matcher.config
         )
+        # names per entity (read here, on the event loop) for the "same target" check
+        from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+        from .corpus import names_table  # noqa: PLC0415
+
+        reg = er.async_get(hass)
+        extra = names_table(matcher.config)
+        names: dict[str, list[str]] = {}
+        for st in hass.states.async_all():
+            ent = reg.async_get(st.entity_id)
+            names[st.entity_id] = [st.name, *[a for a in ((ent.aliases if ent else None) or []) if isinstance(a, str)],
+                                   *extra.get(st.entity_id, [])]
+        builtin = data.get("builtin")
+        builtin_lists = data["builtin_lists"].async_get() if data.get("builtin_lists") is not None else {}
+
+        def _builtin_match(text: str, lang: str):
+            hit = builtin.recognize(text, lang, builtin_lists) if builtin is not None else None
+            return hit[0].intent.name if hit else None
+
         return await hass.async_add_executor_job(
             build_monitor_items, repeated, lines, matcher.config,
             lambda t, lang: matcher.match_all(t, lang, slot_lists), slot_lists,
+            _builtin_match, lambda e: names.get(e, []),
         )
 
     result = await monitor.async_evaluate(data, _propose)

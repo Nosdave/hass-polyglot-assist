@@ -28,8 +28,8 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
-from .corpus import string_rules
-from .proposals import check_proposal, norm
+from .corpus import bucket_by_language, string_rules
+from .proposals import _list_refs, bounded_samples, check_proposal, norm, parse_rules
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -133,12 +133,22 @@ class Monitor:
         for e in entries:
             if e.get("result") == "assistant" and e.get("targets"):
                 groups.setdefault(norm(e.get("text", "")), []).append(e)
-        return [
-            {"text": items[-1]["text"], "count": len(items), "targets": items[-1]["targets"],
-             "lang": items[-1].get("lang"), "times": [i["ts"] for i in items][-5:]}
-            for key, items in groups.items()
-            if key and len(items) >= min_count
-        ]
+        out = []
+        for key, items in groups.items():
+            if not key or len(items) < min_count:
+                continue
+            times = [t for t in (dt_util.parse_datetime(i["ts"]) for i in items) if t]
+            out.append({
+                "text": items[-1]["text"], "count": len(items), "targets": items[-1]["targets"],
+                "lang": items[-1].get("lang"), "times": [i["ts"] for i in items][-5:],
+                # where it came from — the voice path accepts only repeated, spread-out
+                # sentences from approved satellites (see learn.py)
+                "satellites": sorted({i["satellite"] for i in items if i.get("satellite")}),
+                "from_other": sum(1 for i in items if not i.get("satellite")),
+                "conversations": len({i.get("conversation") for i in items if i.get("conversation")}),
+                "span_s": int((max(times) - min(times)).total_seconds()) if len(times) > 1 else 0,
+            })
+        return out
 
     def stats(self, entries: list[dict[str, Any]]) -> dict[str, Any]:
         hits = [e for e in entries if e.get("result") == "hit"]
@@ -181,14 +191,93 @@ def _p50(values: list[Any]) -> float | None:
     return round(nums[len(nums) // 2], 1) if nums else None
 
 
+_ENTITY_IN_TEXT = re.compile(r"\b[a-z_]+\.[a-z0-9_]+\b")
+
+
+def _other_samples(config: dict[str, Any], slot_lists: dict, parsed_rules: dict, lang: str, skip: str) -> list[tuple[str, str]]:
+    """(intent, text) samples of the OTHER commands — for the reverse check."""
+    from hassil.parse_expression import parse_sentence  # noqa: PLC0415
+
+    out: list[tuple[str, str]] = []
+    for bucket in bucket_by_language(config).values():
+        for name, cfg in bucket.items():
+            if name == skip:
+                continue
+            for s in cfg["data"][0]["sentences"][:6]:
+                try:
+                    out.extend((name, t) for t in bounded_samples(parse_sentence(s), slot_lists, parsed_rules, lang, 2))
+                except Exception:  # noqa: BLE001
+                    continue
+    return out
+
+
+def _template_matches(template: str, lang: str, text: str, slot_lists: dict, rules: dict[str, str]) -> bool:
+    """Does the template itself recognise ``text`` (the sentence actually spoken)?"""
+    from hassil.intents import Intents  # noqa: PLC0415
+    from hassil.recognize import recognize_all  # noqa: PLC0415
+
+    try:
+        intents = Intents.from_dict({"language": lang, "intents": {"_t": {"data": [{"sentences": [template]}]}},
+                                     **({"expansion_rules": rules} if rules else {})})
+        return any(True for _ in recognize_all(text, intents, slot_lists=slot_lists))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _harden(check: dict[str, Any], *, name: str, cfg: dict[str, Any], template: str, lang: str, evidence: list[dict[str, Any]],
+            slot_lists: dict, rules: dict[str, str], builtin_match, names_of) -> dict[str, Any]:
+    """Extra rules for proposals that come from strangers' sentences (monitoring)."""
+    from hassil.intents import WildcardSlotList  # noqa: PLC0415
+    from hassil.parse_expression import parse_sentence  # noqa: PLC0415
+
+    def fail(note: str) -> dict[str, Any]:
+        return {**check, "status": "error", "notes": [*check.get("notes", []), note]}
+
+    if check.get("status") == "error":
+        return check
+    try:
+        parsed = parse_sentence(template)
+    except Exception:  # noqa: BLE001
+        return fail("not parsable")
+    if any(isinstance(slot_lists.get(r), WildcardSlotList) for r in _list_refs(parsed)):
+        return fail("free-text placeholders are not allowed in learned sentences")
+    # bound to the evidence: the template must recognise a sentence that was really said
+    spoken = [e["text"] for e in evidence if e.get("text")]
+    if spoken and not any(_template_matches(template, lang, t, slot_lists, rules) for t in spoken):
+        return fail("does not match the sentences that were actually said")
+    # must not take over Home Assistant's built-in commands
+    if builtin_match is not None:
+        for sample in bounded_samples(parsed, slot_lists, parse_rules(rules), lang, 4):
+            if (hit := builtin_match(sample, lang)) is not None:
+                return fail(f"would take over a Home Assistant command ({hit}) for “{sample}”")
+    # the command must switch what the assistant switched back then
+    targets = " ".join(str(t.get("args", "")) for e in evidence for t in (e.get("targets") or [])).casefold()
+    entities = sorted(set(_ENTITY_IN_TEXT.findall(str(cfg.get("action") or ""))))
+    if not cfg.get("action"):
+        return {**check, "status": "warn" if check.get("status") == "ok" else check.get("status"),
+                "notes": [*check.get("notes", []), "what this command switches is not known (intent_script) — review it"]}
+    if entities and targets and names_of is not None:
+        names = {n.casefold() for e in entities for n in [e, *names_of(e)] if n}
+        if not any(n in targets for n in names):
+            return fail("this command switches something else than the assistant did")
+    return check
+
+
 def build_monitor_items(
     repeated: list[dict[str, Any]],
     suggestions: list[str],
     config: dict[str, Any],
     matches,
     slot_lists: dict,
+    builtin_match=None,
+    names_of=None,
 ) -> list[dict[str, Any]]:
-    """Turn ``INTENT | LANG | TEMPLATE`` lines from the AI task into queue items."""
+    """Turn ``INTENT | LANG | TEMPLATE`` lines from the AI task into queue items.
+
+    Besides the normal checks, every item must recognise a sentence that was
+    really said, switch what the assistant switched, not swallow other or
+    built-in commands, and use no free-text placeholder.
+    """
     intents = config.get("intents") or {}
     rules = string_rules(config)  # the user's <rules> are known, unknown ones are refused
     evidence = "; ".join(f"„{r['text']}“ {r['count']}×" for r in repeated[:5])
@@ -205,7 +294,12 @@ def build_monitor_items(
         if not isinstance(cfg, dict) or not template:
             continue
         source = [s for lst in (cfg.get("sentences") or {}).values() for s in (lst or []) if isinstance(s, str)]
-        check = check_proposal(name, template, source, lambda t, lang=lang: matches(t, lang), slot_lists, rules, lang)
+        parsed_rules = parse_rules(rules)
+        check = check_proposal(name, template, source, lambda t, lang=lang: matches(t, lang), slot_lists, rules, lang,
+                               _other_samples(config, slot_lists, parsed_rules, lang, name))
+        mine = [r for r in repeated if (r.get("lang") or lang) == lang] or repeated
+        check = _harden(check, name=name, cfg=cfg, template=template, lang=lang, evidence=mine,
+                        slot_lists=slot_lists, rules=rules, builtin_match=builtin_match, names_of=names_of)
         items.append({
             "op": "add_sentences",
             "payload": {"intent": name, "lang": lang, "sentences": [template]},
