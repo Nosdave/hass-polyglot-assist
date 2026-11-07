@@ -342,9 +342,10 @@ class PolyglotAssistPanel extends HTMLElement {
       <div class="row" style="margin-top:12px">
         <button class="b" data-act="gen" data-what="starter">${t("buttons.starter")}</button>${this._tip("starter")}
         <button class="b" data-act="gen" data-what="new_devices">${t("buttons.new_devices")}</button>${this._tip("newdev")}
+        <button class="b" data-act="gen" data-what="starter" data-dry="1" ${this.s.dryBusy ? 'disabled aria-busy="true"' : ""}>${this.s.dryBusy ? `<span class="spin"></span>` : ""}${t("buttons.dry_run")}</button>${this._tip("dry_run")}
         <select data-bind="propFilter" aria-label="${t("proposals.origin")}"><option value="">${t("proposals.all_origins")}</option>${ORIGINS.map((k) => `<option value="${k}" ${this.s.propFilter === k ? "selected" : ""}>${t("origins." + k)}</option>`).join("")}</select>
         <select data-bind="kindFilter" aria-label="${t("proposals.kind")}"><option value="">${t("proposals.all_kinds")}</option>${["new", "change", "remove"].map((k) => `<option value="${k}" ${this.s.kindFilter === k ? "selected" : ""}>${t("kinds." + k)}</option>`).join("")}</select>
-      </div>${this._msg("prop")}
+      </div>${this._msg("prop")}${this._dryResult()}
       ${rows || `<p class="hint" style="margin-top:16px">${t("proposals.empty", { starter: this.t("buttons.starter"), new_devices: this.t("buttons.new_devices") })}</p>`}
     </div></section>`;
   }
@@ -532,6 +533,18 @@ class PolyglotAssistPanel extends HTMLElement {
     return opts.languages_enabled && opts.languages_enabled.length ? opts.languages_enabled : Object.keys(o.summary.sentences || {});
   }
 
+  _dryResult() {
+    const d = this.s.dry;
+    if (!d) return "";
+    const t = (k, v) => esc(this.t(k, v));
+    const st = d.by_status || {};
+    return `<div class="result" style="margin-top:12px"><b>${t("dry.title")}</b>
+      <p class="hint">${t("dry.summary", { total: d.total, ok: st.ok || 0, warn: st.warn || 0, error: st.error || 0, seconds: d.seconds })}</p>
+      ${(d.sample || []).length ? `<ul class="hint" style="margin:6px 0 0;padding-left:18px">${d.sample.map((i) => `<li><span class="chip ${i.check && i.check.status === "ok" ? "ok" : i.check && i.check.status === "error" ? "err" : "warn"}">${esc(i.check ? i.check.status : "?")}</span> ${esc(i.title || i.op)}</li>`).join("")}</ul>` : ""}
+      ${(d.errors || []).length ? `<p class="hint">${t("dry.notes", { notes: d.errors.slice(0, 3).join("; ") })}</p>` : ""}
+      <p class="hint">${t("dry.nothing_changed")}</p></div>`;
+  }
+
   _card_fallback() {
     const t = (k, v) => esc(this.t(k, v));
     const o = this.s.overview, own = new Set(o.polyglot_agents || []);
@@ -646,6 +659,11 @@ class PolyglotAssistPanel extends HTMLElement {
           else this._setMsg("prop", t("messages.not_accepted", { reason: r.message || r.code, details: this._regressions(r) + this._problems(r) }), "err");
         }
         await this._reload();
+      } else if (a === "gen" && el.dataset.dry) {
+        const run = this.s.setRun || 0;
+        this.s.dryBusy = true; this.s.dry = null; this._setMsg("prop", t("messages.ai_working"));
+        try { const r = await this.ws("proposals/generate", { what: el.dataset.what, dry_run: true }); if (run === (this.s.setRun || 0)) { this.s.dry = r; this.s.msg.prop = null; } }
+        finally { if (run === (this.s.setRun || 0)) { this.s.dryBusy = false; this._render(); } }
       } else if (a === "gen") {
         this._setMsg("prop", t("messages.ai_working"));
         const r = await this.ws("proposals/generate", { what: el.dataset.what });
@@ -814,7 +832,7 @@ class PolyglotAssistPanel extends HTMLElement {
         nameSugg: null, langSugg: null, testResult: undefined, corpus: null, confirmDelete: null, lang: null, msg: {},
         setLoaded: false, setRun: (this.s.setRun || 0) + 1, pipes: null, agents: null, langCheck: null, langChosen: null, langOffered: null,
         sttTest: null, sttBusy: false, uiOwn: null, uiBusy: false, uiNew: null, uiFilter: "", uiDraft: {}, fbBusy: false, langApplying: false,
-        langRun: (this.s.langRun || 0) + 1, langBusy: false, langSteps: null });
+        langRun: (this.s.langRun || 0) + 1, langBusy: false, langSteps: null, dry: null, dryBusy: false });
       try { localStorage.setItem("polyglot-entry", el.value); } catch (e) { /* per-viewer convenience only */ }
       await this._reload(["overview", "data", "proposals", "monitor"]); return;
     }

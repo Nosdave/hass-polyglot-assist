@@ -511,6 +511,7 @@ async def ws_proposals_reject(hass: HomeAssistant, connection, msg) -> None:
         vol.Required("type"): "polyglot_assist/proposals/generate",
         vol.Optional("entry_id"): str,
         vol.Required("what"): vol.In(["starter", "new_devices"]),
+        vol.Optional("dry_run", default=False): bool,
     }
 )
 @websocket_api.async_response
@@ -524,14 +525,31 @@ async def ws_proposals_generate(hass: HomeAssistant, connection, msg) -> None:
         connection.send_error(msg["id"], "not_configured", "choose an AI task for proposals in the options")
         return
     languages = enabled_languages(hass, entry_id, runtime["matcher"].languages)
+    started = time.monotonic()
     try:
         found = await async_discover(
             hass, runtime, ai_task=ai_task, languages=languages,
             only_new=msg["what"] == "new_devices", context=connection.context(msg),
-            deadline=time.monotonic() + TOTAL_BUDGET * 2,
+            deadline=time.monotonic() + TOTAL_BUDGET * 2, dry_run=msg["dry_run"],
         )
     except ProposalError as err:
         connection.send_error(msg["id"], "refused", str(err))
+        return
+    if msg["dry_run"]:
+        # trial run: show what would come, queue nothing, remember nothing
+        items = found["items"]
+        by_status: dict[str, int] = {}
+        by_op: dict[str, int] = {}
+        for item in items:
+            status = (item.get("check") or {}).get("status", "?")
+            by_status[status] = by_status.get(status, 0) + 1
+            by_op[item.get("op", "?")] = by_op.get(item.get("op", "?"), 0) + 1
+        connection.send_result(msg["id"], {
+            "dry_run": True, "seconds": round(time.monotonic() - started, 1), "total": len(items),
+            "by_status": by_status, "by_op": by_op, "errors": found["errors"],
+            "baseline": found.get("baseline"),
+            "sample": [{k: i.get(k) for k in ("title", "op", "check", "origin")} for i in items[:20]],
+        })
         return
     added = await _queue(hass, runtime).async_add(found["items"])
     connection.send_result(msg["id"], {"added": len(added), "errors": found["errors"]})

@@ -1,0 +1,31 @@
+name: Resource benchmark
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  bench:
+    name: Benchmark (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install (versions shipped with Home Assistant)
+        run: pip install -r requirements_test.txt "home-assistant-intents==2026.10.6"
+      - name: Run
+        run: |
+          python scripts/bench.py --json bench.json | tee bench.txt
+          { echo '### ${{ matrix.runner }}'; echo '```'; cat bench.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ matrix.runner }}
+          path: bench.json

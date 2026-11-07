@@ -46,7 +46,8 @@
     "pipelines": "Ein Sprachassistent in Home Assistant legt fest, wer zuhört (Spracherkennung), wer versteht (hier soll Polyglot stehen) und wer spricht. „Befehle lokal bevorzugen“: Ist das an, prüft Home Assistant jeden Satz zuerst selbst – nur in der Sprache des Assistenten – und Polyglot sieht diese Sätze nie. Aus ist richtig, wenn Polyglot die Grundbefehle übernimmt.",
     "apply": "Polyglot hört danach nur noch auf die ausgewählten Sprachen und lädt die Grundbefehle von Home Assistant dafür. Das dauert etwa eine Sekunde. Deine eigenen Befehle bleiben, wie sie sind. Mindestens eine Sprache muss ausgewählt sein.",
     "amp": "Damit ein Satz in einer Sprache klappt, braucht es vier Dinge: Die Spracherkennung muss die Sprache verstehen, deine KI muss sie können, Polyglot muss Befehle in ihr kennen, und die Sprachausgabe muss in ihr antworten können. Ob die Spracherkennung die Sprache auch von selbst erkennt, meldet Home Assistant nicht – das prüft „Spracherkennung testen“.",
-    "uitexts": "Die Texte dieser Oberfläche. Mitgeliefert sind Deutsch, Englisch und Französisch. Für jede weitere Sprache übersetzt deine KI die Texte; du kannst jede Zeile ändern. Mit „Exportieren“ entsteht eine Datei, die sich mit allen teilen lässt."
+    "uitexts": "Die Texte dieser Oberfläche. Mitgeliefert sind Deutsch, Englisch und Französisch. Für jede weitere Sprache übersetzt deine KI die Texte; du kannst jede Zeile ändern. Mit „Exportieren“ entsteht eine Datei, die sich mit allen teilen lässt.",
+    "dry_run": "Zeigt, was der Grundstock vorschlagen würde – ohne etwas in die Vorschlagsliste zu legen und ohne sich Geräte zu merken. Gut zum Ausprobieren einer KI."
   },
   "kinds": {
     "new": "neu",
@@ -93,7 +94,8 @@
     "analyse_now": "Jetzt auswerten",
     "save_languages": "Sprachen speichern",
     "ask_languages": "Welche Sprachen kann meine KI?",
-    "export": "Als Datei exportieren"
+    "export": "Als Datei exportieren",
+    "dry_run": "Probelauf"
   },
   "start": {
     "title": "So versteht dein Zuhause mehrere Sprachen",
@@ -357,5 +359,11 @@
     "translated": "{count} von {total} Texten übersetzt, {refused} abgelehnt.",
     "exported": "Exportiert als {file}.",
     "exported_missing": "Exportiert als {file} – {count} Texte fehlen noch."
+  },
+  "dry": {
+    "title": "Probelauf – nichts wurde übernommen",
+    "summary": "{total} Vorschläge in {seconds} s: {ok} passen, {warn} mit Hinweis, {error} mit Fehler.",
+    "notes": "Hinweise: {notes}",
+    "nothing_changed": "Die Vorschlagsliste und deine Befehle sind unverändert."
   }
 }

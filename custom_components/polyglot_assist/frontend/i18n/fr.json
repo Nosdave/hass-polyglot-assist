@@ -46,7 +46,8 @@
     "pipelines": "Un assistant vocal de Home Assistant définit qui écoute (reconnaissance), qui comprend (Polyglot doit être ici) et qui parle. « Traiter les commandes localement » : activé, Home Assistant vérifie d’abord chaque phrase lui-même – uniquement dans la langue de l’assistant – et Polyglot ne les voit jamais. Désactivé est correct quand Polyglot gère les commandes intégrées.",
     "apply": "Polyglot n’écoutera alors que les langues choisies et chargera les commandes intégrées de Home Assistant pour elles. Cela prend environ une seconde. Tes propres commandes restent inchangées. Au moins une langue doit être choisie.",
     "amp": "Pour qu’une phrase fonctionne dans une langue, il faut quatre choses : la reconnaissance vocale doit la comprendre, ton IA doit la parler, Polyglot doit y connaître des commandes, et la synthèse doit pouvoir y répondre. Home Assistant n’indique pas si la reconnaissance détecte la langue toute seule – « Tester la reconnaissance vocale » le vérifie.",
-    "uitexts": "Les textes de cette interface. L’allemand, l’anglais et le français sont fournis. Pour toute autre langue, ton IA traduit les textes ; tu peux modifier chaque ligne. « Exporter » crée un fichier que tu peux partager avec tous."
+    "uitexts": "Les textes de cette interface. L’allemand, l’anglais et le français sont fournis. Pour toute autre langue, ton IA traduit les textes ; tu peux modifier chaque ligne. « Exporter » crée un fichier que tu peux partager avec tous.",
+    "dry_run": "Montre ce que le kit de départ proposerait – sans rien ajouter aux suggestions et sans retenir d’appareils. Pratique pour essayer une IA."
   },
   "kinds": {
     "new": "ajout",
@@ -93,7 +94,8 @@
     "analyse_now": "Analyser maintenant",
     "save_languages": "Enregistrer les langues",
     "ask_languages": "Quelles langues mon IA connaît-elle ?",
-    "export": "Exporter dans un fichier"
+    "export": "Exporter dans un fichier",
+    "dry_run": "Essai"
   },
   "start": {
     "title": "Comment ta maison comprend plusieurs langues",
@@ -357,5 +359,11 @@
     "translated": "{count} textes sur {total} traduits, {refused} refusés.",
     "exported": "Exporté sous {file}.",
     "exported_missing": "Exporté sous {file} – il manque encore {count} textes."
+  },
+  "dry": {
+    "title": "Essai – rien n’a été appliqué",
+    "summary": "{total} suggestions en {seconds} s : {ok} conviennent, {warn} avec remarque, {error} avec erreur.",
+    "notes": "Remarques : {notes}",
+    "nothing_changed": "Les suggestions et tes commandes sont inchangées."
   }
 }

@@ -106,8 +106,12 @@ async def async_discover(
     only_new: bool,
     context: Context | None,
     deadline: float | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Generate proposals for uncovered devices (and, with only_new, just new ones)."""
+    """Generate proposals for uncovered devices (and, with only_new, just new ones).
+
+    ``dry_run``: nothing is remembered (the "seen" devices stay as they are).
+    """
     matcher = runtime["matcher"]
     config = matcher.config
     slot_lists = {**matcher.static_slot_lists(), **runtime["lists"].async_get()}
@@ -124,7 +128,8 @@ async def async_discover(
     covered = covered_entities(config)
     if only_new and stored_seen is None:
         # first run: remember today's devices as the baseline, propose nothing
-        await seen_store.async_save({"entities": sorted(s.entity_id for s in exposed)})
+        if not dry_run:
+            await seen_store.async_save({"entities": sorted(s.entity_id for s in exposed)})
         return {"items": [], "errors": [], "baseline": len(exposed)}
     sensitive = sensitive_entities(config)
     extra = names_table(config)
@@ -227,5 +232,6 @@ async def async_discover(
         items += classify_existing(config)
     # only what was really looked at counts as seen; the rest comes next time
     handled = processed | {s.entity_id for s in fresh if s.domain not in COMMAND_DOMAINS and s.domain not in NAME_DOMAINS}
-    await seen_store.async_save({"entities": sorted(seen | handled)})
+    if not dry_run:
+        await seen_store.async_save({"entities": sorted(seen | handled)})
     return {"items": items, "errors": errors[:20]}

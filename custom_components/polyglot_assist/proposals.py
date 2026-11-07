@@ -241,6 +241,18 @@ def parse_rules(rules: dict[str, str]) -> dict[str, Sentence]:
     return out
 
 
+def _rule_refs(expr: Any) -> list[str]:
+    """Names of all <rule> references in a parsed sentence."""
+    if isinstance(expr, Sentence):
+        return _rule_refs(expr.expression)
+    if isinstance(expr, RuleReference):
+        return [expr.rule_name]
+    out: list[str] = []
+    for item in _children(expr):
+        out += _rule_refs(item)
+    return out
+
+
 def check_proposal(
     intent_name: str,
     sentence: str,
@@ -283,6 +295,9 @@ def check_proposal(
     if missing:
         return _err(f"unknown placeholder {{{missing[0]}}}")
     parsed_rules = parse_rules(rules or {})
+    unknown_rules = sorted(r for r in _rule_refs(parsed) if r not in parsed_rules)
+    if unknown_rules:  # also catches markup like <b> or <script>, which hassil reads as rules
+        return _err(f"unknown rule <{unknown_rules[0]}>")
     if not _has_required_literal(parsed, rules=parsed_rules):
         return _err("needs at least one fixed word (not only optional parts or placeholders)")
 
