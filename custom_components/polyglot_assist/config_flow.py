@@ -716,7 +716,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                 await self._source.async_save(data)
                 await self.hass.config_entries.async_reload(self._entry.entry_id)
                 return None
-            await async_guarded_update(self.hass, runtime, mutate)
+            await async_guarded_update(self.hass, runtime, mutate, actor="options")
         except GuardError as err:
             details = err.details.get("problems") or [
                 f"{r['text']!r}: expected {r['expected']['intent']}, got "

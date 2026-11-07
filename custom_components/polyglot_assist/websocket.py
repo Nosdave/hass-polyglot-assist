@@ -31,6 +31,7 @@ from .const import (
     DOMAIN,
     SOURCE_CATALOG,
 )
+from .history import CatalogHistory
 from .corpus import count_summary, validate
 from .guard import GuardError, async_guarded_update, revision
 from .source import SourceError
@@ -59,6 +60,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_proposals_generate, ws_suggest_languages,
         ws_monitor_status, ws_monitor_run,
         ws_overview, ws_categories, ws_names_set, ws_options, ws_entries,
+        ws_history_list, ws_history_restore,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -79,7 +81,13 @@ def _runtime(
 NAME_RE = r"^[A-Za-z][A-Za-z0-9_]{0,79}$"
 
 
-async def _guarded(hass, connection, msg, runtime, mutate) -> None:
+def _actor(connection, what: str) -> str:
+    user = getattr(connection, "user", None)
+    name = getattr(user, "name", None) if user is not None else None
+    return f"{what}:{name}" if name else what
+
+
+async def _guarded(hass, connection, msg, runtime, mutate, actor: str = "panel") -> None:
     if runtime["source"].kind != SOURCE_CATALOG:
         connection.send_error(
             msg["id"],
@@ -90,7 +98,8 @@ async def _guarded(hass, connection, msg, runtime, mutate) -> None:
         return
     try:
         result = await async_guarded_update(
-            hass, runtime, mutate, force=msg.get("force", False), base_rev=msg.get("base_rev")
+            hass, runtime, mutate, force=msg.get("force", False), base_rev=msg.get("base_rev"),
+            actor=_actor(connection, actor),
         )
     except GuardError as err:
         connection.send_result(
@@ -464,7 +473,7 @@ async def ws_proposals_accept(hass: HomeAssistant, connection, msg) -> None:
         )
         return
     try:
-        result = await async_guarded_update(hass, runtime, _mutate, force=msg["force"])
+        result = await async_guarded_update(hass, runtime, _mutate, force=msg["force"], actor=_actor(connection, "proposals"))
     except GuardError as err:
         connection.send_result(msg["id"], {"saved": False, "code": err.code, "message": str(err), "refused": refused, **err.details})
         return
@@ -810,3 +819,48 @@ def ws_entries(hass: HomeAssistant, connection, msg) -> None:
         msg["id"],
         {"entries": [{"entry_id": eid, "title": data["entry"].title} for eid, data in hass.data.get(DOMAIN, {}).items()]},
     )
+
+
+def _history(runtime: dict[str, Any]) -> CatalogHistory:
+    return runtime.setdefault("history", CatalogHistory(runtime["source"].hass, runtime["entry"].entry_id))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/history/list", vol.Optional("entry_id"): str}
+)
+@websocket_api.async_response
+async def ws_history_list(hass: HomeAssistant, connection, msg) -> None:
+    """Earlier states of the catalog (newest first, without their content)."""
+    _entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    connection.send_result(msg["id"], {"items": await _history(runtime).async_list()})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "polyglot_assist/history/restore",
+        vol.Optional("entry_id"): str,
+        vol.Required("rev"): str,
+        vol.Optional("base_rev"): str,
+        vol.Optional("force", default=False): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_history_restore(hass: HomeAssistant, connection, msg) -> None:
+    """Go back to an earlier state — a normal guarded save (can be undone again)."""
+    _entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    old = await _history(runtime).async_get(msg["rev"])
+    if old is None:
+        connection.send_error(msg["id"], "not_found", "this state is no longer in the history")
+        return
+
+    def _mutate(data: dict[str, Any]) -> None:
+        data.clear()
+        data.update(old)
+
+    await _guarded(hass, connection, msg, runtime, _mutate, actor=f"restore {msg['rev'][:8]}")

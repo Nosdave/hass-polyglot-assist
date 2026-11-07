@@ -18,6 +18,7 @@ import asyncio
 import copy
 import hashlib
 import json
+import logging
 from pathlib import Path
 from typing import Any, Callable
 
@@ -25,9 +26,12 @@ import yaml
 
 from homeassistant.core import HomeAssistant
 
-from .const import DEFAULT_TESTS_FILE
+from .const import DEFAULT_TESTS_FILE, SOURCE_CATALOG
 from .corpus import parse_corpus, run_corpus, validate
+from .history import CatalogHistory
 from .loader import MatcherLoader
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class GuardError(Exception):
@@ -95,6 +99,7 @@ async def async_guarded_update(
     *,
     force: bool = False,
     base_rev: str | None = None,
+    actor: str = "panel",
 ) -> dict[str, Any]:
     """Apply ``mutate`` to a fresh copy of the source and save it if safe.
 
@@ -137,6 +142,12 @@ async def async_guarded_update(
         if source.kind != kind:
             raise GuardError("conflict", "the intents source was switched meanwhile — try again")
         await source.async_save(candidate)
+        if kind == SOURCE_CATALOG:
+            try:
+                history = runtime.setdefault("history", CatalogHistory(hass, runtime["entry"].entry_id))
+                await history.async_add(current, candidate, rev=revision(current), actor=actor)
+            except Exception:  # noqa: BLE001 — the save itself succeeded; history is a convenience
+                _LOGGER.exception("Polyglot Assist: could not record the catalog history")
         old_matcher = runtime["matcher"]
         from . import DOMAIN, async_reload_entry_matcher  # noqa: PLC0415 — avoid import cycle
 
