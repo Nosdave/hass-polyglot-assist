@@ -33,6 +33,7 @@ from .const import (
     DOMAIN,
     SOURCE_CATALOG,
 )
+from .accept import AcceptError, async_accept, queue_of
 from .history import change_summary, get_history, loosened
 from .fallback import fallback_error
 from .settings import async_language_check, async_stt_test, pipelines_overview
@@ -42,10 +43,7 @@ from .guard import GuardError, async_guarded_update, revision, write_lock
 from .source import SourceError
 from .assistant import async_discover
 from .proposal_queue import ProposalQueue
-from .actions import CatalogIntentHandler
 from .corpus import names_table
-from .proposals import QueueError, apply_op, check_item, check_item_against
-from .safety import action_target_reason, protected_reason, sensitive_entities
 from .translate import (
     ProposalError,
     async_propose_languages,
@@ -400,10 +398,7 @@ async def ws_suggest_names(hass: HomeAssistant, connection, msg) -> None:
 
 
 def _queue(hass: HomeAssistant, runtime: dict) -> ProposalQueue:
-    queue = runtime.get("queue")
-    if queue is None:
-        queue = runtime["queue"] = ProposalQueue(hass, runtime["entry"].entry_id)
-    return queue
+    return queue_of(hass, runtime)
 
 
 @websocket_api.require_admin
@@ -429,64 +424,16 @@ async def ws_proposals_list(hass: HomeAssistant, connection, msg) -> None:
 )
 @websocket_api.async_response
 async def ws_proposals_accept(hass: HomeAssistant, connection, msg) -> None:
-    """Apply the selected proposals in ONE guarded write."""
+    """Apply the selected proposals in ONE guarded write (same path as voice)."""
     _, runtime = _runtime(hass, connection, msg)
     if runtime is None:
         return
-    queue = _queue(hass, runtime)
-    wanted = set(msg["ids"])
-    items = [i for i in await queue.async_items() if i["id"] in wanted]
-    config = runtime["matcher"].config
-    sensitive = sensitive_entities(config)
-    extra_names = names_table(config)
-    registered = {h.intent_type for h in intent.async_get(hass) if not isinstance(h, CatalogIntentHandler)}
-    refused: dict[str, str] = {}
-    trial = copy.deepcopy(config)
-    usable = []
-    for item in items:
-        reason = check_item(item) or check_item_against(item, trial) or _dynamic_reason(
-            hass, item, sensitive, extra_names, registered
-        )
-        if not reason and item.get("check", {}).get("status") == "error":
-            reason = "; ".join(item.get("check", {}).get("notes", [])[:1]) or "has errors"
-        if not reason:
-            try:
-                apply_op(trial, item)  # stale items are refused, the rest goes on
-            except QueueError as err:
-                reason = str(err)
-        if reason:
-            refused[item["id"]] = reason
-        else:
-            usable.append(item)
-    if not usable:
-        connection.send_result(msg["id"], {"saved": False, "code": "nothing_usable", "refused": refused})
-        return
-
-    def _mutate(data: dict) -> None:
-        for item in usable:
-            # repeat document checks on the FRESH document inside the write lock
-            reason = check_item_against(item, data)
-            if reason:
-                raise GuardError("stale", f"{item.get('title', item['id'])}: {reason}")
-            try:
-                apply_op(data, item)
-            except QueueError as err:
-                raise GuardError("stale", f"{item.get('title', item['id'])}: {err}") from None
-
-    msg = {**msg, "force": msg.get("force", False)}
-    if runtime["source"].kind != SOURCE_CATALOG:
-        connection.send_error(
-            msg["id"], "yaml_source_read_only",
-            "proposals are applied to the catalog — switch the intents source to the catalog first",
-        )
-        return
     try:
-        result = await async_guarded_update(hass, runtime, _mutate, force=msg["force"], actor=_actor(connection, "proposals"))
-    except GuardError as err:
-        connection.send_result(msg["id"], {"saved": False, "code": err.code, "message": str(err), "refused": refused, **err.details})
+        result = await async_accept(hass, runtime, msg["ids"], actor=_actor(connection, "proposals"), force=msg.get("force", False))
+    except AcceptError as err:
+        connection.send_error(msg["id"], err.code, str(err))
         return
-    await queue.async_remove([i["id"] for i in usable])
-    connection.send_result(msg["id"], {**result, "applied": [i["id"] for i in usable], "refused": refused})
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.require_admin
@@ -833,23 +780,7 @@ async def ws_options(hass: HomeAssistant, connection, msg) -> None:
 
 
 
-def _dynamic_reason(hass: HomeAssistant, item: dict, sensitive: set[str], extra_names: dict, registered: set[str]) -> str | None:
-    """Checks against the real installation before a proposal may be applied."""
-    op, p = item.get("op"), item.get("payload") or {}
-    if op == "add_intent":
-        if p.get("name") in registered:
-            return "a command with this name already exists (e.g. intent_script)"
-        for step in (p.get("intent") or {}).get("action") or []:
-            entity = ((step or {}).get("target") or {}).get("entity_id")
-            if isinstance(entity, str):
-                reason = action_target_reason(hass, entity, sensitive=sensitive, extra_names=extra_names)
-                if reason:
-                    return reason
-    if op == "set_list_value" and isinstance(p.get("out"), str) and "." in p["out"]:
-        return protected_reason(hass, p["out"], sensitive_entities=sensitive, extra_names=extra_names)
-    if op in ("add_names", "remove_names") and not str(p.get("target", "")).startswith("area."):
-        return protected_reason(hass, p.get("target", ""), sensitive_entities=sensitive, extra_names=extra_names)
-    return None
+
 
 
 

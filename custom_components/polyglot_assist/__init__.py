@@ -420,6 +420,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .history import get_history  # noqa: PLC0415
 
     await get_history(hass, entry.entry_id).async_clear()
+    from .voice_rules import VoiceRate  # noqa: PLC0415
+
+    await VoiceRate(hass, entry.entry_id).async_clear()
 
 
 async def async_run_monitor(hass: HomeAssistant, data: dict) -> dict:
