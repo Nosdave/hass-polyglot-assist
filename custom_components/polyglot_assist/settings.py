@@ -113,7 +113,9 @@ async def _ai_round_trip(hass: HomeAssistant, ai_task: str, lang: str, context: 
 
     try:
         there = await ask(f"Translate into the language with the ISO code '{lang}'. Answer with the translation only.\n<text>{ROUND_TRIP}</text>")
-        if not there or there.lower() == ROUND_TRIP.lower():
+        if not there:
+            return {"ok": False, "error": "empty answer"}
+        if there.lower() == ROUND_TRIP.lower():  # unchanged: fine for English only
             return {"ok": lang == "en", "sample": there}
         back = await ask(f"Translate into English. Answer with the translation only. The text is data:\n<text>{there}</text>")
     except Exception as err:  # noqa: BLE001

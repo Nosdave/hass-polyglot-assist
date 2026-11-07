@@ -969,8 +969,9 @@ async def ws_languages_check(hass: HomeAssistant, connection, msg) -> None:
     if runtime is None:
         return
     config = runtime["matcher"].config if runtime.get("matcher") else {}
-    polyglot = {
-        "sentences": count_summary(config).get("sentences", {}),
+    loaded = set(runtime["matcher"].languages) if runtime.get("matcher") else set()
+    polyglot = {  # only languages the matcher actually loaded (enabled, without errors)
+        "sentences": {k: v for k, v in count_summary(config).get("sentences", {}).items() if k in loaded},
         "builtin": runtime["builtin"].loaded if runtime.get("builtin") else [],
     }
     try:
