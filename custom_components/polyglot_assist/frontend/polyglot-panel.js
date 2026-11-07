@@ -1,46 +1,53 @@
 // Polyglot Assist panel — plain web component (no build step).
 // Talks to the admin WebSocket API of the integration. All text that comes
-// from the configuration or from an AI task is escaped before rendering.
+// from the configuration, from an AI task or from a translation file is
+// escaped before rendering; translated texts are never inserted as HTML.
 
-const T = {
-  de: {
-    title: "Polyglot Assist",
-    tabs: { start: "Start", proposals: "Vorschläge", commands: "Befehle", test: "Ausprobieren", names: "Namen", monitor: "Überwachung", settings: "Einstellungen" },
-  },
+// ── texts ───────────────────────────────────────────────────────────────────
+// UI texts live in i18n/<lang>.json next to this module (HA language codes,
+// nested objects, keys addressed as dot paths, placeholders as {name}).
+// Lookup order for a key: WS polyglot_assist/ui_texts/get > full language
+// file (pt-BR) > base language file (pt) > en.json > the key itself.
+const MOD_URL = new URL(import.meta.url);
+const STATIC = new URL(".", MOD_URL).href.replace(/\/$/, "");
+const VERSION = MOD_URL.searchParams.get("v") || "";
+const FILE_LANGS = ["en", "de", "fr"];
+const LS_UI = "polyglot.uiLang";
+const okLang = (l) => typeof l === "string" && /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(l);
+const baseLang = (l) => l.split("-")[0].toLowerCase();
+const langChain = (l) => [...new Set([l, baseLang(l), "en"])];
+
+// nested {a: {b: "x"}} → {"a.b": "x"}; empty and non-string leaves are dropped
+const flatten = (obj, prefix = "", out = {}) => {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return out;
+  for (const [k, v] of Object.entries(obj)) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (typeof v === "string") { if (v) out[key] = v; }
+    else if (v && typeof v === "object") flatten(v, key, out);
+  }
+  return out;
 };
-const L = T.de;
-const LANG_NAMES = { de: "Deutsch", en: "English", fr: "Français", nl: "Nederlands", it: "Italiano", es: "Español", pt: "Português", pl: "Polski" };
+
+async function fetchTexts(lang) {
+  try {
+    const r = await fetch(`${STATIC}/i18n/${encodeURIComponent(lang)}.json?v=${encodeURIComponent(VERSION)}`);
+    if (!r.ok) return {};
+    return flatten(await r.json());
+  } catch (e) { return {}; }
+}
+
+const TABS = ["start", "proposals", "commands", "test", "names", "monitor", "settings"];
 const OP_KIND = {
-  add_intent: "neu", add_sentences: "neu", add_names: "neu", set_list_value: "ändern",
-  set_field: "ändern", remove_sentences: "entfernen", remove_names: "entfernen", remove_list_value: "entfernen",
+  add_intent: "new", add_sentences: "new", add_names: "new", set_list_value: "change",
+  set_field: "change", remove_sentences: "remove", remove_names: "remove", remove_list_value: "remove",
 };
-const ORIGIN = { new_devices: "Neue Geräte", starter: "Grundstock", monitor: "Überwachung", translation: "Übersetzung", manual: "Von Hand" };
-const SAFETY = { normal: "normal", sensitive: "sicherheitsrelevant", disabled: "aus" };
-const TIPS = {
-  how: "Polyglot hört bei jedem Sprachbefehl zuerst hin. Kennt es den Satz, führt es ihn sofort aus, ohne KI und in der Sprache, in der du gesprochen hast. Sonst gibt es ihn an deinen KI-Assistenten weiter.",
-  proposals: "Hier sammelt Polyglot neue, geänderte und zu entfernende Befehle, Sätze und Namen. Nichts davon ist aktiv, bevor du es übernimmst. Jeder Vorschlag wurde geprüft: Er darf keinen anderen Befehl stören, und alles, was schon funktioniert, muss weiter funktionieren.",
-  starter: "Die KI schaut sich deine Skripte, Szenen und Geräte an, die Polyglot noch nicht versteht, und schlägt Befehle und Namen in allen gewählten Sprachen vor. Dazu Arten für deine Befehle. Ideal beim ersten Einrichten.",
-  newdev: "Nach einer neuen Integration oder einem neuen Gerät: Polyglot findet, was neu dazugekommen ist, und schlägt Namen und Befehle vor.",
-  coverage: "Wie viele Beispielsätze es pro Sprache gibt. Orange: Eine Sprache hat deutlich weniger Varianten als die anderen. Mit „Übersetzen“ schlägt die KI fehlende vor.",
-  safety: "Normal: Der Befehl wird sofort ausgeführt. Sicherheitsrelevant (z. B. Haustür, Garage, Auto): wird ausgeführt, ist aber markiert; Vorschläge dafür übernimmt Polyglot nie automatisch, und beim Ändern erscheint eine Warnung. Aus: Polyglot ignoriert den Befehl, der Satz geht an deinen KI-Assistenten.",
-  groups: "Art: Licht, Energie, Wetter … (bei jedem Befehl einstellbar). Raum und Gerät ermittelt Polyglot aus den Geräten, die ein Befehl schaltet.",
-  cats: "Arten ordnen deine Befehle. Du kannst eigene anlegen, umbenennen oder löschen. Beim Löschen kommen die Befehle in „Sonstiges“.",
-  syntax: "[eckige Klammern] = darf fehlen · (a|b) = eins davon · {Platzhalter} = ein Raum, Gerät oder eine Zahl, die Polyglot einsetzt.",
-  answer: "Sprechen: „Licht Couch an.“ Ton: ein kurzes Signal (braucht Polyglot TTS). Gilt nur für Schaltbefehle; Fragen werden immer gesprochen beantwortet.",
-  kind: "Schaltbefehl: tut etwas (Licht an …). Frage: liefert eine Auskunft (Wetter, Status …) und wird immer gesprochen beantwortet.",
-  test: "Schreib einen Satz, wie du ihn sagen würdest. Polyglot zeigt, ob und wie es ihn versteht. Es wird nichts geschaltet.",
-  corpus: "Echte Sätze aus deinem Alltag, die immer gleich verstanden werden müssen. Bei jeder Änderung prüft Polyglot sie vorher; würde etwas kaputtgehen, wird nicht gespeichert.",
-  names: "Wie du Räume und Geräte in jeder Sprache nennst, z. B. Wohnzimmer = living room = salon. Diese Namen ändern nichts an Home Assistant selbst und machen deinen KI-Assistenten nicht langsamer.",
-  monitor: "Polyglot merkt sich die letzten 500 Sprachbefehle (nur Text, kein Ton, bleibt in deinem Home Assistant). Einmal am Tag wertet deine eigene KI aus, was oft nicht direkt verstanden wurde, und macht daraus Vorschläge.",
-  languages: "Die Sprachen, die in deinem Zuhause gesprochen werden. Polyglot erkennt sie automatisch; abgewählte Sprachen werden nicht mehr beachtet.",
-  aitask: "Die KI-Aufgabe, die Übersetzungen, Namen und Befehle vorschlägt. Sie muss ohne Werkzeuge sein: Sie liest fremde Sätze und darf dabei nichts schalten können.",
-  builtin: "Home Assistant bringt fertige Sprachbefehle mit: Licht an/aus, dimmen, Farbe, Timer, Datum, Uhrzeit, Status. Von sich aus versteht es die aber nur in der Sprache deines Sprachassistenten. Mit diesem Schalter erkennt Polyglot sie in allen gewählten Sprachen und führt sie sofort aus, ohne Umweg über die KI. Das ist schneller und funktioniert auch, wenn die KI gerade nicht erreichbar ist. Türen, Schlösser, Tore, Alarm und das Auto schaltet Polyglot dabei nie; solche Befehle gehen weiter an deinen KI-Assistenten. Ausschalten nur, wenn du Befehle ausschließlich selbst festlegen willst.",
-  followup: "Damit dein KI-Assistent „und jetzt auch das Piano“ versteht, erfährt er, was Polyglot gerade geschaltet hat.",
-  fallback: "Dein KI-Assistent, der alles beantwortet, was kein fester Befehl ist.",
-};
+const ORIGINS = ["new_devices", "starter", "monitor", "translation", "manual"];
+const SAFETY = ["normal", "sensitive", "disabled"];
+// The backend's "no category" value (corpus.OTHER_CATEGORY). It is stored data,
+// so it stays as is; only its label is translated.
+const OTHER = "Sonstiges";
 
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const tip = (key) => `<span class="tip"><button class="info" type="button" aria-label="Erklärung" data-tip="${esc(TIPS[key])}">i</button></span>`;
 
 const CSS = `
 :host{display:block;background:var(--primary-background-color);color:var(--primary-text-color);font-family:var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif);font-size:14px;min-height:100%}
@@ -49,6 +56,7 @@ const CSS = `
 .wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .appbar{display:flex;align-items:center;gap:12px;padding-block:14px}
 .appbar h1{font-size:20px;font-weight:400;margin:0}.appbar .src{margin-left:auto;font-size:12px;opacity:.85}
+.appbar select.ui{font-size:12px;padding:4px 6px}
 .menu{background:none;border:0;color:inherit;font-size:22px;padding:0 6px 0 0;cursor:pointer}
 .tabs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
 .tabs button{background:none;border:0;border-bottom:2px solid transparent;color:inherit;opacity:.75;padding:10px 14px;font:inherit;font-weight:500;font-size:13px;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;cursor:pointer}
@@ -106,6 +114,12 @@ class PolyglotAssistPanel extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this.s = { view: "start", group: "category", filter: "", query: "", selected: null, proposals: null, monitor: null, data: null, overview: null, msg: {}, propFilter: "", kindFilter: "", lang: null };
+    this._tx = {};
+    this._machine = new Set();
+    this._wsLangs = [];
+    this._uiLang = "en";
+    this._uiPref = "";
+    this._txRun = 0;
   }
   set hass(h) { this._hass = h; if (!this._started) { this._started = true; this._boot(); } }
   get hass() { return this._hass; }
@@ -116,14 +130,86 @@ class PolyglotAssistPanel extends HTMLElement {
     return this._hass.callWS({ type: `polyglot_assist/${type}`, ...extra, ...data });
   }
 
+  // ── i18n ──────────────────────────────────────────────────────────────────
+  /** Translated plain text (never HTML): callers always pass it through esc(). */
+  t(key, vars) {
+    const s = this._tx[key] ?? key;
+    return vars ? s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k] ?? "") : m)) : s;
+  }
+
+  /** Language the panel would use without a manual choice: HA's language. */
+  _haLang() {
+    const h = this._hass || {};
+    const l = (h.locale && h.locale.language) || h.language || "";
+    return okLang(l) ? l : "en";
+  }
+
+  async _loadTexts() {
+    const run = ++this._txRun;
+    const lang = okLang(this._uiPref) ? this._uiPref : this._haLang();
+    const chain = langChain(lang); // e.g. pt-BR → pt → en
+    const ws = Promise.resolve().then(() => this._hass.callWS({ type: "polyglot_assist/ui_texts/get", lang })).catch(() => null);
+    const [files, r] = await Promise.all([Promise.all(chain.map(fetchTexts)), ws]);
+    if (run !== this._txRun) return; // a newer choice won
+    const wsTexts = flatten(r && r.texts);
+    const merged = {};
+    [...files].reverse().forEach((f) => Object.assign(merged, f));
+    Object.assign(merged, wsTexts);
+    this._tx = merged;
+    this._machine = new Set(Array.isArray(r && r.machine) ? r.machine : []); // kept for a later "machine translated" hint
+    // language for Intl (language names, dates): the most specific one that has texts
+    this._uiLang = Object.keys(wsTexts).length ? lang : chain.find((l, i) => Object.keys(files[i]).length) || "en";
+  }
+
+  async _loadUiLangs() {
+    try {
+      const r = await this._hass.callWS({ type: "polyglot_assist/ui_texts/languages" });
+      this._wsLangs = (Array.isArray(r && r.languages) ? r.languages : []).filter(okLang);
+    } catch (e) { this._wsLangs = []; }
+  }
+
+  _cap(n, locale) {
+    try { return n.charAt(0).toLocaleUpperCase(locale) + n.slice(1); } catch (e) { return n.charAt(0).toUpperCase() + n.slice(1); }
+  }
+
+  /** Name of a language in the panel's language, the code if Intl does not know it. */
+  _ln(code) {
+    if (this._dnLang !== this._uiLang) {
+      try { this._dn = new Intl.DisplayNames([this._uiLang], { type: "language" }); } catch (e) { this._dn = null; }
+      this._dnLang = this._uiLang;
+    }
+    let n = null;
+    try { n = this._dn ? this._dn.of(code) : null; } catch (e) { n = null; }
+    return n && n !== code ? this._cap(n, this._uiLang) : String(code ?? "");
+  }
+
+  /** Name of a language in that language (for the language switcher). */
+  _endonym(code) {
+    let n = null;
+    try { n = new Intl.DisplayNames([code], { type: "language" }).of(code); } catch (e) { n = null; }
+    return n && n !== code ? this._cap(n, code) : code;
+  }
+
+  _tip(key) { return `<span class="tip"><button class="info" type="button" aria-label="${esc(this.t("app.explanation"))}" data-tip="${esc(this.t("tips." + key))}">i</button></span>`; }
+  _link(view, key) { return `<a href="#${view}" data-act="tab" data-v="${view}">${esc(this.t(key))}</a>`; }
+  _sec(ms) { return ms != null ? this.t("units.seconds", { n: (ms / 1000).toFixed(1) }) : "–"; }
+  _cat(c) { return c === OTHER ? this.t("categories.other") : c; }
+  _origin(src) { return ORIGINS.includes(src) ? this.t("origins." + src) : ""; }
+  _q(text) { return this.t("messages.quoted", { text }); }
+  _date(v) { try { return new Date(v).toLocaleString(this._uiLang); } catch (e) { return new Date(v).toLocaleString(); } }
+
   async _boot() {
-    this.shadowRoot.innerHTML = `<style>${CSS}</style><div class="loading">Polyglot wird geladen …</div>`;
+    this.shadowRoot.innerHTML = `<style>${CSS}</style><div class="loading">…</div>`;
     this.shadowRoot.addEventListener("click", (e) => this._click(e));
     this.shadowRoot.addEventListener("change", (e) => this._change(e));
     this.shadowRoot.addEventListener("input", (e) => this._input(e));
     this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") this._closeTips(); if (e.key === "Enter" && e.target.id === "tin") this._test(); });
     const hash = location.hash.slice(1);
-    if (L.tabs[hash]) this.s.view = hash;
+    if (TABS.includes(hash)) this.s.view = hash;
+    try { this._uiPref = localStorage.getItem(LS_UI) || ""; } catch (e) { this._uiPref = ""; }
+    if (!okLang(this._uiPref)) this._uiPref = "";
+    await Promise.all([this._loadTexts(), this._loadUiLangs()]);
+    if (!this.s.overview) this.shadowRoot.innerHTML = `<style>${CSS}</style><div class="loading">${esc(this.t("app.loading"))}</div>`;
     try {
       const r = await this._hass.callWS({ type: "polyglot_assist/entries" });
       this.s.entries = r.entries || [];
@@ -154,17 +240,24 @@ class PolyglotAssistPanel extends HTMLElement {
   _msg(key) { const m = this.s.msg[key]; return m ? `<div class="msg ${m.cls}" role="status">${esc(m.text)}</div>` : ""; }
 
   // ── rendering ─────────────────────────────────────────────────────────────
+  _uiSelect() {
+    const langs = [...new Set([...FILE_LANGS, ...this._wsLangs])];
+    if (this._uiPref && !langs.includes(this._uiPref)) langs.push(this._uiPref);
+    const opt = (v, label) => `<option value="${esc(v)}" ${this._uiPref === v ? "selected" : ""}>${esc(label)}</option>`;
+    return `<select class="ui" data-act="uilang" aria-label="${esc(this.t("app.ui_language"))}">${opt("", this.t("app.ui_language_auto"))}${langs.map((l) => opt(l, this._endonym(l))).join("")}</select>`;
+  }
+
   _render() {
     const o = this.s.overview;
     const nProps = (this.s.proposals || []).length;
-    const tabs = Object.entries(L.tabs).map(([k, v]) => `<button data-act="tab" data-v="${k}" ${this.s.view === k ? 'aria-current="page"' : ""}>${v}${k === "proposals" && nProps ? ` <span class="chip pri">${nProps}</span>` : ""}</button>`).join("");
-    const langs = o ? o.languages.map((l) => esc(LANG_NAMES[l] || l)).join(" · ") : "";
-    let body = `<div class="loading">Lädt …</div>`;
-    if (this.s.error) body = `<div class="card"><div class="banner err">Polyglot antwortet nicht: ${esc(this.s.error)}</div><p class="hint">Ist die Integration geladen? Einstellungen → Geräte &amp; Dienste → Polyglot Assist.</p></div>`;
+    const tabs = TABS.map((k) => `<button data-act="tab" data-v="${k}" ${this.s.view === k ? 'aria-current="page"' : ""}>${esc(this.t("tabs." + k))}${k === "proposals" && nProps ? ` <span class="chip pri">${nProps}</span>` : ""}</button>`).join("");
+    const langs = o ? o.languages.map((l) => this._ln(l)).join(" · ") : "";
+    let body = `<div class="loading">${esc(this.t("app.loading_short"))}</div>`;
+    if (this.s.error) body = `<div class="card"><div class="banner err">${esc(this.t("app.no_answer", { error: this.s.error }))}</div><p class="hint">${esc(this.t("app.no_answer_hint"))}</p></div>`;
     else if (o) body = this[`_v_${this.s.view}`]();
     this.shadowRoot.innerHTML = `<style>${CSS}</style>
-      <div class="top"><div class="wrap"><div class="appbar">${this._narrow ? '<button class="menu" data-act="menu" aria-label="Menü">☰</button>' : ""}<h1>${L.title}</h1>${(this.s.entries || []).length > 1 ? `<select data-act="entry" aria-label="Polyglot-Eintrag" style="margin-left:12px">${this.s.entries.map((x) => `<option value="${esc(x.entry_id)}" ${x.entry_id === this.s.entryId ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select>` : ""}<span class="src">${esc(langs)}</span></div>
-      <nav class="tabs" aria-label="Bereiche">${tabs}</nav></div></div>
+      <div class="top"><div class="wrap"><div class="appbar">${this._narrow ? `<button class="menu" data-act="menu" aria-label="${esc(this.t("app.menu"))}">☰</button>` : ""}<h1>${esc(this.t("app.title"))}</h1>${(this.s.entries || []).length > 1 ? `<select data-act="entry" aria-label="${esc(this.t("app.entry"))}" style="margin-left:12px">${this.s.entries.map((x) => `<option value="${esc(x.entry_id)}" ${x.entry_id === this.s.entryId ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select>` : ""}<span class="src">${esc(langs)}</span>${this._uiSelect()}</div>
+      <nav class="tabs" aria-label="${esc(this.t("app.sections"))}">${tabs}</nav></div></div>
       <main class="wrap">${body}</main>`;
   }
 
@@ -174,59 +267,65 @@ class PolyglotAssistPanel extends HTMLElement {
     const props = (this.s.proposals || []).length;
     const hits = Object.values(o.intents).reduce((a, m) => a + (m.hits || 0), 0);
     const today = this.s.monitor && this.s.monitor.today;
+    const t = (k, v) => esc(this.t(k, v));
+    const builtinHint = o.builtin_languages.length ? t("start.builtin_active", { languages: o.builtin_languages.map((l) => this._ln(l)).join(", ") })
+      : (o.options || {}).builtin_commands === false ? `${t("start.builtin_off")} · ${this._link("settings", "start.turn_on")}` : t("start.builtin_unavailable");
+    const kpiSub = (k) => t(o.source === "catalog" ? `kpi.catalog_${k}` : `kpi.file_${k}`);
     return `<section class="grid">
-      <div class="card"><h2>So versteht dein Zuhause mehrere Sprachen${tip("how")}</h2>
-        <div class="step"><span class="dot ok">✓</span><div><b>Sprachen</b><div class="hint">${esc(o.languages.map((l) => LANG_NAMES[l] || l).join(", "))} · <a href="#settings" data-act="tab" data-v="settings">ändern</a></div></div></div>
-        <div class="step"><span class="dot ${o.builtin_languages.length ? "ok" : "warn"}">${o.builtin_languages.length ? "✓" : "!"}</span><div><b>Grundbefehle von Home Assistant</b>${tip("builtin")}<div class="hint">${o.builtin_languages.length ? "aktiv in " + esc(o.builtin_languages.map((l) => LANG_NAMES[l] || l).join(", ")) : (o.options || {}).builtin_commands === false ? "ausgeschaltet · <a href=\"#settings\" data-act=\"tab\" data-v=\"settings\">einschalten</a>" : "nicht verfügbar"}</div></div></div>
-        <div class="step"><span class="dot ${props ? "warn" : "ok"}">${props ? "!" : "✓"}</span><div><b>${props ? props + " Vorschläge warten" : "Keine offenen Vorschläge"}</b><div class="hint"><a href="#proposals" data-act="tab" data-v="proposals">ansehen</a> · Grundstock und neue Geräte findest du dort</div></div></div>
-        <div class="step"><span class="dot pri">${sum.active}</span><div><b>Eigene Befehle</b><div class="hint">${sum.active} aktiv mit ${total} Beispielsätzen · <a href="#commands" data-act="tab" data-v="commands">bearbeiten</a></div></div></div>
-        ${o.problems.length ? `<div class="step"><span class="dot err">!</span><div><b>${o.problems.length} Hinweise in deinen Befehlen</b><div class="hint mono">${o.problems.slice(0, 3).map(esc).join("<br>")}</div></div></div>` : ""}
+      <div class="card"><h2>${t("start.title")}${this._tip("how")}</h2>
+        <div class="step"><span class="dot ok">✓</span><div><b>${t("start.languages")}</b><div class="hint">${esc(o.languages.map((l) => this._ln(l)).join(", "))} · ${this._link("settings", "start.change")}</div></div></div>
+        <div class="step"><span class="dot ${o.builtin_languages.length ? "ok" : "warn"}">${o.builtin_languages.length ? "✓" : "!"}</span><div><b>${t("start.builtin")}</b>${this._tip("builtin")}<div class="hint">${builtinHint}</div></div></div>
+        <div class="step"><span class="dot ${props ? "warn" : "ok"}">${props ? "!" : "✓"}</span><div><b>${props ? t("start.proposals_waiting", { count: props }) : t("start.no_proposals")}</b><div class="hint">${this._link("proposals", "start.view")} · ${t("start.proposals_hint")}</div></div></div>
+        <div class="step"><span class="dot pri">${esc(sum.active)}</span><div><b>${t("start.own_commands")}</b><div class="hint">${t("start.own_commands_hint", { active: sum.active, total })} · ${this._link("commands", "start.edit")}</div></div></div>
+        ${o.problems.length ? `<div class="step"><span class="dot err">!</span><div><b>${t("start.problems", { count: o.problems.length })}</b><div class="hint mono">${o.problems.slice(0, 3).map(esc).join("<br>")}</div></div></div>` : ""}
       </div>
       <div class="grid kpis">
-        <div class="card kpi"><div class="l">Seit Start verstanden</div><div class="v">${hits}</div><div class="sub">sofort, ohne KI</div></div>
-        ${today ? `<div class="card kpi"><div class="l">Heute an die KI</div><div class="v">${today.assistant}</div><div class="sub">von ${today.total} Anfragen</div></div>
-        <div class="card kpi"><div class="l">Antwortzeit</div><div class="v">${today.hit_ms_p50 != null ? (today.hit_ms_p50 / 1000).toFixed(1) + " s" : "–"}</div><div class="sub">eigener Befehl · KI ${today.assistant_ms_p50 != null ? (today.assistant_ms_p50 / 1000).toFixed(1) + " s" : "–"}</div></div>` : `<div class="card kpi"><div class="l">Überwachung</div><div class="v">aus</div><div class="sub"><a href="#monitor" data-act="tab" data-v="monitor">einschalten</a></div></div>`}
-        <div class="card kpi"><div class="l">Quelle</div><div class="v">${o.source === "catalog" ? "Katalog" : "Datei"}</div><div class="sub">${o.source === "catalog" ? "in Home Assistant gespeichert" : "intents.yaml – Panel-Änderungen brauchen den Katalog"}</div></div>
+        <div class="card kpi"><div class="l">${t("kpi.understood")}</div><div class="v">${hits}</div><div class="sub">${t("kpi.understood_sub")}</div></div>
+        ${today ? `<div class="card kpi"><div class="l">${t("kpi.to_ai")}</div><div class="v">${esc(today.assistant)}</div><div class="sub">${t("kpi.to_ai_sub", { total: today.total })}</div></div>
+        <div class="card kpi"><div class="l">${t("kpi.response_time")}</div><div class="v">${esc(this._sec(today.hit_ms_p50))}</div><div class="sub">${t("kpi.response_time_sub", { time: this._sec(today.assistant_ms_p50) })}</div></div>` : `<div class="card kpi"><div class="l">${t("kpi.monitor")}</div><div class="v">${t("kpi.monitor_off")}</div><div class="sub">${this._link("monitor", "start.turn_on")}</div></div>`}
+        <div class="card kpi"><div class="l">${t("kpi.source")}</div><div class="v">${kpiSub("name")}</div><div class="sub">${kpiSub("sub")}</div></div>
       </div></section>`;
   }
 
   _v_proposals() {
+    const t = (k, v) => esc(this.t(k, v));
     const items = (this.s.proposals || []).filter((i) => (!this.s.propFilter || i.origin?.source === this.s.propFilter) && (!this.s.kindFilter || OP_KIND[i.op] === this.s.kindFilter));
     const readonly = this.s.overview.source !== "catalog";
     const rows = items.map((i) => {
       const st = i.check?.status || "ok";
-      const stLabel = st === "ok" ? "geprüft" : st === "warn" ? "Hinweis" : "Fehler";
-      const kind = OP_KIND[i.op] || "ändern";
+      const stLabel = st === "ok" ? t("proposals.status_ok") : st === "warn" ? t("proposals.status_warn") : t("proposals.status_error");
+      const kind = OP_KIND[i.op] || "change";
       const p = i.payload || {};
       const ex = p.sentences ? p.sentences.join(" · ") : p.names ? p.names.join(" · ") : p.intent?.sentences ? Object.values(p.intent.sentences).flat().slice(0, 3).join(" · ") : p.field ? `${p.field} = ${JSON.stringify(p.value)}` : p.in ? `${p.in} → ${p.out ?? "–"}` : "";
-      return `<div class="qrow"><input type="checkbox" data-pid="${esc(i.id)}" ${st === "err" || st === "error" ? "disabled" : ""} aria-label="Auswählen">
-        <div><span class="chip ${kind === "neu" ? "ok" : kind === "entfernen" ? "warn" : "pri"}">${kind}</span> <b>${esc(i.title || i.op)}</b> <span class="chip ${st === "ok" ? "ok" : st === "warn" ? "warn" : "err"}">${stLabel}</span>
-        <div class="hint"><b>Woher:</b> ${esc(i.origin?.detail || ORIGIN[i.origin?.source] || "")}</div>
+      return `<div class="qrow"><input type="checkbox" data-pid="${esc(i.id)}" ${st === "err" || st === "error" ? "disabled" : ""} aria-label="${t("proposals.select")}">
+        <div><span class="chip ${kind === "new" ? "ok" : kind === "remove" ? "warn" : "pri"}">${t("kinds." + kind)}</span> <b>${esc(i.title || i.op)}</b> <span class="chip ${st === "ok" ? "ok" : st === "warn" ? "warn" : "err"}">${stLabel}</span>
+        <div class="hint"><b>${t("proposals.origin_label")}</b> ${esc(i.origin?.detail || this._origin(i.origin?.source))}</div>
         ${(i.check?.notes || []).length ? `<div class="hint">${esc(i.check.notes.join("; "))}</div>` : ""}
-        ${ex ? `<div class="ex">${esc(ex)}</div>` : ""}</div><span class="chip pri">${esc(ORIGIN[i.origin?.source] || "")}</span></div>`;
+        ${ex ? `<div class="ex">${esc(ex)}</div>` : ""}</div><span class="chip pri">${esc(this._origin(i.origin?.source))}</span></div>`;
     }).join("");
     return `<section class="grid"><div class="card">
-      <div class="row" style="justify-content:space-between"><h2 style="margin:0">Vorschläge${tip("proposals")}</h2>
-        <div class="row"><button class="b" data-act="pall">Alle geprüften auswählen</button><button class="b p" data-act="paccept" ${readonly ? "disabled" : ""}>Ausgewählte übernehmen</button><button class="b" data-act="preject">Ablehnen</button></div></div>
-      ${readonly ? `<div class="banner warn" style="margin-top:10px">Deine Befehle liegen noch in der Datei intents.yaml. Zum Übernehmen von Vorschlägen stelle unter Einstellungen die Quelle auf „Katalog“ (die Datei bleibt als Sicherung).</div>` : ""}
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">${t("proposals.title")}${this._tip("proposals")}</h2>
+        <div class="row"><button class="b" data-act="pall">${t("buttons.select_checked")}</button><button class="b p" data-act="paccept" ${readonly ? "disabled" : ""}>${t("buttons.accept_selected")}</button><button class="b" data-act="preject">${t("buttons.reject")}</button></div></div>
+      ${readonly ? `<div class="banner warn" style="margin-top:10px">${t("proposals.readonly")}</div>` : ""}
       <div class="row" style="margin-top:12px">
-        <button class="b" data-act="gen" data-what="starter">Grundstock anlegen</button>${tip("starter")}
-        <button class="b" data-act="gen" data-what="new_devices">Neue Geräte prüfen</button>${tip("newdev")}
-        <select data-bind="propFilter" aria-label="Herkunft"><option value="">Alle Herkünfte</option>${Object.entries(ORIGIN).map(([k, v]) => `<option value="${k}" ${this.s.propFilter === k ? "selected" : ""}>${v}</option>`).join("")}</select>
-        <select data-bind="kindFilter" aria-label="Art"><option value="">Alle Arten</option>${["neu", "ändern", "entfernen"].map((k) => `<option ${this.s.kindFilter === k ? "selected" : ""}>${k}</option>`).join("")}</select>
+        <button class="b" data-act="gen" data-what="starter">${t("buttons.starter")}</button>${this._tip("starter")}
+        <button class="b" data-act="gen" data-what="new_devices">${t("buttons.new_devices")}</button>${this._tip("newdev")}
+        <select data-bind="propFilter" aria-label="${t("proposals.origin")}"><option value="">${t("proposals.all_origins")}</option>${ORIGINS.map((k) => `<option value="${k}" ${this.s.propFilter === k ? "selected" : ""}>${t("origins." + k)}</option>`).join("")}</select>
+        <select data-bind="kindFilter" aria-label="${t("proposals.kind")}"><option value="">${t("proposals.all_kinds")}</option>${["new", "change", "remove"].map((k) => `<option value="${k}" ${this.s.kindFilter === k ? "selected" : ""}>${t("kinds." + k)}</option>`).join("")}</select>
       </div>${this._msg("prop")}
-      ${rows || `<p class="hint" style="margin-top:16px">Keine Vorschläge. Starte mit „Grundstock anlegen“ oder „Neue Geräte prüfen“.</p>`}
+      ${rows || `<p class="hint" style="margin-top:16px">${t("proposals.empty", { starter: this.t("buttons.starter"), new_devices: this.t("buttons.new_devices") })}</p>`}
     </div></section>`;
   }
 
   _groupKey(meta) {
-    if (this.s.group === "category") return meta.category || "Sonstiges";
-    if (this.s.group === "room") return meta.rooms.length === 1 ? meta.rooms[0] : meta.rooms.length ? "Mehrere Räume" : "Ohne Raum";
-    if (this.s.group === "device") return meta.devices.length === 1 ? meta.devices[0] : meta.devices.length ? "Mehrere Geräte" : "Ohne Gerät";
+    if (this.s.group === "category") return this._cat(meta.category || OTHER);
+    if (this.s.group === "room") return meta.rooms.length === 1 ? meta.rooms[0] : meta.rooms.length ? this.t("groups.several_rooms") : this.t("groups.no_room");
+    if (this.s.group === "device") return meta.devices.length === 1 ? meta.devices[0] : meta.devices.length ? this.t("groups.several_devices") : this.t("groups.no_device");
     return "";
   }
 
   _v_commands() {
+    const t = (k, v) => esc(this.t(k, v));
     const o = this.s.overview, q = this.s.query.toLowerCase();
     const langs = Object.keys(o.summary.sentences || {});
     const entries = Object.entries(o.intents).filter(([n, m]) => (!q || n.toLowerCase().includes(q) || (m.description || "").toLowerCase().includes(q)) &&
@@ -234,12 +333,12 @@ class PolyglotAssistPanel extends HTMLElement {
        (this.s.filter === "gap" && Math.min(...langs.map((l) => m.sentences[l] || 0)) < Math.max(...langs.map((l) => m.sentences[l] || 0)) * 0.5)));
     const groups = {};
     entries.forEach(([n, m]) => (groups[this._groupKey(m)] ||= []).push([n, m]));
-    const cats = [...new Set([...(o.categories || []), ...Object.values(o.intents).map((m) => m.category).filter(Boolean), "Sonstiges"])];
+    const cats = [...new Set([...(o.categories || []), ...Object.values(o.intents).map((m) => m.category).filter(Boolean), OTHER])];
     const row = ([n, m]) => {
       const max = Math.max(1, ...langs.map((l) => m.sentences[l] || 0));
       const cov = langs.map((l) => { const c = m.sentences[l] || 0; return `${esc(l.toUpperCase())} <span class="lang ${c === 0 ? "err" : c < Math.max(2, max * 0.5) ? "warn" : "ok"}">${c}</span>`; }).join(" ");
       return `<tr class="click" data-act="open" data-name="${esc(n)}"><td><div class="name">${esc(n)}</div><div class="desc">${esc(m.description)}</div></td><td>${cov}</td>
-        <td><select data-act="safety" data-name="${esc(n)}" aria-label="Schutz">${Object.entries(SAFETY).map(([k, v]) => `<option value="${k}" ${m.safety === k ? "selected" : ""}>${v}</option>`).join("")}</select></td>
+        <td><select data-act="safety" data-name="${esc(n)}" aria-label="${t("commands.safety")}">${SAFETY.map((k) => `<option value="${k}" ${m.safety === k ? "selected" : ""}>${t("safety." + k)}</option>`).join("")}</select></td>
         <td style="text-align:right">${m.hits || "–"}</td></tr>`;
     };
     const table = Object.keys(groups).sort().map((g) => (g ? `<tr><th class="group" colspan="4">${esc(g)} · ${groups[g].length}</th></tr>` : "") + groups[g].map(row).join("")).join("");
@@ -247,27 +346,29 @@ class PolyglotAssistPanel extends HTMLElement {
       ${this.s.selected ? this._editor(this.s.selected, cats) : ""}
       <div class="card">
       <div class="row">
-        <input type="search" data-bind="query" value="${esc(this.s.query)}" placeholder="Befehl suchen" aria-label="Befehl suchen">
-        <label class="hint" for="grp">Gruppieren nach</label><select id="grp" data-bind="group">${[["category", "Art"], ["room", "Raum"], ["device", "Gerät"], ["", "keine Gruppen"]].map(([k, v]) => `<option value="${k}" ${this.s.group === k ? "selected" : ""}>${v}</option>`).join("")}</select>${tip("groups")}
-        <select data-bind="filter" aria-label="Filter"><option value="">Alle</option><option value="gap" ${this.s.filter === "gap" ? "selected" : ""}>Sprache fehlt</option><option value="sensitive" ${this.s.filter === "sensitive" ? "selected" : ""}>Sicherheitsrelevant</option><option value="off" ${this.s.filter === "off" ? "selected" : ""}>Ausgeschaltet</option></select>
-        <button class="b" data-act="cats">Arten verwalten</button>
-        <span class="hint">${entries.length} von ${Object.keys(o.intents).length}</span>
+        <input type="search" data-bind="query" value="${esc(this.s.query)}" placeholder="${t("commands.search")}" aria-label="${t("commands.search")}">
+        <label class="hint" for="grp">${t("commands.group_by")}</label><select id="grp" data-bind="group">${[["category", "commands.group_category"], ["room", "commands.group_room"], ["device", "commands.group_device"], ["", "commands.group_none"]].map(([k, v]) => `<option value="${k}" ${this.s.group === k ? "selected" : ""}>${t(v)}</option>`).join("")}</select>${this._tip("groups")}
+        <select data-bind="filter" aria-label="${t("commands.filter")}"><option value="">${t("commands.filter_all")}</option><option value="gap" ${this.s.filter === "gap" ? "selected" : ""}>${t("commands.filter_gap")}</option><option value="sensitive" ${this.s.filter === "sensitive" ? "selected" : ""}>${t("commands.filter_sensitive")}</option><option value="off" ${this.s.filter === "off" ? "selected" : ""}>${t("commands.filter_off")}</option></select>
+        <button class="b" data-act="cats">${t("categories.manage")}</button>
+        <span class="hint">${t("commands.count", { shown: entries.length, total: Object.keys(o.intents).length })}</span>
       </div>${this._msg("cmd")}
       ${this.s.catsOpen ? this._catsBox(cats) : ""}
-      <div class="tbl" style="margin-top:12px"><table><thead><tr><th>Befehl</th><th>Sätze je Sprache${tip("coverage")}</th><th>Schutz${tip("safety")}</th><th style="text-align:right">Treffer</th></tr></thead><tbody>${table}</tbody></table></div>
+      <div class="tbl" style="margin-top:12px"><table><thead><tr><th>${t("commands.col_command")}</th><th>${t("commands.col_sentences")}${this._tip("coverage")}</th><th>${t("commands.safety")}${this._tip("safety")}</th><th style="text-align:right">${t("commands.col_hits")}</th></tr></thead><tbody>${table}</tbody></table></div>
     </div></section>`;
   }
 
   _catsBox(cats) {
+    const t = (k, v) => esc(this.t(k, v));
     const counts = {};
-    Object.values(this.s.overview.intents).forEach((m) => { const c = m.category || "Sonstiges"; counts[c] = (counts[c] || 0) + 1; });
-    this.s.catEdit ||= cats.filter((c) => c !== "Sonstiges").map((c) => ({ from: c, to: c }));
-    return `<div class="card" style="margin-top:12px;background:var(--primary-background-color)"><h2>Arten verwalten${tip("cats")}</h2>
-      <div class="grid" style="gap:6px">${this.s.catEdit.map((c, i) => `<div class="row"><input type="text" data-cat="${i}" value="${esc(c.to)}" aria-label="Art umbenennen" style="flex:1;min-width:0"><span class="hint">${counts[c.from] || 0} Befehle</span><button class="b" data-act="catdel" data-i="${i}">Löschen</button></div>`).join("")}</div>
-      <div class="row" style="margin-top:8px"><input type="text" id="newcat" placeholder="Neue Art, z. B. Garten" aria-label="Neue Art"><button class="b" data-act="catadd">Hinzufügen</button><button class="b p" data-act="catsave">Arten speichern</button></div></div>`;
+    Object.values(this.s.overview.intents).forEach((m) => { const c = m.category || OTHER; counts[c] = (counts[c] || 0) + 1; });
+    this.s.catEdit ||= cats.filter((c) => c !== OTHER).map((c) => ({ from: c, to: c }));
+    return `<div class="card" style="margin-top:12px;background:var(--primary-background-color)"><h2>${t("categories.manage")}${this._tip("cats")}</h2>
+      <div class="grid" style="gap:6px">${this.s.catEdit.map((c, i) => `<div class="row"><input type="text" data-cat="${i}" value="${esc(c.to)}" aria-label="${t("categories.rename")}" style="flex:1;min-width:0"><span class="hint">${t("categories.count", { count: counts[c.from] || 0 })}</span><button class="b" data-act="catdel" data-i="${i}">${t("buttons.delete")}</button></div>`).join("")}</div>
+      <div class="row" style="margin-top:8px"><input type="text" id="newcat" placeholder="${t("categories.new_placeholder")}" aria-label="${t("categories.new")}"><button class="b" data-act="catadd">${t("buttons.add")}</button><button class="b p" data-act="catsave">${t("buttons.save_categories")}</button></div></div>`;
   }
 
   _editor(name, cats) {
+    const t = (k, v) => esc(this.t(k, v));
     const intent = (this.s.data?.data?.intents || {})[name];
     if (!intent) return "";
     const langs = Object.keys(this.s.overview.summary.sentences || {});
@@ -275,45 +376,47 @@ class PolyglotAssistPanel extends HTMLElement {
     const lang = this.s.lang && langs.includes(this.s.lang) ? this.s.lang : langs[0];
     const sents = ((intent.sentences || {})[lang] || []).join("\n");
     const ro = this.s.overview.source !== "catalog";
-    return `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(name)}</h2><button class="b" data-act="close">Schließen</button></div>
+    return `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(name)}</h2><button class="b" data-act="close">${t("buttons.close")}</button></div>
       <p class="hint">${esc(intent.description || "")}</p>
-      ${intent.safety === "sensitive" ? `<div class="banner warn">Sicherheitsrelevanter Befehl: Änderungen bitte genau prüfen.</div>` : ""}
-      <div class="row" style="margin:10px 0">${langs.map((l) => `<button class="b" data-act="elang" data-l="${esc(l)}" aria-pressed="${l === lang}" style="${l === lang ? "border-color:var(--primary-color)" : ""}">${esc(LANG_NAMES[l] || l)} · ${((intent.sentences || {})[l] || []).length}</button>`).join("")}</div>
-      <textarea id="esents" aria-label="Sätze, einer pro Zeile">${esc(sents)}</textarea>
-      <p class="hint">${esc(TIPS.syntax)}</p>
+      ${intent.safety === "sensitive" ? `<div class="banner warn">${t("editor.sensitive")}</div>` : ""}
+      <div class="row" style="margin:10px 0">${langs.map((l) => `<button class="b" data-act="elang" data-l="${esc(l)}" aria-pressed="${l === lang}" style="${l === lang ? "border-color:var(--primary-color)" : ""}">${esc(this._ln(l))} · ${((intent.sentences || {})[l] || []).length}</button>`).join("")}</div>
+      <textarea id="esents" aria-label="${t("editor.sentences")}">${esc(sents)}</textarea>
+      <p class="hint">${t("tips.syntax", { placeholder: `{${this.t("tips.syntax_placeholder")}}` })}</p>
       <div class="row">
-        <label class="hint">Art <select id="ecat">${cats.map((c) => `<option ${((intent.category || "Sonstiges") === c) ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
-        <label class="hint">Typ <select id="ekind"><option value="">–</option><option value="command" ${intent.kind === "command" ? "selected" : ""}>Schaltbefehl</option><option value="question" ${intent.kind === "question" ? "selected" : ""}>Frage</option></select></label>${tip("kind")}
-        <label class="hint">Antwort <select id="eresp"><option value="">wie eingestellt</option><option value="text" ${intent.response_mode === "text" ? "selected" : ""}>Sprechen</option><option value="chime" ${intent.response_mode === "chime" ? "selected" : ""}>Ton</option></select></label>${tip("answer")}
-        <label class="hint">Schutz <select id="esafety">${Object.entries(SAFETY).map(([k, v]) => `<option value="${k}" ${(intent.safety || "normal") === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>${tip("safety")}
+        <label class="hint">${t("editor.category")} <select id="ecat">${cats.map((c) => `<option value="${esc(c)}" ${((intent.category || OTHER) === c) ? "selected" : ""}>${esc(this._cat(c))}</option>`).join("")}</select></label>
+        <label class="hint">${t("editor.type")} <select id="ekind"><option value="">–</option><option value="command" ${intent.kind === "command" ? "selected" : ""}>${t("editor.type_command")}</option><option value="question" ${intent.kind === "question" ? "selected" : ""}>${t("editor.type_question")}</option></select></label>${this._tip("kind")}
+        <label class="hint">${t("editor.answer")} <select id="eresp"><option value="">${t("editor.answer_default")}</option><option value="text" ${intent.response_mode === "text" ? "selected" : ""}>${t("answer.text")}</option><option value="chime" ${intent.response_mode === "chime" ? "selected" : ""}>${t("answer.chime")}</option></select></label>${this._tip("answer")}
+        <label class="hint">${t("commands.safety")} <select id="esafety">${SAFETY.map((k) => `<option value="${k}" ${(intent.safety || "normal") === k ? "selected" : ""}>${t("safety." + k)}</option>`).join("")}</select></label>${this._tip("safety")}
       </div>
-      <div class="row" style="margin-top:12px"><button class="b p" data-act="esave" data-name="${esc(name)}" data-lang="${esc(lang)}" ${ro ? "disabled" : ""}>Speichern</button>
-        ${missing.length ? `<button class="b" data-act="etrans" data-name="${esc(name)}" data-langs="${esc(missing.join(","))}">Übersetzen nach ${esc(missing.map((l) => LANG_NAMES[l] || l).join(", "))}</button>` : `<button class="b" data-act="etrans" data-name="${esc(name)}" data-langs="${esc(langs.filter((l) => l !== lang).join(","))}">Mehr Varianten vorschlagen</button>`}
-        <button class="b" data-act="edel" data-name="${esc(name)}" ${ro ? "disabled" : ""}>Löschen</button>
-        ${ro ? `<span class="hint">Zum Bearbeiten im Panel unter Einstellungen die Quelle „Katalog“ wählen.</span>` : ""}</div>
-      ${this.s.confirmDelete === name ? `<div class="banner err" style="margin-top:10px">„${esc(name)}“ wirklich löschen? Er ist danach nicht mehr verfügbar. <button class="b" data-act="edelyes" data-name="${esc(name)}">Ja, löschen</button> <button class="b" data-act="edelno">Abbrechen</button></div>` : ""}
+      <div class="row" style="margin-top:12px"><button class="b p" data-act="esave" data-name="${esc(name)}" data-lang="${esc(lang)}" ${ro ? "disabled" : ""}>${t("buttons.save")}</button>
+        ${missing.length ? `<button class="b" data-act="etrans" data-name="${esc(name)}" data-langs="${esc(missing.join(","))}">${t("buttons.translate_to", { languages: missing.map((l) => this._ln(l)).join(", ") })}</button>` : `<button class="b" data-act="etrans" data-name="${esc(name)}" data-langs="${esc(langs.filter((l) => l !== lang).join(","))}">${t("buttons.more_variants")}</button>`}
+        <button class="b" data-act="edel" data-name="${esc(name)}" ${ro ? "disabled" : ""}>${t("buttons.delete")}</button>
+        ${ro ? `<span class="hint">${t("editor.readonly")}</span>` : ""}</div>
+      ${this.s.confirmDelete === name ? `<div class="banner err" style="margin-top:10px">${t("editor.confirm_delete", { name })} <button class="b" data-act="edelyes" data-name="${esc(name)}">${t("buttons.yes_delete")}</button> <button class="b" data-act="edelno">${t("buttons.cancel")}</button></div>` : ""}
       ${this._msg("edit")}</div>`;
   }
 
   _v_test() {
+    const t = (k, v) => esc(this.t(k, v));
     const r = this.s.testResult;
-    const res = r === undefined ? "" : r ? `<span class="chip ok">Verstanden</span><dl><dt>Befehl</dt><dd>${esc(r.intent)}</dd><dt>Sprache</dt><dd>${esc(LANG_NAMES[r.lang] || r.lang)}</dd><dt>Erkannt</dt><dd>${Object.entries(r.slots || {}).filter(([k]) => k !== "lang").map(([k, v]) => esc(k + " = " + (v.text || v.value))).join("<br>") || "–"}</dd><dt>Satz</dt><dd>${esc(r.sentence)}</dd></dl>`
-      : `<span class="chip warn">Nicht als eigener Befehl erkannt</span><p class="hint">Polyglot prüft dann die Grundbefehle von Home Assistant; sonst geht der Satz an deinen KI-Assistenten (${esc(this.s.overview.fallback_agent)}).</p>`;
+    const res = r === undefined ? "" : r ? `<span class="chip ok">${t("test.understood")}</span><dl><dt>${t("test.command")}</dt><dd>${esc(r.intent)}</dd><dt>${t("test.language")}</dt><dd>${esc(this._ln(r.lang))}</dd><dt>${t("test.detected")}</dt><dd>${Object.entries(r.slots || {}).filter(([k]) => k !== "lang").map(([k, v]) => esc(k + " = " + (v.text || v.value))).join("<br>") || "–"}</dd><dt>${t("test.sentence")}</dt><dd>${esc(r.sentence)}</dd></dl>`
+      : `<span class="chip warn">${t("test.not_recognized")}</span><p class="hint">${t("test.fallback_hint", { agent: this.s.overview.fallback_agent })}</p>`;
     const c = this.s.corpus;
-    return `<section class="grid two"><div class="card"><h2>Satz ausprobieren${tip("test")}</h2>
-      <div class="row"><input type="text" id="tin" value="${esc(this.s.testText || "")}" placeholder="z. B. Schalt die Küchendecke aus" style="flex:1;min-width:0" aria-label="Testsatz">
-      <select id="tlang" aria-label="Sprache der Pipeline">${this.s.overview.languages.map((l) => `<option value="${esc(l)}">${esc(LANG_NAMES[l] || l)}</option>`).join("")}</select>
-      <button class="b p" data-act="test">Ausprobieren</button></div><div class="msg">${res}</div></div>
-      <div class="card"><h2>Prüfsätze${tip("corpus")}</h2>
-      ${c ? (c.error ? `<div class="banner err">${esc(c.error)}</div>` : `<div class="banner ${c.failed.length ? "warn" : "ok"}">${c.passed} von ${c.total} Sätzen wie erwartet</div>${c.failed.slice(0, 8).map((f) => `<div class="hint mono">„${esc(f.text)}“: erwartet ${esc(f.expected.intent)}, erkannt ${esc((f.got || {}).intent)}</div>`).join("")}`) : `<p class="hint">Noch nicht geprüft.</p>`}
-      <button class="b" data-act="corpus" style="margin-top:8px">Jetzt prüfen</button></div></section>`;
+    return `<section class="grid two"><div class="card"><h2>${t("test.title")}${this._tip("test")}</h2>
+      <div class="row"><input type="text" id="tin" value="${esc(this.s.testText || "")}" placeholder="${t("test.placeholder")}" style="flex:1;min-width:0" aria-label="${t("test.input")}">
+      <select id="tlang" aria-label="${t("test.pipeline_language")}">${this.s.overview.languages.map((l) => `<option value="${esc(l)}">${esc(this._ln(l))}</option>`).join("")}</select>
+      <button class="b p" data-act="test">${t("buttons.try")}</button></div><div class="msg">${res}</div></div>
+      <div class="card"><h2>${t("corpus.title")}${this._tip("corpus")}</h2>
+      ${c ? (c.error ? `<div class="banner err">${esc(c.error)}</div>` : `<div class="banner ${c.failed.length ? "warn" : "ok"}">${t("corpus.result", { passed: c.passed, total: c.total })}</div>${c.failed.slice(0, 8).map((f) => `<div class="hint mono">${t("corpus.failed", { text: f.text, expected: f.expected.intent, got: (f.got || {}).intent })}</div>`).join("")}`) : `<p class="hint">${t("corpus.not_run")}</p>`}
+      <button class="b" data-act="corpus" style="margin-top:8px">${t("buttons.check_now")}</button></div></section>`;
   }
 
   _v_names() {
+    const t = (k, v) => esc(this.t(k, v));
     const names = this.s.data?.data?.names || {};
     const langs = this.s.overview.languages;
     const areas = Object.values(this._hass.areas || {});
-    const targets = [...areas.map((a) => [`area.${a.area_id}`, a.name, "Raum"]), ...Object.keys(names).filter((t) => !t.startsWith("area.")).map((t) => [t, this._hass.states[t]?.attributes?.friendly_name || t, t.split(".")[0]])];
+    const targets = [...areas.map((a) => [`area.${a.area_id}`, a.name, this.t("names.room")]), ...Object.keys(names).filter((x) => !x.startsWith("area.")).map((x) => [x, this._hass.states[x]?.attributes?.friendly_name || x, x.split(".")[0]])];
     const sugg = this.s.nameSugg || {};
     const ro = this.s.overview.source !== "catalog";
     const rows = targets.map(([id, label, kind]) => `<tr><td><span class="name">${esc(label)}</span><div class="desc">${esc(kind)}</div></td>${langs.map((l) => {
@@ -322,55 +425,63 @@ class PolyglotAssistPanel extends HTMLElement {
       const sHtml = Array.isArray(s) ? s.filter((x) => x.status === "ok").map((x) => `<button class="b" data-act="nadd" data-t="${esc(id)}" data-l="${esc(l)}" data-n="${esc(x.name)}" style="padding:2px 8px;margin-top:4px">+ ${esc(x.name)}</button>`).join(" ") : "";
       return `<td><input type="text" data-name-t="${esc(id)}" data-name-l="${esc(l)}" value="${esc(cur)}" aria-label="${esc(label)} ${esc(l)}" ${ro ? "disabled" : ""} style="width:100%">${sHtml}</td>`;
     }).join("")}</tr>`).join("");
-    return `<section class="grid"><div class="card"><h2>Namen in jeder Sprache${tip("names")}</h2>
-      <div class="row"><input type="text" id="newtarget" placeholder="Gerät hinzufügen, z. B. light.couch" aria-label="Gerät"><button class="b" data-act="ntarget">Hinzufügen</button>
-      <button class="b" data-act="nsugg" style="margin-left:auto">Lücken vorschlagen lassen</button></div>${this._msg("names")}
-      <p class="hint">Mehrere Namen mit Komma trennen. Gespeichert wird beim Verlassen des Feldes.</p>
-      <div class="tbl"><table><thead><tr><th>Raum / Gerät</th>${langs.map((l) => `<th>${esc(LANG_NAMES[l] || l)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></div></section>`;
+    return `<section class="grid"><div class="card"><h2>${t("names.title")}${this._tip("names")}</h2>
+      <div class="row"><input type="text" id="newtarget" placeholder="${t("names.add_placeholder")}" aria-label="${t("names.device")}"><button class="b" data-act="ntarget">${t("buttons.add")}</button>
+      <button class="b" data-act="nsugg" style="margin-left:auto">${t("buttons.suggest_gaps")}</button></div>${this._msg("names")}
+      <p class="hint">${t("names.hint")}</p>
+      <div class="tbl"><table><thead><tr><th>${t("names.col_target")}</th>${langs.map((l) => `<th>${esc(this._ln(l))}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></div></section>`;
   }
 
   _v_monitor() {
+    const t = (k, v) => esc(this.t(k, v));
     const m = this.s.monitor;
-    if (!m) { this._reload(["monitor"]); return `<div class="loading">Lädt …</div>`; }
+    if (!m) { this._reload(["monitor"]); return `<div class="loading">${t("app.loading_short")}</div>`; }
     const opts = this.s.overview.options || {};
-    const sw = `<div class="set" style="padding-top:0"><div><div class="t">Sprechfluss überwachen${tip("monitor")}</div><div class="hint">Täglich auswerten um <input type="time" id="mtime" value="${esc(opts.monitor_time || "03:00")}" aria-label="Uhrzeit"></div></div>
-      <button class="switch" role="switch" data-act="opt" data-k="monitor" aria-checked="${m.enabled ? "true" : "false"}" aria-label="Überwachung"></button></div>`;
+    const sw = `<div class="set" style="padding-top:0"><div><div class="t">${t("monitor.title")}${this._tip("monitor")}</div><div class="hint">${t("monitor.daily_at")} <input type="time" id="mtime" value="${esc(opts.monitor_time || "03:00")}" aria-label="${t("monitor.time")}"></div></div>
+      <button class="switch" role="switch" data-act="opt" data-k="monitor" aria-checked="${m.enabled ? "true" : "false"}" aria-label="${t("monitor.switch")}"></button></div>`;
     if (!m.enabled) return `<section class="grid"><div class="card">${sw}${this._msg("mon")}</div></section>`;
     const s = m.summary || {};
-    const log = (m.log || []).slice(0, 40).map((e) => `<tr><td class="hint">${esc(new Date(e.ts).toLocaleString())}</td><td>${esc(e.text)}</td><td><span class="chip ${e.error ? "err" : e.result === "hit" ? "ok" : "pri"}">${e.error ? "Fehler" : e.result === "hit" ? (e.builtin ? "Grundbefehl" : "sofort") : "KI"}</span></td><td class="hint">${e.ms != null ? (e.ms / 1000).toFixed(1) + " s" : ""}</td></tr>`).join("");
+    const log = (m.log || []).slice(0, 40).map((e) => `<tr><td class="hint">${esc(this._date(e.ts))}</td><td>${esc(e.text)}</td><td><span class="chip ${e.error ? "err" : e.result === "hit" ? "ok" : "pri"}">${e.error ? t("monitor.result_error") : e.result === "hit" ? (e.builtin ? t("monitor.result_builtin") : t("monitor.result_hit")) : t("monitor.result_ai")}</span></td><td class="hint">${e.ms != null ? esc(this._sec(e.ms)) : ""}</td></tr>`).join("");
     return `<section class="grid two"><div class="card">${sw}
-      <h2 style="margin-top:12px">Letzte Auswertung</h2>
-      ${s.when ? `<p class="hint">${esc(new Date(s.when).toLocaleString())} · ${s.total} Anfragen, ${s.hits} sofort, ${s.assistant} an die KI, ${s.proposals} Vorschläge</p>
-      <ul class="hint" style="padding-left:18px">${(s.repeated || []).map((r) => `<li>„${esc(r.text)}“ ging ${r.count}× an die KI</li>`).join("")}${(s.corrections || []).map((c) => `<li>Möglicherweise falsch verstanden: „${esc(c.before)}“ → danach „${esc(c.correction)}“</li>`).join("")}</ul>` : `<p class="hint">Noch keine Auswertung.</p>`}
-      <button class="b" data-act="monrun">Jetzt auswerten</button>${this._msg("mon")}</div>
-      <div class="card"><h2>Protokoll</h2><div class="tbl"><table><tbody>${log || `<tr><td class="hint">Noch keine Einträge.</td></tr>`}</tbody></table></div></div></section>`;
+      <h2 style="margin-top:12px">${t("monitor.last_run")}</h2>
+      ${s.when ? `<p class="hint">${t("monitor.summary", { when: this._date(s.when), total: s.total, hits: s.hits, assistant: s.assistant, proposals: s.proposals })}</p>
+      <ul class="hint" style="padding-left:18px">${(s.repeated || []).map((r) => `<li>${t("monitor.repeated", { text: r.text, count: r.count })}</li>`).join("")}${(s.corrections || []).map((c) => `<li>${t("monitor.correction", { before: c.before, after: c.correction })}</li>`).join("")}</ul>` : `<p class="hint">${t("monitor.no_run")}</p>`}
+      <button class="b" data-act="monrun">${t("buttons.analyse_now")}</button>${this._msg("mon")}</div>
+      <div class="card"><h2>${t("monitor.log")}</h2><div class="tbl"><table><tbody>${log || `<tr><td class="hint">${t("monitor.no_log")}</td></tr>`}</tbody></table></div></div></section>`;
   }
 
   _v_settings() {
+    const t = (k, v) => esc(this.t(k, v));
     const o = this.s.overview, opts = o.options || {};
     const available = Object.keys(o.summary.sentences || {});
     const enabled = opts.languages_enabled && opts.languages_enabled.length ? opts.languages_enabled : available;
     const aiTasks = Object.keys(this._hass.states).filter((e) => e.startsWith("ai_task."));
     const mode = opts.response_mode || "text";
-    return `<section class="grid two"><div class="card"><h2>Einstellungen</h2>
-      <div class="set"><div><div class="t">Sprachen${tip("languages")}</div>
-        <div class="langs" style="margin-top:6px">${available.map((l) => `<label><input type="checkbox" data-lang-opt="${esc(l)}" ${enabled.includes(l) ? "checked" : ""}> ${esc(LANG_NAMES[l] || l)}</label>`).join("")}</div>
-        <div class="row" style="margin-top:8px"><button class="b" data-act="langsave">Sprachen speichern</button><button class="b" data-act="langsugg">Welche Sprachen kann meine KI?</button></div>
-        ${this.s.langSugg ? `<p class="hint">Deine KI nennt: ${esc(this.s.langSugg.map((l) => LANG_NAMES[l] || l).join(", "))}. Für neue Sprachen schlägt „Übersetzen“ im Befehl Sätze vor.</p>` : ""}</div><span></span></div>
-      <div class="set"><div><div class="t">Bestätigung bei Schaltbefehlen${tip("answer")}</div></div>
-        <div class="seg" role="group" aria-label="Bestätigung"><button data-act="opt" data-k="response_mode" data-v="text" aria-pressed="${mode === "text"}">Sprechen</button><button data-act="opt" data-k="response_mode" data-v="chime" aria-pressed="${mode === "chime"}">Ton</button></div></div>
-      <div class="set"><div><div class="t">KI für Vorschläge${tip("aitask")}</div></div>
-        <select data-act="aitask" aria-label="KI-Aufgabe"><option value="">– keine –</option>${aiTasks.map((e) => `<option value="${esc(e)}" ${opts.translation_ai_task === e ? "selected" : ""}>${esc(this._hass.states[e]?.attributes?.friendly_name || e)}</option>`).join("")}</select></div>
-      <div class="set"><div><div class="t">Grundbefehle von Home Assistant in allen Sprachen${tip("builtin")}</div><div class="hint">Licht, Timer, Datum … sofort und ohne KI</div></div>
-        <button class="switch" role="switch" data-act="opt" data-k="builtin_commands" aria-checked="${opts.builtin_commands === false ? "false" : "true"}" aria-label="Grundbefehle"></button></div>
-      <div class="set"><div><div class="t">Folgebefehle verstehen${tip("followup")}</div></div>
-        <button class="switch" role="switch" data-act="opt" data-k="chat_log_tools" aria-checked="${opts.chat_log_tools ? "true" : "false"}" aria-label="Folgebefehle"></button></div>
-      <div class="set"><div><div class="t">Wenn Polyglot nichts erkennt${tip("fallback")}</div><div class="hint">${esc(o.fallback_agent)} · ändern in Einstellungen → Geräte &amp; Dienste → Polyglot Assist</div></div><span></span></div>
+    return `<section class="grid two"><div class="card"><h2>${t("settings.title")}</h2>
+      <div class="set"><div><div class="t">${t("settings.languages")}${this._tip("languages")}</div>
+        <div class="langs" style="margin-top:6px">${available.map((l) => `<label><input type="checkbox" data-lang-opt="${esc(l)}" ${enabled.includes(l) ? "checked" : ""}> ${esc(this._ln(l))}</label>`).join("")}</div>
+        <div class="row" style="margin-top:8px"><button class="b" data-act="langsave">${t("buttons.save_languages")}</button><button class="b" data-act="langsugg">${t("buttons.ask_languages")}</button></div>
+        ${this.s.langSugg ? `<p class="hint">${t("settings.ai_languages", { languages: this.s.langSugg.map((l) => this._ln(l)).join(", ") })}</p>` : ""}</div><span></span></div>
+      <div class="set"><div><div class="t">${t("settings.confirmation")}${this._tip("answer")}</div></div>
+        <div class="seg" role="group" aria-label="${t("settings.confirmation_label")}"><button data-act="opt" data-k="response_mode" data-v="text" aria-pressed="${mode === "text"}">${t("answer.text")}</button><button data-act="opt" data-k="response_mode" data-v="chime" aria-pressed="${mode === "chime"}">${t("answer.chime")}</button></div></div>
+      <div class="set"><div><div class="t">${t("settings.ai_task")}${this._tip("aitask")}</div></div>
+        <select data-act="aitask" aria-label="${t("settings.ai_task_label")}"><option value="">${t("settings.ai_task_none")}</option>${aiTasks.map((e) => `<option value="${esc(e)}" ${opts.translation_ai_task === e ? "selected" : ""}>${esc(this._hass.states[e]?.attributes?.friendly_name || e)}</option>`).join("")}</select></div>
+      <div class="set"><div><div class="t">${t("settings.builtin")}${this._tip("builtin")}</div><div class="hint">${t("settings.builtin_hint")}</div></div>
+        <button class="switch" role="switch" data-act="opt" data-k="builtin_commands" aria-checked="${opts.builtin_commands === false ? "false" : "true"}" aria-label="${t("settings.builtin_label")}"></button></div>
+      <div class="set"><div><div class="t">${t("settings.followup")}${this._tip("followup")}</div></div>
+        <button class="switch" role="switch" data-act="opt" data-k="chat_log_tools" aria-checked="${opts.chat_log_tools ? "true" : "false"}" aria-label="${t("settings.followup_label")}"></button></div>
+      <div class="set"><div><div class="t">${t("settings.fallback")}${this._tip("fallback")}</div><div class="hint">${t("settings.fallback_hint", { agent: o.fallback_agent })}</div></div><span></span></div>
       ${this._msg("set")}</div>
-      <div class="card"><h2>Sicherung</h2>
-        <p class="hint">${o.source === "catalog" ? "Deine Befehle liegen in Home Assistant und werden mit seinen Backups gesichert." : "Deine Befehle liegen in der Datei intents.yaml. Für das Bearbeiten im Panel auf „Katalog“ umstellen (die Datei bleibt als Sicherung) – in Einstellungen → Geräte & Dienste → Polyglot Assist → Konfigurieren → Quelle."}</p>
-        <div class="grid" style="gap:8px"><button class="b" data-act="export" ${o.source === "catalog" ? "" : "disabled"}>Als Datei exportieren</button></div>${this._msg("backup")}</div></section>`;
+      <div class="card"><h2>${t("settings.backup")}</h2>
+        <p class="hint">${o.source === "catalog" ? t("settings.backup_catalog") : t("settings.backup_file")}</p>
+        <div class="grid" style="gap:8px"><button class="b" data-act="export" ${o.source === "catalog" ? "" : "disabled"}>${t("buttons.export")}</button></div>${this._msg("backup")}</div></section>`;
   }
+
+  // ── messages ──────────────────────────────────────────────────────────────
+  _corpusStatus(r) { return r.corpus_cases ? this.t("messages.all_passed", { count: r.corpus_cases }) : this.t("messages.active"); }
+  _problems(r) { return r.problems ? " – " + r.problems.slice(0, 2).join("; ") : ""; }
+  _regressions(r) { return r.regressions ? " " + this.t("messages.regressions", { count: r.regressions.length }) : ""; }
+  _notSaved(r, extra = "") { return this.t("messages.not_saved", { reason: r.message || r.code, details: extra }); }
 
   // ── events ────────────────────────────────────────────────────────────────
   _closeTips() { this.shadowRoot.querySelectorAll(".bubble").forEach((b) => b.remove()); }
@@ -386,6 +497,7 @@ class PolyglotAssistPanel extends HTMLElement {
     const el = e.target.closest("[data-act]");
     if (!el || el.tagName === "SELECT") return;
     const a = el.dataset.act;
+    const t = (k, v) => this.t(k, v);
     if (el.tagName === "A") e.preventDefault();
     try {
       if (a === "menu") this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
@@ -393,35 +505,36 @@ class PolyglotAssistPanel extends HTMLElement {
       else if (a === "pall") this.shadowRoot.querySelectorAll("[data-pid]").forEach((c) => { const it = this.s.proposals.find((i) => i.id === c.dataset.pid); c.checked = !c.disabled && it?.check?.status === "ok"; });
       else if (a === "paccept" || a === "preject") {
         const ids = [...this.shadowRoot.querySelectorAll("[data-pid]:checked")].map((c) => c.dataset.pid);
-        if (!ids.length) return this._setMsg("prop", "Nichts ausgewählt.");
-        this._setMsg("prop", a === "paccept" ? "Wird geprüft und übernommen …" : "Wird entfernt …");
-        if (a === "preject") { const r = await this.ws("proposals/reject", { ids }); this._setMsg("prop", `${r.removed} abgelehnt.`); }
+        if (!ids.length) return this._setMsg("prop", t("messages.nothing_selected"));
+        this._setMsg("prop", a === "paccept" ? t("messages.accepting") : t("messages.removing"));
+        if (a === "preject") { const r = await this.ws("proposals/reject", { ids }); this._setMsg("prop", t("messages.rejected", { count: r.removed })); }
         else {
           const r = await this.ws("proposals/accept", { ids });
-          if (r.saved) this._setMsg("prop", `${r.applied.length} übernommen · ${r.corpus_cases ? `alle ${r.corpus_cases} Prüfsätze bestanden` : "aktiv"}${Object.keys(r.refused || {}).length ? ` · ${Object.keys(r.refused).length} nicht übernehmbar` : ""}.`, "ok");
-          else this._setMsg("prop", `Nicht übernommen: ${r.message || r.code}${r.regressions ? ` (${r.regressions.length} Prüfsätze würden nicht mehr funktionieren)` : ""}${r.problems ? " – " + r.problems.slice(0, 2).join("; ") : ""}`, "err");
+          const refused = Object.keys(r.refused || {}).length;
+          if (r.saved) this._setMsg("prop", t("messages.accepted", { count: r.applied.length, status: this._corpusStatus(r), details: refused ? " · " + t("messages.refused", { count: refused }) : "" }), "ok");
+          else this._setMsg("prop", t("messages.not_accepted", { reason: r.message || r.code, details: this._regressions(r) + this._problems(r) }), "err");
         }
         await this._reload();
       } else if (a === "gen") {
-        this._setMsg("prop", "Die KI arbeitet – das kann eine bis drei Minuten dauern …");
+        this._setMsg("prop", t("messages.ai_working"));
         const r = await this.ws("proposals/generate", { what: el.dataset.what });
-        this.s.msg.prop = { text: `${r.added} neue Vorschläge${r.errors.length ? ` · ${r.errors.length} Hinweise: ${r.errors.slice(0, 2).join("; ")}` : ""}.`, cls: "ok" };
+        this.s.msg.prop = { text: t("messages.generated", { count: r.added, details: r.errors.length ? " · " + t("messages.generate_notes", { count: r.errors.length, notes: r.errors.slice(0, 2).join("; ") }) : "" }), cls: "ok" };
         await this._reload(["proposals"]);
       } else if (a === "open") { this.s.selected = el.dataset.name; this.s.lang = null; this.s.confirmDelete = null; this._render(); this.shadowRoot.querySelector("main").scrollIntoView(); }
       else if (a === "close") { this.s.selected = null; this._render(); }
       else if (a === "elang") { this.s.lang = el.dataset.l; this._render(); }
       else if (a === "esave") await this._saveIntent(el.dataset.name, el.dataset.lang);
       else if (a === "etrans") {
-        this._setMsg("edit", "Die KI schlägt Sätze vor und Polyglot prüft sie …");
+        this._setMsg("edit", t("messages.translating"));
         const r = await this.ws("translate", { name: el.dataset.name, languages: el.dataset.langs.split(","), to_queue: true });
-        this._setMsg("edit", `${r.queued} geprüfte Vorschläge liegen jetzt unter „Vorschläge“.`, "ok");
+        this._setMsg("edit", t("messages.queued", { count: r.queued }), "ok");
         await this._reload(["proposals"]);
       } else if (a === "edel") { this.s.confirmDelete = el.dataset.name; this._render(); }
       else if (a === "edelno") { this.s.confirmDelete = null; this._render(); }
       else if (a === "edelyes") {
         const r = await this.ws("delete_intent", { name: el.dataset.name, base_rev: this.s.data.rev });
-        if (r.saved) { this.s.selected = null; this.s.confirmDelete = null; this.s.msg.cmd = { text: `${el.dataset.name} gelöscht.`, cls: "ok" }; await this._reload(); }
-        else this._setMsg("edit", `Nicht gelöscht: ${r.message || r.code}`, "err");
+        if (r.saved) { this.s.selected = null; this.s.confirmDelete = null; this.s.msg.cmd = { text: t("messages.deleted", { name: el.dataset.name }), cls: "ok" }; await this._reload(); }
+        else this._setMsg("edit", t("messages.not_deleted", { reason: r.message || r.code }), "err");
       } else if (a === "cats") { this.s.catsOpen = !this.s.catsOpen; this.s.catEdit = null; this._render(); }
       else if (a === "catdel") { this.s.catEdit.splice(+el.dataset.i, 1); this._render(); }
       else if (a === "catadd") { const v = this.shadowRoot.getElementById("newcat").value.trim(); if (v) { this.s.catEdit.push({ from: v, to: v }); this._render(); } }
@@ -429,7 +542,7 @@ class PolyglotAssistPanel extends HTMLElement {
         const renames = {}; this.s.catEdit.forEach((c) => { if (c.from !== c.to) renames[c.from] = c.to; });
         const r = await this.ws("categories", { categories: this.s.catEdit.map((c) => c.to), renames, base_rev: this.s.data.rev });
         this.s.catsOpen = false; this.s.catEdit = null;
-        this.s.msg.cmd = r.saved ? { text: "Arten gespeichert.", cls: "ok" } : { text: `Nicht gespeichert: ${r.message || r.code}`, cls: "err" };
+        this.s.msg.cmd = r.saved ? { text: t("messages.categories_saved"), cls: "ok" } : { text: this._notSaved(r), cls: "err" };
         await this._reload();
       } else if (a === "test") await this._test();
       else if (a === "corpus") {
@@ -440,39 +553,45 @@ class PolyglotAssistPanel extends HTMLElement {
         const cur = ((this.s.data.data.names || {})[el.dataset.t] || {})[el.dataset.l] || [];
         await this._setNames(el.dataset.t, el.dataset.l, [...cur, el.dataset.n]);
       } else if (a === "ntarget") {
-        const t = this.shadowRoot.getElementById("newtarget").value.trim();
-        if (!/^[a-z_]+\.[a-z0-9_]+$/.test(t)) return this._setMsg("names", "Bitte eine Entitäts-ID wie light.couch eingeben.", "err");
-        this.s.data.data.names = { ...(this.s.data.data.names || {}), [t]: {} }; this._render();
+        const x = this.shadowRoot.getElementById("newtarget").value.trim();
+        if (!/^[a-z_]+\.[a-z0-9_]+$/.test(x)) return this._setMsg("names", t("messages.entity_id"), "err");
+        this.s.data.data.names = { ...(this.s.data.data.names || {}), [x]: {} }; this._render();
       } else if (a === "nsugg") {
         const names = this.s.data.data.names || {};
         const langs = this.s.overview.languages.filter((l) => l !== (this._hass.language || "de").slice(0, 2));
         const ids = Object.values(this._hass.areas || {}).map((x) => `area.${x.area_id}`).filter((id) => langs.some((l) => !((names[id] || {})[l] || []).length)).slice(0, Math.max(1, Math.floor(20 / Math.max(1, langs.length))));
-        if (!ids.length) return this._setMsg("names", "Keine Lücken bei den Räumen.");
-        this._setMsg("names", "Die KI schlägt Namen vor …");
+        if (!ids.length) return this._setMsg("names", t("messages.no_gaps"));
+        this._setMsg("names", t("messages.suggesting_names"));
         const r = await this.ws("suggest_names", { ids, languages: langs });
-        this.s.nameSugg = r.proposals; this._setMsg("names", "Vorschläge erscheinen als Knöpfe unter den Feldern. Ein Klick übernimmt den Namen.", "ok");
+        this.s.nameSugg = r.proposals; this._setMsg("names", t("messages.names_suggested"), "ok");
       } else if (a === "opt") {
         const k = el.dataset.k; const v = el.dataset.v !== undefined ? el.dataset.v : el.getAttribute("aria-checked") !== "true";
         const extra = k === "monitor" ? { monitor_time: (this.shadowRoot.getElementById("mtime")?.value || "03:00").slice(0, 5) } : {};
         await this.ws("options", { [k]: v, ...extra });
         setTimeout(() => this._reload(["overview", "monitor"]), k === "monitor" || k === "chat_log_tools" || k === "builtin_commands" ? 1500 : 0);
-        this._setMsg(k === "monitor" ? "mon" : "set", "Gespeichert.", "ok");
+        this._setMsg(k === "monitor" ? "mon" : "set", t("messages.saved"), "ok");
       } else if (a === "langsave") {
         const langs = [...this.shadowRoot.querySelectorAll("[data-lang-opt]:checked")].map((c) => c.dataset.langOpt);
-        if (!langs.length) return this._setMsg("set", "Mindestens eine Sprache wählen.", "err");
-        await this.ws("options", { languages_enabled: langs }); this._setMsg("set", "Sprachen gespeichert.", "ok"); setTimeout(() => this._reload(["overview"]), 1500);
-      } else if (a === "langsugg") { this._setMsg("set", "Frage deine KI …"); const r = await this.ws("suggest_languages"); this.s.langSugg = r.languages; this._setMsg("set", ""); }
-      else if (a === "export") { const r = await this._hass.callService("polyglot_assist", "export_yaml", {}, undefined, false, true); this._setMsg("backup", `Gespeichert: ${Object.values(r.response || {})[0]?.file || "?"}`, "ok"); }
-      else if (a === "monrun") { this._setMsg("mon", "Wird ausgewertet …"); await this.ws("monitor/run"); await this._reload(["monitor", "proposals"]); this._setMsg("mon", "Auswertung fertig.", "ok"); }
+        if (!langs.length) return this._setMsg("set", t("messages.pick_language"), "err");
+        await this.ws("options", { languages_enabled: langs }); this._setMsg("set", t("messages.languages_saved"), "ok"); setTimeout(() => this._reload(["overview"]), 1500);
+      } else if (a === "langsugg") { this._setMsg("set", t("messages.asking_ai")); const r = await this.ws("suggest_languages"); this.s.langSugg = r.languages; this._setMsg("set", ""); }
+      else if (a === "export") { const r = await this._hass.callService("polyglot_assist", "export_yaml", {}, undefined, false, true); this._setMsg("backup", t("messages.exported", { file: Object.values(r.response || {})[0]?.file || "?" }), "ok"); }
+      else if (a === "monrun") { this._setMsg("mon", t("messages.analysing")); await this.ws("monitor/run"); await this._reload(["monitor", "proposals"]); this._setMsg("mon", t("messages.analysed"), "ok"); }
     } catch (err) {
       const key = { gen: "prop", paccept: "prop", preject: "prop", etrans: "edit", esave: "edit", edelyes: "edit", nsugg: "names", nadd: "names", langsugg: "set", opt: "set", langsave: "set", export: "backup", monrun: "mon", catsave: "cmd" }[a] || "cmd";
-      this._setMsg(key, `Fehler: ${err.message || err.code || err}`, "err");
+      this._setMsg(key, t("messages.error", { error: err.message || err.code || err }), "err");
     }
   }
 
   async _change(e) {
     const el = e.target;
     if (el.dataset.bind) { this.s[el.dataset.bind] = el.value; this._render(); return; }
+    if (el.dataset.act === "uilang") {
+      // only a deliberate choice is remembered; "automatic" follows HA's language
+      this._uiPref = okLang(el.value) ? el.value : "";
+      try { if (this._uiPref) localStorage.setItem(LS_UI, this._uiPref); else localStorage.removeItem(LS_UI); } catch (err) { /* per-viewer convenience only */ }
+      await this._loadTexts(); this._render(); return;
+    }
     if (el.dataset.act === "entry") {
       // nothing of entry A may leak into entry B (editors, suggestions, results)
       Object.assign(this.s, { entryId: el.value, selected: null, monitor: null, catsOpen: false, catEdit: null,
@@ -481,15 +600,15 @@ class PolyglotAssistPanel extends HTMLElement {
       await this._reload(["overview", "data", "proposals", "monitor"]); return;
     }
     if (el.id === "mtime") {
-      try { await this.ws("options", { monitor_time: (el.value || "03:00").slice(0, 5) }); this._setMsg("mon", "Uhrzeit gespeichert.", "ok"); setTimeout(() => this._reload(["overview", "monitor"]), 1500); }
-      catch (err) { this._setMsg("mon", `Fehler: ${err.message || err}`, "err"); }
+      try { await this.ws("options", { monitor_time: (el.value || "03:00").slice(0, 5) }); this._setMsg("mon", this.t("messages.time_saved"), "ok"); setTimeout(() => this._reload(["overview", "monitor"]), 1500); }
+      catch (err) { this._setMsg("mon", this.t("messages.error", { error: err.message || err }), "err"); }
       return;
     }
     if (el.dataset.cat !== undefined) { this.s.catEdit[+el.dataset.cat].to = el.value.trim() || this.s.catEdit[+el.dataset.cat].to; return; }
     if (el.dataset.act === "safety") { await this._patchIntent(el.dataset.name, { safety: el.value === "normal" ? undefined : el.value }, "cmd"); return; }
     if (el.dataset.act === "aitask") {
-      try { await this.ws("options", { translation_ai_task: el.value || null }); this._setMsg("set", "Gespeichert.", "ok"); await this._reload(["overview"]); }
-      catch (err) { this._setMsg("set", err.code === "ai_task_has_tools" ? "Diese KI-Aufgabe hat Werkzeuge. Bitte eine ohne Werkzeuge wählen." : `Fehler: ${err.message}`, "err"); await this._reload(["overview"]); }
+      try { await this.ws("options", { translation_ai_task: el.value || null }); this._setMsg("set", this.t("messages.saved"), "ok"); await this._reload(["overview"]); }
+      catch (err) { this._setMsg("set", err.code === "ai_task_has_tools" ? this.t("messages.ai_task_has_tools") : this.t("messages.error", { error: err.message }), "err"); await this._reload(["overview"]); }
       return;
     }
     if (el.dataset.nameT) {
@@ -502,17 +621,17 @@ class PolyglotAssistPanel extends HTMLElement {
 
   async _setNames(target, lang, names) {
     const r = await this.ws("names/set", { target, lang, names, base_rev: this.s.data.rev });
-    if (r.saved) { this.s.msg.names = { text: "Gespeichert.", cls: "ok" }; await this._reload(["data"]); }
-    else this._setMsg("names", `Nicht gespeichert: ${r.message || r.code}${r.problems ? " – " + r.problems.slice(0, 2).join("; ") : ""}`, "err");
+    if (r.saved) { this.s.msg.names = { text: this.t("messages.saved"), cls: "ok" }; await this._reload(["data"]); }
+    else this._setMsg("names", this._notSaved(r, this._problems(r)), "err");
   }
 
   async _patchIntent(name, patch, msgKey) {
-    if (this.s.overview.source !== "catalog") { this._setMsg(msgKey, "Zum Ändern bitte unter Einstellungen die Quelle „Katalog“ wählen.", "err"); return; }
+    if (this.s.overview.source !== "catalog") { this._setMsg(msgKey, this.t("messages.need_catalog"), "err"); return; }
     const intent = JSON.parse(JSON.stringify((this.s.data.data.intents || {})[name] || {}));
     Object.entries(patch).forEach(([k, v]) => { if (v === undefined || v === "") delete intent[k]; else intent[k] = v; });
     const r = await this.ws("save_intent", { name, intent, base_rev: this.s.data.rev });
-    if (r.saved) { this.s.msg[msgKey] = { text: "Gespeichert.", cls: "ok" }; await this._reload(); }
-    else this._setMsg(msgKey, `Nicht gespeichert: ${r.message || r.code}${r.regressions ? ` (${r.regressions.length} Prüfsätze würden nicht mehr funktionieren)` : ""}${r.problems ? " – " + r.problems.slice(0, 2).join("; ") : ""}`, "err");
+    if (r.saved) { this.s.msg[msgKey] = { text: this.t("messages.saved"), cls: "ok" }; await this._reload(); }
+    else this._setMsg(msgKey, this._notSaved(r, this._regressions(r) + this._problems(r)), "err");
   }
 
   async _saveIntent(name, lang) {
@@ -521,13 +640,16 @@ class PolyglotAssistPanel extends HTMLElement {
     const lines = g("esents").value.split("\n").map((x) => x.trim()).filter(Boolean);
     intent.sentences = { ...(intent.sentences || {}) };
     if (lines.length) intent.sentences[lang] = lines; else delete intent.sentences[lang];
-    const cat = g("ecat").value; if (cat && cat !== "Sonstiges") intent.category = cat; else delete intent.category;
+    const cat = g("ecat").value; if (cat && cat !== OTHER) intent.category = cat; else delete intent.category;
     const set = (k, v) => { if (v) intent[k] = v; else delete intent[k]; };
     set("kind", g("ekind").value); set("response_mode", g("eresp").value);
     set("safety", g("esafety").value === "normal" ? "" : g("esafety").value);
     const r = await this.ws("save_intent", { name, intent, base_rev: this.s.data.rev });
-    if (r.saved) { this.s.msg.edit = { text: `Gespeichert · ${r.corpus_cases ? `alle ${r.corpus_cases} Prüfsätze bestanden` : "aktiv"}.`, cls: "ok" }; await this._reload(); }
-    else this._setMsg("edit", `Nicht gespeichert: ${r.message || r.code}${r.regressions ? ` – ${r.regressions.slice(0, 3).map((x) => "„" + x.text + "“").join(", ")} würden nicht mehr funktionieren` : ""}${r.problems ? " – " + r.problems.slice(0, 2).join("; ") : ""}`, "err");
+    if (r.saved) { this.s.msg.edit = { text: this.t("messages.saved_status", { status: this._corpusStatus(r) }), cls: "ok" }; await this._reload(); }
+    else {
+      const regs = r.regressions ? " – " + this.t("messages.regressions_list", { sentences: r.regressions.slice(0, 3).map((x) => this._q(x.text)).join(", ") }) : "";
+      this._setMsg("edit", this._notSaved(r, regs + this._problems(r)), "err");
+    }
   }
 
   async _test() {
