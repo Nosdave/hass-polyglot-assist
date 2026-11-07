@@ -28,9 +28,11 @@ from hassil.util import remove_punctuation
 
 MAX_SENTENCE_CHARS = 250
 MAX_GROUPS = 8
-MAX_VARIANTS = 100000
+MAX_VARIANTS = 10000
+MAX_PERMUTATION = 4
 MAX_SAMPLES = 120
 MAX_PATHS = 256
+EMPTY_LISTS: set[str] = set()  # lists that were empty during the last shrink (diagnostics)
 MAX_NAME_CHARS = 40
 MAX_NAME_WORDS = 4
 _NAME_FORBIDDEN = re.compile(r"[{}<>\[\]()|;:]")
@@ -48,31 +50,38 @@ def _children(expr: Any) -> list[Any]:
     return list(getattr(expr, "items", []) or [])
 
 
-def count_variants(expr: Any, sizes: dict[str, int], rules: dict[str, Sentence], _depth: int = 0) -> int:
+def count_variants(
+    expr: Any, sizes: dict[str, int], rules: dict[str, Sentence], _depth: int = 0,
+    skip_optionals: bool = False,
+) -> int:
     """Upper bound of expansions (capped at MAX_VARIANTS + 1)."""
     cap = MAX_VARIANTS + 1
     if _depth > 20:
         return cap
     if isinstance(expr, Sentence):
-        return count_variants(expr.expression, sizes, rules, _depth + 1)
+        return count_variants(expr.expression, sizes, rules, _depth + 1, skip_optionals)
     if isinstance(expr, TextChunk):
         return 1
     if isinstance(expr, ListReference):
         return max(1, sizes.get(expr.list_name, 1))
     if isinstance(expr, RuleReference):
         rule = rules.get(expr.rule_name)
-        return count_variants(rule, sizes, rules, _depth + 1) if rule else 1
+        return count_variants(rule, sizes, rules, _depth + 1, skip_optionals) if rule else 1
     if isinstance(expr, Alternative):
-        return min(cap, sum(count_variants(c, sizes, rules, _depth + 1) for c in _children(expr)))
+        if skip_optionals and expr.is_optional:
+            return 1
+        return min(cap, sum(count_variants(c, sizes, rules, _depth + 1, skip_optionals) for c in _children(expr)))
     if isinstance(expr, Permutation):
-        total = math.factorial(min(len(_children(expr)), 8))
+        if len(_children(expr)) > MAX_PERMUTATION:
+            return cap
+        total = math.factorial(len(_children(expr)))
         for child in _children(expr):
-            total = min(cap, total * count_variants(child, sizes, rules, _depth + 1))
+            total = min(cap, total * count_variants(child, sizes, rules, _depth + 1, skip_optionals))
         return total
     if isinstance(expr, (Sequence, Group)):
         total = 1
         for child in _children(expr):
-            total = min(cap, total * count_variants(child, sizes, rules, _depth + 1))
+            total = min(cap, total * count_variants(child, sizes, rules, _depth + 1, skip_optionals))
         return total
     return 1
 
@@ -103,7 +112,7 @@ def slot_paths(
             nxt = slot_paths(child, rules, _depth + 1)
             acc = {a | b for a in acc for b in nxt}
             if len(acc) > MAX_PATHS:
-                acc = set(list(acc)[:MAX_PATHS])
+                acc = set(sorted(acc, key=lambda x: sorted(x))[:MAX_PATHS])
         return acc
     return {frozenset()}
 
@@ -156,6 +165,8 @@ def shrink_lists(slot_lists: dict[str, SlotList], per_list: int = 3) -> dict[str
             if len(texts) > per_list:
                 texts = [texts[0], texts[len(texts) // 2], texts[-1]]
             out[name] = TextSlotList.from_strings(texts or ["x"], allow_template=False, name=name)
+            if not texts:
+                EMPTY_LISTS.add(name)
         elif isinstance(sl, RangeSlotList):
             mid = sl.start + ((sl.stop - sl.start) // (2 * sl.step)) * sl.step
             vals = sorted({sl.start, mid, sl.stop})
@@ -175,13 +186,20 @@ def bounded_samples(
     """Evenly spread samples over all (bounded) variants."""
     small = shrink_lists(slot_lists)
     sizes = {name: len(getattr(sl, "values", [])) or 1 for name, sl in small.items()}
+    skip = False
     if count_variants(sentence, sizes, rules) > MAX_VARIANTS:
-        raise ValueError("too many variants")
-    texts: list[str] = []
-    for text in sample_sentence(sentence, slot_lists=small, expansion_rules=rules, language=language):
+        # big but legitimate templates: check them without the optional words
+        if count_variants(sentence, sizes, rules, skip_optionals=True) > MAX_VARIANTS:
+            raise ValueError("too many variants")
+        skip = True
+    seen: dict[str, None] = {}
+    for text in sample_sentence(
+        sentence, slot_lists=small, expansion_rules=rules, language=language, skip_optionals=skip
+    ):
         text = " ".join(text.split())
-        if text and text not in texts:
-            texts.append(text)
+        if text:
+            seen[text] = None
+    texts = list(seen)
     if len(texts) <= limit:
         return texts
     step = len(texts) / limit
@@ -230,7 +248,7 @@ def check_proposal(
         return _err("empty")
     if len(sentence) > MAX_SENTENCE_CHARS:
         return _err(f"longer than {MAX_SENTENCE_CHARS} characters")
-    if sentence.count("(") + sentence.count("[") > MAX_GROUPS:
+    if sentence.count("(") + sentence.count("[") + sentence.count(";") > MAX_GROUPS:
         return _err("too many alternatives/optional parts")
     try:
         parsed = parse_sentence(sentence)

@@ -296,8 +296,8 @@ def test_check_proposal_statuses():
     assert P.check_proposal("ZoneOn", "x" * 300, src, fn, lists)["status"] == "error"
     # reverse direction: proposal would swallow another command's sentence
     others = [("AllOff", "éteins toutes les lumières")]
-    rev = P.check_proposal("ZoneOn", "éteins toutes les lumières [{zone}]", ["[x] {zone}"], lambda t: set(), lists, other_samples=others)
-    assert rev["status"] == "error"
+    rev = P.check_proposal("ZoneOn", "éteins toutes les lumières [{zone}]", [], lambda t: set(), lists, other_samples=others)
+    assert rev["status"] == "error" and any(c.get("direction") == "swallows" for c in rev["collisions"])
     assert P.clean_alternatives("(an|an|ein) x") == "(an|ein) x"
 
 
@@ -334,3 +334,14 @@ def test_names_table_and_validation():
     assert any("'Sofa' is used for light.couch and light.bar" in p for p in problems)
     assert corpus.names_table({"names": ["x"]}) == {}
     assert any(p.startswith("names.bad") for p in problems)
+
+
+def test_permutation_and_large_templates_are_bounded():
+    import time
+    data = {"intents": {"S": {"sentences": {"en": ["x"]}}}}
+    lists = {}
+    t = time.monotonic()
+    assert proposals.check_proposal("S", "(a;b;c;d;e;f;g;h;i;j) x", [], lambda _t: set(), lists)["status"] == "error"
+    big = " ".join("(" + "|".join(f"w{i}{j}" for j in range(10)) + ")" for i in range(4)) + " x"
+    res = proposals.check_proposal("S", big, [], lambda _t: set(), lists)
+    assert time.monotonic() - t < 2, res

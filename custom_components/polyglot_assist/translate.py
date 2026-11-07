@@ -206,15 +206,20 @@ async def async_propose_sentences(
                 "sentence templates in hassil syntax", context,
             )
             existing_norm = {norm(s) for s in existing}
-            other_samples: list[tuple[str, str]] = []
-            for name, cfg in per_lang.get(lang, {}).items():
-                for s in cfg["data"][0]["sentences"][:6]:
-                    try:
-                        for t in bounded_samples(parse_sentence(s), slot_lists, parsed_rules, lang, 2):
-                            other_samples.append((name, t))
-                    except Exception:  # noqa: BLE001
-                        continue
 
+            def _other_samples(lang: str = lang) -> list[tuple[str, str]]:
+                out: list[tuple[str, str]] = []
+                for name, cfg in per_lang.get(lang, {}).items():
+                    for s in cfg["data"][0]["sentences"][:6]:
+                        try:
+                            for t in bounded_samples(parse_sentence(s), slot_lists, parsed_rules, lang, 2):
+                                out.append((name, t))
+                        except Exception:  # noqa: BLE001
+                            continue
+                return out
+
+            # CPU work never on the event loop
+            other_samples = await hass.async_add_executor_job(_other_samples)
             def _check(p: str) -> dict[str, Any]:
                 result = check_proposal(
                     intent_name,
