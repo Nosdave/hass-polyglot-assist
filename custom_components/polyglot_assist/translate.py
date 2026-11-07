@@ -73,12 +73,14 @@ def _has_llm_api(value: Any, _depth: int = 0) -> bool:
 
 def ai_task_has_tools(hass: HomeAssistant, entity_id: str) -> bool:
     """True if the AI Task entity has an LLM API (tools) attached, or unknown."""
+    if not isinstance(entity_id, str) or not entity_id.startswith("ai_task.") or hass.states.get(entity_id) is None:
+        return True  # unknown → treat as having tools (never send foreign text there)
     entry = er.async_get(hass).async_get(entity_id)
     if entry is None or entry.config_entry_id is None:
-        return False
+        return True
     config_entry = hass.config_entries.async_get_entry(entry.config_entry_id)
     if config_entry is None:
-        return False
+        return True
     sources: list[Any] = [config_entry.options, config_entry.data]
     if entry.config_subentry_id and entry.config_subentry_id in config_entry.subentries:
         sources.insert(0, config_entry.subentries[entry.config_subentry_id].data)

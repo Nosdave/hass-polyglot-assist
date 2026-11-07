@@ -37,7 +37,7 @@ from .fallback import fallback_error
 from .settings import async_language_check, pipelines_overview
 from .ui_texts import UiTextError, get_ui_texts, shipped_languages
 from .corpus import count_summary, validate
-from .guard import GuardError, async_guarded_update, revision
+from .guard import GuardError, async_guarded_update, revision, write_lock
 from .source import SourceError
 from .assistant import async_discover
 from .proposal_queue import ProposalQueue
@@ -252,6 +252,7 @@ def _ai_task_entity(hass: HomeAssistant, entry_id: str) -> str | None:
 
 TOTAL_BUDGET = 180
 CALL_BUDGET = 70
+LANG_CHECK_BUDGET = 420  # up to 12 languages, 2 at a time, ≤ 60 s each
 
 
 def _enabled_or_none(hass: HomeAssistant, entry_id: str) -> list[str] | None:
@@ -927,8 +928,20 @@ async def ws_fallback_set(hass: HomeAssistant, connection, msg) -> None:
         connection.send_error(msg["id"], "not_found", "this conversation agent does not exist")
         return
     entry = runtime["entry"]
-    hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_FALLBACK_AGENT: agent_id})
-    await hass.config_entries.async_reload(entry_id)  # wait: the panel shows the new state afterwards
+    old_data = dict(entry.data)
+    async with write_lock(runtime):  # no guarded save may run across the reload
+        hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_FALLBACK_AGENT: agent_id})
+        try:
+            ok = await hass.config_entries.async_reload(entry_id)
+        except Exception as err:  # noqa: BLE001
+            ok, why = False, str(err)
+        else:
+            why = "the integration did not load again"
+        if not ok:
+            hass.config_entries.async_update_entry(entry, data=old_data)
+            await hass.config_entries.async_reload(entry_id)
+            connection.send_error(msg["id"], "reload_failed", f"not changed: {why}")
+            return
     connection.send_result(msg["id"], {"fallback_agent": agent_id})
 
 
@@ -961,7 +974,7 @@ async def ws_languages_check(hass: HomeAssistant, connection, msg) -> None:
         "builtin": runtime["builtin"].loaded if runtime.get("builtin") else [],
     }
     try:
-        async with asyncio.timeout(CALL_BUDGET):
+        async with asyncio.timeout(LANG_CHECK_BUDGET):
             result = await async_language_check(
                 hass, pipeline_id=msg.get("pipeline_id"), languages=msg["languages"], polyglot=polyglot,
                 ai_task=_ai_task_entity(hass, entry_id), context=connection.context(msg),

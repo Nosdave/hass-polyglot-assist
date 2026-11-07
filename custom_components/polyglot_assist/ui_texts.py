@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import string
+import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +27,9 @@ from homeassistant.helpers.storage import Store
 from .const import DOMAIN
 from .translate import LANG_RE, ai_task_has_tools
 
+_LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
+TRANSLATE_BUDGET = 15 * 60  # whole run; finished batches are kept
 I18N_DIR = Path(__file__).parent / "frontend" / "i18n"
 BATCH = 25
 CALL_TIMEOUT = 90
@@ -36,11 +41,12 @@ class UiTextError(Exception):
     """Refused input or failed translation (message is shown in the panel)."""
 
 
-def placeholders(text: str) -> set[str]:
+def placeholders(text: str) -> Counter | None:
+    """Placeholder names with their count ({} counts as ""), None if the text is not a valid template."""
     try:
-        return {f for _, f, _, _ in string.Formatter().parse(text) if f}
+        return Counter(f for _, f, _, _ in string.Formatter().parse(text) if f is not None)
     except ValueError:
-        return {"<invalid>"}
+        return None
 
 
 def check_text(english: str, text: str) -> str | None:
@@ -51,8 +57,12 @@ def check_text(english: str, text: str) -> str | None:
         return "too long"
     if _MARKUP.search(text):
         return "no < or > allowed"
-    if placeholders(text) != placeholders(english):
-        return "placeholders must stay the same: " + ", ".join(sorted(placeholders(english))) if placeholders(english) else "no placeholders allowed"
+    want, got = placeholders(english), placeholders(text)
+    if want is None:
+        return "the English text is not a valid template"
+    if got != want:
+        names = ", ".join("{" + n + "}" + (f" ×{c}" if c > 1 else "") for n, c in sorted(want.items()))
+        return f"placeholders must stay the same: {names}" if want else "no placeholders allowed"
     return None
 
 
@@ -62,6 +72,9 @@ def flatten(data: Any, prefix: str = "") -> dict[str, str]:
     if isinstance(data, dict):
         for k, v in data.items():
             if not isinstance(k, str):
+                continue
+            if not k or "." in k:  # a dot would make the path ambiguous (export) — not allowed in keys
+                _LOGGER.warning("Polyglot Assist: interface text key %r ignored (empty or contains a dot)", k)
                 continue
             key = f"{prefix}.{k}" if prefix else k
             if isinstance(v, str):
@@ -74,7 +87,8 @@ def flatten(data: Any, prefix: str = "") -> dict[str, str]:
 def _read_json(path: Path) -> dict[str, str]:
     try:
         return flatten(json.loads(path.read_text("utf-8")))
-    except (OSError, ValueError):
+    except (OSError, ValueError) as err:
+        _LOGGER.error("Polyglot Assist: interface texts %s cannot be read: %s", path.name, err)
         return {}
 
 
@@ -90,6 +104,7 @@ class UiTexts:
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{DOMAIN}.ui_texts", atomic_writes=True)
         self._data: dict[str, Any] | None = None
         self._lock = asyncio.Lock()
+        self._running: dict[str, asyncio.Lock] = {}
 
     async def _load(self) -> dict[str, Any]:
         if self._data is None:
@@ -136,38 +151,48 @@ class UiTexts:
         """Machine-translate every English text that has no text in ``lang`` yet."""
         if not LANG_RE.match(lang):
             raise UiTextError("invalid language code")
-        if lang in shipped_languages():
+        if lang in await self.hass.async_add_executor_job(shipped_languages):
             raise UiTextError("this language ships with Polyglot — correct single texts instead")
         if not ai_task or ai_task_has_tools(self.hass, ai_task):
             raise UiTextError("choose an AI task without tools for suggestions first")
         english = await self.async_english()
         if not english:
             raise UiTextError("the English texts are missing")
-        current = await self.async_get(lang)
-        todo = [k for k in english if k not in current["texts"]]
-        done: dict[str, str] = {}
-        refused: dict[str, str] = {}
-        for i in range(0, len(todo), BATCH):
-            keys = todo[i:i + BATCH]
-            try:
-                answers = await self._call(ai_task, lang, [english[k] for k in keys], context)
-            except (TimeoutError, UiTextError, Exception) as err:  # noqa: BLE001 — keep what is done
-                refused.update({k: f"translation failed: {err}" for k in keys})
-                continue
-            for key, text in zip(keys, answers, strict=False):
-                if reason := check_text(english[key], text):
-                    refused[key] = reason
-                else:
-                    done[key] = " ".join(text.split())
-        if done:
-            data = await self._load()
-            entry = data.setdefault(lang, {"texts": {}, "machine": []})
-            for key, text in done.items():
-                if key not in entry["texts"]:  # a correction made meanwhile wins
-                    entry["texts"][key] = text
-                    entry["machine"].append(key)
-            await self._save()
-        return {"translated": len(done), "refused": refused, "total": len(english)}
+        lock = self._running.setdefault(lang, asyncio.Lock())
+        if lock.locked():
+            raise UiTextError("a translation for this language is already running")
+        async with lock:
+            current = await self.async_get(lang)
+            todo = [k for k in english if k not in current["texts"] and placeholders(english[k]) is not None]
+            deadline = time.monotonic() + TRANSLATE_BUDGET
+            translated = 0
+            refused: dict[str, str] = {}
+            for i in range(0, len(todo), BATCH):
+                keys = todo[i:i + BATCH]
+                if time.monotonic() > deadline:
+                    refused.update({k: "time budget used up — run again to continue" for k in keys})
+                    continue
+                try:
+                    answers = await self._call(ai_task, lang, [english[k] for k in keys], context)
+                except Exception as err:  # noqa: BLE001 — keep what is done
+                    refused.update({k: f"translation failed: {err}" for k in keys})
+                    continue
+                batch: dict[str, str] = {}
+                for key, text in zip(keys, answers, strict=False):
+                    if reason := check_text(english[key], text):
+                        refused[key] = reason
+                    else:
+                        batch[key] = " ".join(text.split())
+                if batch:  # save after every batch: an interruption keeps what is done
+                    data = await self._load()
+                    entry = data.setdefault(lang, {"texts": {}, "machine": []})
+                    for key, text in batch.items():
+                        if key not in entry["texts"]:  # a correction made meanwhile wins
+                            entry["texts"][key] = text
+                            entry["machine"].append(key)
+                            translated += 1
+                    await self._save()
+            return {"translated": translated, "refused": refused, "total": len(english)}
 
     async def _call(self, ai_task: str, lang: str, texts: list[str], context: Context | None) -> list[str]:
         payload = json.dumps(texts, ensure_ascii=False)

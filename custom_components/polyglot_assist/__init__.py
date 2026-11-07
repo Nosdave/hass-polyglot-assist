@@ -21,7 +21,7 @@ import yaml
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
 from homeassistant.exceptions import ConfigEntryError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
@@ -390,9 +390,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 data["monitor"].async_deactivate()
         # Last entry → unregister services
         if not hass.data[DOMAIN]:
+            from homeassistant.helpers.event import async_call_later  # noqa: PLC0415
+
             from .panel import async_unregister as async_unregister_panel  # noqa: PLC0415
 
-            async_unregister_panel(hass)
+            @callback
+            def _unregister_if_still_gone(_now) -> None:
+                # an entry reload loads the entry again within moments — keep the panel then
+                if not hass.data.get(DOMAIN):
+                    async_unregister_panel(hass)
+
+            async_call_later(hass, 5, _unregister_if_still_gone)
             hass.services.async_remove(DOMAIN, SERVICE_RELOAD)
             hass.services.async_remove(DOMAIN, SERVICE_TEST_MATCH)
             hass.services.async_remove(DOMAIN, SERVICE_RUN_TESTS)

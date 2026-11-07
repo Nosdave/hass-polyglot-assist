@@ -19,10 +19,12 @@ from .translate import LANG_RE, ai_task_has_tools
 ROUND_TRIP = "Turn on the kitchen light and tell me the weather for tomorrow."
 ROUND_TRIP_WORDS = ("kitchen", "light", "weather", "tomorrow")
 AI_TIMEOUT = 45
+AI_PARALLEL = 2       # a local LLM serves few requests at once
+AI_PER_LANGUAGE = 60  # both calls of one language
 
 
 def _base(lang: str | None) -> str:
-    return (lang or "").split("-")[0].lower()
+    return re.split(r"[-_]", lang or "")[0].lower()
 
 
 def _satellites(hass: HomeAssistant) -> list[dict[str, Any]]:
@@ -89,7 +91,7 @@ def _tts_languages(hass: HomeAssistant, engine: str | None) -> list[str] | None:
 
 
 def _covers(supported: list[str] | None, lang: str) -> bool | None:
-    if supported is None:
+    if not supported:  # unknown or not reported
         return None
     if "*" in supported:
         return True
@@ -134,7 +136,17 @@ async def async_language_check(
     use_ai = bool(ai_task) and not ai_task_has_tools(hass, ai_task)
     ai_results = {}
     if use_ai:
-        results = await asyncio.gather(*(_ai_round_trip(hass, ai_task, lang, context) for lang in langs))
+        sem = asyncio.Semaphore(AI_PARALLEL)
+
+        async def one(lang: str) -> dict[str, Any]:
+            async with sem:
+                try:
+                    async with asyncio.timeout(AI_PER_LANGUAGE):
+                        return await _ai_round_trip(hass, ai_task, lang, context)
+                except TimeoutError:
+                    return {"ok": None, "error": "timeout"}
+
+        results = await asyncio.gather(*(one(lang) for lang in langs))
         ai_results = dict(zip(langs, results, strict=True))
     rows = []
     for lang in langs:
