@@ -857,7 +857,7 @@ async def ws_history_diff(hass: HomeAssistant, connection, msg) -> None:
         return
     current = await runtime["source"].async_load()
     connection.send_result(msg["id"], {
-        "summary": change_summary(current, old), "loosened": loosened(current, old), "base_rev": revision(current),
+        "summary": change_summary(current, old), "loosened": loosened(current, old, hass), "base_rev": revision(current),
     })
 
 
@@ -885,7 +885,7 @@ async def ws_history_restore(hass: HomeAssistant, connection, msg) -> None:
 
     def _mutate(data: dict[str, Any]) -> None:
         # checked against the CURRENT state inside the write lock
-        weaker = loosened(data, old)
+        weaker = loosened(data, old, hass)
         if weaker and not msg["confirm_loosened"]:
             raise GuardError(
                 "confirm_loosened",

@@ -34,7 +34,7 @@ def get_history(hass: HomeAssistant, entry_id: str) -> "CatalogHistory":
     return store[entry_id]
 
 
-def loosened(current: dict[str, Any], old: dict[str, Any]) -> list[dict[str, Any]]:
+def loosened(current: dict[str, Any], old: dict[str, Any], hass: HomeAssistant | None = None) -> list[dict[str, Any]]:
     """Commands a restore of ``old`` would make less protected than they are now.
 
     Lower safety level, or a command that is gone now but would come back
@@ -55,20 +55,8 @@ def loosened(current: dict[str, Any], old: dict[str, Any]) -> list[dict[str, Any
                 out.append({"intent": name, "now": "action", "then": "other action"})
         elif name not in now_i and then != "disabled":  # a switched-off command coming back stays off
             out.append({"intent": name, "now": "removed", "then": then or "normal"})
-    # devices protected today only because a sensitive/disabled command uses them
-    from .safety import sensitive_entities  # noqa: PLC0415
-
-    for entity in sorted(sensitive_entities(current) - sensitive_entities(old)):
-        out.append({"entity": entity, "now": "protected", "then": "unprotected"})
-    # devices protected today only because a Polyglot name looks security-relevant
-    from .corpus import names_table  # noqa: PLC0415
-    from .proposals import looks_protected  # noqa: PLC0415
-
-    def _by_name(cfg: dict[str, Any]) -> set[str]:
-        return {t for t, names in names_table(cfg).items() if any(looks_protected(n) for n in names)}
-
-    for entity in sorted(_by_name(current) - _by_name(old)):
-        out.append({"entity": entity, "now": "protected by name", "then": "unprotected"})
+    if hass is not None:
+        out += _effective_loosened(hass, current, old)
     return out
 
 
@@ -111,6 +99,29 @@ async def async_record(hass: HomeAssistant, entry_id: str, before: dict[str, Any
         await get_history(hass, entry_id).async_add(before, after, rev=revision(before), actor=actor)
     except Exception:  # noqa: BLE001 — the write itself succeeded; history is a convenience
         _LOGGER.exception("Polyglot Assist: could not record the catalog history (%s)", actor)
+
+
+def _effective_loosened(hass: HomeAssistant, current: dict[str, Any], old: dict[str, Any]) -> list[dict[str, Any]]:
+    """Entities protected under ``current`` but not under ``old`` — using the real check.
+
+    Runs the same protection rule as the built-in commands (safety.protected_reason)
+    with each catalog's protected commands and name table, so every rule counts:
+    security words in names, window words that whitelist covers, commands marked
+    sensitive/disabled.
+    """
+    from .corpus import names_table  # noqa: PLC0415
+    from .safety import protected_reason, sensitive_entities  # noqa: PLC0415
+
+    sens_now, sens_old = sensitive_entities(current), sensitive_entities(old)
+    names_now, names_old = names_table(current), names_table(old)
+    candidates = {e for e in (*sens_now, *sens_old, *names_now, *names_old) if "." in e and not e.startswith("area.")}
+    out = []
+    for entity in sorted(candidates):
+        now = protected_reason(hass, entity, sensitive_entities=sens_now, extra_names=names_now)
+        then = protected_reason(hass, entity, sensitive_entities=sens_old, extra_names=names_old)
+        if now and not then:
+            out.append({"entity": entity, "now": f"protected: {now}", "then": "unprotected"})
+    return out
 
 
 class CatalogHistory:
