@@ -18,7 +18,7 @@ from typing import Any
 from homeassistant.components import tts
 from homeassistant.components.tts import TextToSpeechEntity, TTSAudioRequest, TTSAudioResponse, Voice
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -44,6 +44,22 @@ def inner_tts_error(hass: HomeAssistant, entity_id: str | None) -> str | None:
     return None
 
 
+INNER_OPTION = "polyglot_inner_tts"  # part of the cache key: changing the inner TTS must not replay old audio
+
+
+def _silence_wav() -> bytes:
+    import io  # noqa: PLC0415
+    import wave  # noqa: PLC0415
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(22050)
+        w.writeframes(b"\x00\x00" * 2205)  # 0.1 s
+    return buf.getvalue()
+
+
 class PolyglotToneTTS(TextToSpeechEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "tone"
@@ -53,6 +69,7 @@ class PolyglotToneTTS(TextToSpeechEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_tone_tts"
         self._chime: bytes | None = None
+        self._unsub_state = None
 
     # ── the TTS behind the tone ────────────────────────────────────────────
     @property
@@ -67,9 +84,22 @@ class PolyglotToneTTS(TextToSpeechEntity):
 
         return get_engine_instance(self.hass, self._inner_id)
 
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        from homeassistant.helpers.event import async_track_state_change_event  # noqa: PLC0415
+
+        @callback
+        def _refresh(*_args: Any) -> None:
+            self.async_write_ha_state()
+
+        if self._inner_id:  # the inner TTS may load later or go away
+            self.async_on_remove(async_track_state_change_event(self.hass, [self._inner_id], _refresh))
+        self.async_on_remove(self._entry.add_update_listener(lambda hass, entry: _refresh()))
+
     @property
     def available(self) -> bool:
-        return self._inner() is not None
+        inner = self._inner()
+        return inner is not None and getattr(inner, "available", True) is not False
 
     @property
     def supported_languages(self) -> list[str]:
@@ -84,12 +114,12 @@ class PolyglotToneTTS(TextToSpeechEntity):
     @property
     def supported_options(self) -> list[str] | None:
         inner = self._inner()
-        return getattr(inner, "supported_options", None)
+        return [*(getattr(inner, "supported_options", None) or []), INNER_OPTION]
 
     @property
     def default_options(self) -> dict[str, Any] | None:
         inner = self._inner()
-        return getattr(inner, "default_options", None)
+        return {**(getattr(inner, "default_options", None) or {}), INNER_OPTION: self._inner_id or ""}
 
     def async_get_supported_voices(self, language: str) -> list[Voice] | None:
         inner = self._inner()
@@ -102,45 +132,55 @@ class PolyglotToneTTS(TextToSpeechEntity):
             self._chime = await self.hass.async_add_executor_job(CHIME_FILE.read_bytes)
         return "wav", self._chime
 
-    def _forward(self, language: str, options: dict[str, Any]) -> Any:
-        if not self._inner_id:
+    async def _inner_stream(self, language: str, options: dict[str, Any], text_gen: AsyncGenerator[str]) -> TTSAudioResponse:
+        """Ask the inner TTS directly: its own format comes back and HA converts once."""
+        inner = self._inner()
+        if inner is None:
             raise HomeAssistantError("Polyglot Assist (tone): choose the speech output behind the tone in Polyglot's options")
-        return tts.async_create_stream(self.hass, self._inner_id, language=language, options=dict(options or {}))
+        opts = {k: v for k, v in (options or {}).items() if k != INNER_OPTION}
+        if isinstance(inner, TextToSpeechEntity):
+            return await inner.internal_async_stream_tts_audio(TTSAudioRequest(language, opts, text_gen))
+        message = "".join([chunk async for chunk in text_gen])  # legacy provider
+        extension, data = await inner.async_get_tts_audio(message, language, opts)
+        if extension is None or data is None:
+            raise HomeAssistantError(f"No TTS from {self._inner_id}")
+
+        async def data_gen() -> AsyncGenerator[bytes]:
+            yield data
+
+        return TTSAudioResponse(extension, data_gen())
 
     async def async_get_tts_audio(self, message: str, language: str, options: dict[str, Any]) -> tuple[str, bytes]:
         if message.strip() == CHIME_MARKER:
             return await self._tone()
-        stream = self._forward(language, options)
-        stream.async_set_message(message)
-        return stream.extension, b"".join([chunk async for chunk in stream.async_stream_result()])
+        if not message.strip():
+            return "wav", _silence_wav()
+
+        async def one() -> AsyncGenerator[str]:
+            yield message
+
+        response = await self._inner_stream(language, options, one())
+        return response.extension, b"".join([chunk async for chunk in response.data_gen])
 
     async def async_stream_tts_audio(self, request: TTSAudioRequest) -> TTSAudioResponse:
-        """Stream through to the real TTS; the marker is checked on the start of the text only."""
+        """Stream through to the real TTS; only a text that is exactly the marker becomes the tone."""
         gen = request.message_gen
         head = ""
         ended = False
-        # read until the text can no longer be the marker (it is never streamed in pieces by the LLM)
+        # read while the text could still be the marker (Polyglot sends it as one piece)
         while len(head.strip()) <= len(CHIME_MARKER) and CHIME_MARKER.startswith(head.strip()):
             try:
                 head += await gen.__anext__()
             except StopAsyncIteration:
                 ended = True
                 break
-        if head.strip() == CHIME_MARKER and not ended:
-            # the marker alone means tone; anything after it means: speak everything
-            async for chunk in gen:
-                head += chunk
-                if chunk.strip():
-                    break
-            else:
-                ended = True
-        if head.strip() == CHIME_MARKER and ended:
-            ext, data = await self._tone()
+        if ended and head.strip() in (CHIME_MARKER, ""):
+            ext, data = await self._tone() if head.strip() else ("wav", _silence_wav())
 
-            async def tone_gen() -> AsyncGenerator[bytes]:
+            async def fixed() -> AsyncGenerator[bytes]:
                 yield data
 
-            return TTSAudioResponse(ext, tone_gen())
+            return TTSAudioResponse(ext, fixed())
 
         async def text_gen() -> AsyncGenerator[str]:
             if head:  # never read the marker aloud
@@ -149,7 +189,4 @@ class PolyglotToneTTS(TextToSpeechEntity):
                 async for chunk in gen:
                     yield chunk
 
-        stream = self._forward(request.language, request.options)
-        stream.async_set_message_stream(text_gen())
-        return TTSAudioResponse(stream.extension, stream.async_stream_result())
-
+        return await self._inner_stream(request.language, request.options, text_gen())
