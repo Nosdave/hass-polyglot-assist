@@ -585,9 +585,10 @@ class PolyglotAssistPanel extends HTMLElement {
     if (!this.s.uiShipped) return ""; // not loaded yet
     const shipped = this.s.uiShipped;
     const isShipped = (l) => shipped.includes(l) || shipped.includes(baseLang(l));
-    const candidates = [...new Set([...this._enabledLangs(), ...this._wsLangs, ...(okLang(this._uiPref) ? [this._uiPref] : [])])].filter((l) => beLang(l) && !isShipped(l));
+    const active = okLang(this._uiPref) ? this._uiPref : this._haLang(); // the language the panel shows right now
+    const candidates = [...new Set([active, ...this._enabledLangs(), ...this._wsLangs])].filter((l) => beLang(l) && !isShipped(l));
     if (!candidates.length) return "";
-    const target = candidates.includes(this.s.uiNew) ? this.s.uiNew : candidates.includes(this._uiPref) ? this._uiPref : candidates[0];
+    const target = candidates.includes(this.s.uiNew) ? this.s.uiNew : candidates.includes(active) ? active : candidates[0];
     const lang = "";
     const en = this._enTexts || {};
     const own = this.s.uiOwn && this.s.uiOwn.lang === target ? this.s.uiOwn : null;
@@ -600,7 +601,7 @@ class PolyglotAssistPanel extends HTMLElement {
       <p class="hint">${own ? (own.machine.length ? t("uitexts.machine", { count: own.machine.length }) : t("uitexts.own", { count: Object.keys(own.texts).length })) : t("uitexts.none")}</p>${this._msg("ui")}
       ${own ? `<input type="search" data-bind="uiFilter" value="${esc(this.s.uiFilter || "")}" placeholder="${t("uitexts.filter")}" aria-label="${t("uitexts.filter")}" style="width:100%;margin:8px 0">
       <div class="tbl"><table><thead><tr><th>English</th><th>${esc(this._endonym(target))}</th></tr></thead><tbody>
-      ${keys.map((k) => `<tr><td class="desc">${esc(en[k])}</td><td><input type="text" data-uikey="${esc(k)}" data-l="${esc(target)}" value="${esc(own.texts[k] || "")}" style="width:100%" aria-label="${esc(en[k])}">${own.machine.includes(k) ? ` <span class="chip warn">${t("uitexts.machine_chip")}</span>` : ""}</td></tr>`).join("")}
+      ${keys.map((k) => `<tr><td class="desc">${esc(en[k])}</td><td><input type="text" data-uikey="${esc(k)}" data-l="${esc(target)}" value="${esc((this.s.uiDraft || {})[target + "|" + k] ?? own.texts[k] ?? "")}" style="width:100%" aria-label="${esc(en[k])}">${own.machine.includes(k) ? ` <span class="chip warn">${t("uitexts.machine_chip")}</span>` : ""}</td></tr>`).join("")}
       </tbody></table></div>` : ""}</div>`;
   }
 
@@ -788,7 +789,9 @@ class PolyglotAssistPanel extends HTMLElement {
       return;
     }
     if (el.dataset.uikey) {
-      try { await this._hass.callWS({ type: "polyglot_assist/ui_texts/set", lang: el.dataset.l, key: el.dataset.uikey, text: el.value.trim() ? el.value : null });
+      const draftKey = el.dataset.l + "|" + el.dataset.uikey, value = el.value;
+      try { await this._hass.callWS({ type: "polyglot_assist/ui_texts/set", lang: el.dataset.l, key: el.dataset.uikey, text: value.trim() ? value : null });
+        if (this.s.uiDraft && this.s.uiDraft[draftKey] === value) { const d = { ...this.s.uiDraft }; delete d[draftKey]; this.s.uiDraft = d; }
         const own = await this._hass.callWS({ type: "polyglot_assist/ui_texts/get", lang: el.dataset.l });
         this.s.uiOwn = { lang: el.dataset.l, texts: flatten(own.texts), machine: own.machine || [] };
         if (el.dataset.l === this._uiPref) await this._loadTexts();
@@ -807,7 +810,7 @@ class PolyglotAssistPanel extends HTMLElement {
       Object.assign(this.s, { entryId: el.value, selected: null, monitor: null, catsOpen: false, catEdit: null,
         nameSugg: null, langSugg: null, testResult: undefined, corpus: null, confirmDelete: null, lang: null, msg: {},
         setLoaded: false, setRun: (this.s.setRun || 0) + 1, pipes: null, agents: null, langCheck: null, langChosen: null, langOffered: null,
-        sttTest: null, sttBusy: false, uiOwn: null, uiBusy: false, uiNew: null, uiFilter: "", fbBusy: false, langApplying: false,
+        sttTest: null, sttBusy: false, uiOwn: null, uiBusy: false, uiNew: null, uiFilter: "", uiDraft: {}, fbBusy: false, langApplying: false,
         langRun: (this.s.langRun || 0) + 1, langBusy: false, langSteps: null });
       try { localStorage.setItem("polyglot-entry", el.value); } catch (e) { /* per-viewer convenience only */ }
       await this._reload(["overview", "data", "proposals", "monitor"]); return;
@@ -830,7 +833,12 @@ class PolyglotAssistPanel extends HTMLElement {
     }
   }
 
-  _input(e) { if (e.target.dataset.bind === "query") { this.s.query = e.target.value; clearTimeout(this._qt); this._qt = setTimeout(() => { const pos = e.target.selectionStart; this._render(); const i = this.shadowRoot.querySelector('[data-bind="query"]'); if (i) { i.focus(); i.setSelectionRange(pos, pos); } }, 250); } }
+  _input(e) {
+    if (e.target.dataset.uikey) { // keep what is typed: a re-render while another row saves must not lose it
+      this.s.uiDraft = { ...(this.s.uiDraft || {}), [e.target.dataset.l + "|" + e.target.dataset.uikey]: e.target.value };
+      return;
+    }
+    if (e.target.dataset.bind === "query") { this.s.query = e.target.value; clearTimeout(this._qt); this._qt = setTimeout(() => { const pos = e.target.selectionStart; this._render(); const i = this.shadowRoot.querySelector('[data-bind="query"]'); if (i) { i.focus(); i.setSelectionRange(pos, pos); } }, 250); } }
 
   async _setNames(target, lang, names) {
     const r = await this.ws("names/set", { target, lang, names, base_rev: this.s.data.rev });
