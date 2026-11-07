@@ -24,6 +24,7 @@ from homeassistant.helpers.storage import Store
 from .const import DOMAIN
 from .corpus import OTHER_CATEGORY, names_table, static_lists
 from .proposals import check_item
+from .safety import action_target_reason, protected_reason, sensitive_entities
 from .translate import async_propose_names, async_propose_new_command
 
 COMMAND_DOMAINS = {"script": "script.turn_on", "scene": "scene.turn_on",
@@ -34,17 +35,17 @@ MAX_NAME_TARGETS_PER_RUN = 8
 
 # keyword → category (German default names, editable by the user)
 CATEGORY_RULES = [
-    (r"licht|lamp|light|ambiente|esstisch", "Licht"),
-    (r"energie|strom|batterie|pv|solar|power", "Energie"),
-    (r"wetter|weather|regen|temperatur", "Wetter"),
-    (r"waesche|wäsche|wasch|trockner|laundry", "Wäsche"),
-    (r"tram|abfahrt|fahrzeit|zug|bus|route|verkehr", "Unterwegs"),
-    (r"musik|music|radio|fernseh|tv|artframe|media", "Medien"),
-    (r"haustuer|haustür|garage|lift|tesla|tor|door", "Zugang & Fahrzeug"),
-    (r"rolll|rollo|jalousie|verschatt|cover|blind", "Rollläden"),
-    (r"einkauf|shopping|liste", "Einkauf"),
+    (r"licht|lamp|light|leuchte", "Licht"),
+    (r"energie|strom|batterie|solar|power|energy", "Energie"),
+    (r"wetter|weather|regen|temperatur|météo", "Wetter"),
+    (r"waesche|wäsche|wasch|trockner|laundry|dryer", "Wäsche"),
+    (r"abfahrt|fahrzeit|zug|bus|route|verkehr|commute|transit", "Unterwegs"),
+    (r"musik|music|radio|fernseh|\btv\b|media|film", "Medien"),
+    (r"(^|[^a-z])(tür|tuer|door|garage|gate|lock|auto|car)([^a-z]|$)", "Zugang & Fahrzeug"),
+    (r"rolll|rollo|jalousie|verschatt|\bcover\b|blind|shutter", "Rollläden"),
+    (r"einkauf|shopping|einkaufsliste", "Einkauf"),
 ]
-QUESTION_RE = re.compile(r"status|frage|wie|welche|wann|info|wetter|abfahrt|fahrzeit|ende|fertig|zeit", re.I)
+QUESTION_RE = re.compile(r"status|frage|question|\bwie\b|welche|\bwann\b|\binfo|wetter|weather|abfahrt|fertig|\bdone\b", re.I)
 
 
 def _camel(text: str) -> str:
@@ -111,7 +112,8 @@ async def async_discover(
     slot_lists = {**matcher.static_slot_lists(), **runtime["lists"].async_get()}
     entry_id = runtime["entry"].entry_id
     seen_store: Store[dict[str, Any]] = Store(hass, 1, f"{DOMAIN}.seen.{entry_id}")
-    seen = set((await seen_store.async_load() or {}).get("entities", []))
+    stored_seen = await seen_store.async_load()
+    seen = set((stored_seen or {}).get("entities", []))
 
     registry = er.async_get(hass)
     exposed = [
@@ -119,13 +121,29 @@ async def async_discover(
         if async_should_expose(hass, "conversation", s.entity_id)
     ]
     covered = covered_entities(config)
+    if only_new and stored_seen is None:
+        # first run: remember today's devices as the baseline, propose nothing
+        await seen_store.async_save({"entities": sorted(s.entity_id for s in exposed)})
+        return {"items": [], "errors": [], "baseline": len(exposed)}
+    sensitive = sensitive_entities(config)
+    extra = names_table(config)
+    # protected devices are never proposed (locks, doors, garage, cars, …)
+    exposed = [
+        s for s in exposed
+        if s.domain in ("script", "scene", "button", "input_button")
+        or protected_reason(hass, s.entity_id, sensitive_entities=sensitive, extra_names=extra) is None
+    ]
     fresh = [s for s in exposed if s.entity_id not in seen] if only_new else exposed
+    processed: set[str] = set()
     origin_source = "new_devices" if only_new else "starter"
     items: list[dict[str, Any]] = []
     errors: list[str] = []
 
     # 1) commands for scripts / scenes / buttons
     for state in [s for s in fresh if s.domain in COMMAND_DOMAINS and s.entity_id not in covered][:MAX_COMMANDS_PER_RUN]:
+        processed.add(state.entity_id)
+        if action_target_reason(hass, state.entity_id, sensitive=sensitive, extra_names=extra):
+            continue  # script/scene/button that touches something protected
         name = _camel(f"{state.domain} {state.name}")
         if name in (config.get("intents") or {}):
             continue
@@ -181,6 +199,7 @@ async def async_discover(
             area = areas.async_get_area(entry.area_id) if entry and entry.area_id else None
             targets.setdefault(state.entity_id, (state.name, f"{state.domain} device", area.name if area else ""))
     targets = dict(list(targets.items())[:MAX_NAME_TARGETS_PER_RUN])
+    processed |= set(targets)
     if targets and other_langs:
         names = await async_propose_names(
             hass, ai_task_entity=ai_task, targets=targets, languages=other_langs,
@@ -203,5 +222,7 @@ async def async_discover(
 
     if not only_new:
         items += classify_existing(config)
-    await seen_store.async_save({"entities": sorted({s.entity_id for s in exposed} | seen)})
+    # only what was really looked at counts as seen; the rest comes next time
+    handled = processed | {s.entity_id for s in fresh if s.domain not in COMMAND_DOMAINS and s.domain not in NAME_DOMAINS}
+    await seen_store.async_save({"entities": sorted(seen | handled)})
     return {"items": items, "errors": errors[:20]}

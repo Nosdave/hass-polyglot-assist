@@ -117,3 +117,34 @@ def build_extra_prompt(
         # so send the base prompt or a neutral instruction instead.
         hint = NEUTRAL_HINT
     return "\n\n".join(p for p in (base, f"{HINT_MARKER}\n{hint}") if p)
+
+
+# Speech-to-text sometimes writes short German words in Cyrillic ("Кауч аус"
+# for "Couch aus"). If no enabled language uses Cyrillic, such text is
+# transliterated (German-oriented) before matching.
+_CYR = {
+    "а": "a", "б": "b", "в": "w", "г": "g", "д": "d", "е": "e", "ё": "jo", "ж": "sch", "з": "s",
+    "и": "i", "й": "i", "к": "k", "л": "l", "м": "m", "н": "n", "о": "o", "п": "p", "р": "r",
+    "с": "s", "т": "t", "у": "u", "ф": "f", "х": "ch", "ц": "z", "ч": "tsch", "ш": "sch",
+    "щ": "schtsch", "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "ju", "я": "ja",
+}
+CYRILLIC_LANGS = {"ru", "uk", "bg", "sr", "mk", "be", "kk"}
+
+
+def transliterate_cyrillic(text: str, languages: list[str]) -> str | None:
+    """Latin version of a mostly Cyrillic text, or None if not applicable."""
+    if any(lang.split("-")[0] in CYRILLIC_LANGS for lang in languages):
+        return None
+    letters = [c for c in text if c.isalpha()]
+    cyr = [c for c in letters if "\u0400" <= c <= "\u04ff"]
+    if not letters or len(cyr) * 2 < len(letters):
+        return None
+    out = []
+    for c in text:
+        low = c.lower()
+        if low in _CYR:
+            t = _CYR[low]
+            out.append(t.capitalize() if c.isupper() and t else t)
+        else:
+            out.append(c)
+    return "".join(out)

@@ -362,17 +362,17 @@ def test_categories_kind_response_mode():
 
 def test_proposal_operations():
     P = proposals
-    data = {"lists": {"raum": {"values": [{"in": "gang", "out": "light.gang_west"}]}},
+    data = {"lists": {"raum": {"values": [{"in": "hall", "out": "light.hall_west"}]}},
             "intents": {"A": {"sentences": {"de": ["a", "b"]}}}}
     P.apply_op(data, {"op": "add_sentences", "payload": {"intent": "A", "lang": "fr", "sentences": ["x"]}})
     P.apply_op(data, {"op": "remove_sentences", "payload": {"intent": "A", "lang": "de", "sentences": ["b"]}})
     P.apply_op(data, {"op": "set_field", "payload": {"intent": "A", "field": "category", "value": "Licht"}})
-    P.apply_op(data, {"op": "set_list_value", "payload": {"list": "raum", "in": "gang", "out": "light.gang_ost"}})
+    P.apply_op(data, {"op": "set_list_value", "payload": {"list": "raum", "in": "hall", "out": "light.hall_east"}})
     P.apply_op(data, {"op": "add_names", "payload": {"target": "light.couch", "lang": "fr", "names": ["canapé"]}})
     P.apply_op(data, {"op": "add_intent", "payload": {"name": "B", "intent": {"sentences": {"de": ["c"]}}}})
     assert data["intents"]["A"]["sentences"] == {"de": ["a"], "fr": ["x"]}
     assert data["categories"] == ["Licht"] and data["intents"]["A"]["category"] == "Licht"
-    assert data["lists"]["raum"]["values"] == [{"in": "gang", "out": "light.gang_ost"}]
+    assert data["lists"]["raum"]["values"] == [{"in": "hall", "out": "light.hall_east"}]
     assert data["names"]["light.couch"]["fr"] == ["canapé"]
     for bad in ({"op": "remove_sentences", "payload": {"intent": "A", "lang": "de", "sentences": ["zzz"]}},
                 {"op": "add_intent", "payload": {"name": "A", "intent": {}}},

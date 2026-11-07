@@ -6,11 +6,15 @@ Home Assistant ships (``home-assistant-intents``) in all enabled languages —
 with Polyglot's runtime lists, so the per-language name table works too
 ("salon" → area "Wohnzimmer") — and runs the built-in intent handler.
 
-Safety: only an allowlist of everyday intents is executed, entities in
-security-relevant domains (locks, alarms, valves, garage/door/gate covers)
-are never targeted this way (the sentence goes on to the assistant, which has
-its own rules), and Home Assistant's handlers only see entities exposed to
-Assist.
+Safety: only an allowlist of everyday intents is executed. Before anything
+runs, the REAL targets are resolved with Home Assistant's own matching (all
+candidates, duplicates included) and every one is checked by safety.py —
+locks, alarms, scripts, scenes, buttons, covers that are not clearly window
+coverings, anything named like a door/gate/garage/lock/car and anything a
+security-relevant Polyglot command uses are refused; the sentence then goes on
+to the assistant, which has its own rules. The name slot is passed as the
+checked entity id, so exactly the checked entity is switched. Home
+Assistant's handlers only see entities exposed to Assist.
 """
 from __future__ import annotations
 
@@ -29,7 +33,7 @@ from homeassistant.helpers.template import Template
 _LOGGER = logging.getLogger(__name__)
 
 ALLOWED_INTENTS = {
-    "HassTurnOn", "HassTurnOff", "HassToggle", "HassLightSet", "HassSetPosition",
+    "HassTurnOn", "HassTurnOff", "HassLightSet", "HassSetPosition",
     "HassStartTimer", "HassCancelTimer", "HassCancelAllTimers", "HassIncreaseTimer",
     "HassDecreaseTimer", "HassPauseTimer", "HassUnpauseTimer", "HassTimerStatus",
     "HassGetCurrentTime", "HassGetCurrentDate", "HassGetWeather",
@@ -76,8 +80,14 @@ class BuiltinIntents:
                 "skip_words": data.get("skip_words") or [],
             }
             try:
+                built = Intents.from_dict(payload)
+                for sl in built.slot_lists.values():  # build lazy indexes once, here
+                    try:
+                        sl.get_candidates("")
+                    except Exception:  # noqa: BLE001
+                        pass
                 self._by_lang[lang] = (
-                    Intents.from_dict(payload),
+                    built,
                     (data.get("responses") or {}).get("intents") or {},
                     list(data.get("skip_words") or []),
                 )
@@ -89,7 +99,8 @@ class BuiltinIntents:
         return list(self._by_lang)
 
     def recognize(
-        self, text: str, lang: str, slot_lists: dict[str, SlotList]
+        self, text: str, lang: str, slot_lists: dict[str, SlotList],
+        intent_context: dict[str, Any] | None = None,
     ) -> tuple[RecognizeResult, dict[str, Any]] | None:
         """Blocking: best built-in match in ``lang`` (call in the executor)."""
         entry = self._by_lang.get(lang)
@@ -100,7 +111,10 @@ class BuiltinIntents:
         for ref in ("name", "area", "floor"):
             lists.setdefault(ref, _empty(ref))
         try:
-            result = recognize_best(text, intents, slot_lists=lists, skip_words=skip_words, language=lang)
+            result = recognize_best(
+                text, intents, slot_lists=lists, skip_words=skip_words, language=lang,
+                intent_context=intent_context,
+            )
         except Exception:  # noqa: BLE001 — e.g. a list Polyglot does not provide
             return None
         return (result, responses) if result is not None else None
@@ -145,14 +159,74 @@ def is_blocked(hass: HomeAssistant, result: RecognizeResult) -> str | None:
 
 
 def preferred_area(hass: HomeAssistant, satellite_id: str | None, device_id: str | None) -> str | None:
-    if satellite_id and (entry := er.async_get(hass).async_get(satellite_id)) and entry.area_id:
-        return entry.area_id
-    if device_id:
-        from homeassistant.helpers import device_registry as dr  # noqa: PLC0415
+    """Area of the satellite entity, else of its device, else of device_id."""
+    from homeassistant.helpers import device_registry as dr  # noqa: PLC0415
 
+    if satellite_id and (entry := er.async_get(hass).async_get(satellite_id)):
+        if entry.area_id:
+            return entry.area_id
+        device_id = device_id or entry.device_id
+    if device_id:
         device = dr.async_get(hass).async_get(device_id)
         if device and device.area_id:
             return device.area_id
+    return None
+
+
+def build_slots(result: RecognizeResult) -> dict[str, Any]:
+    """Slots for the built-in handler; the name is the matched entity id."""
+    slots: dict[str, Any] = {
+        name: {"value": ent.value, "text": ent.text or ent.value}
+        for name, ent in (result.entities or {}).items()
+    }
+    entity_id = (result.context or {}).get("entity_id")
+    if "name" in slots and isinstance(entity_id, str):
+        slots["name"] = {"value": entity_id, "text": slots["name"]["text"]}
+    return slots
+
+
+def check_targets(
+    hass: HomeAssistant,
+    result: RecognizeResult,
+    slots: dict[str, Any],
+    area_id: str | None,
+    *,
+    sensitive: set[str],
+    extra_names: dict[str, list[str]],
+) -> str | None:
+    """Resolve every possible target like Home Assistant will and check each."""
+    from .safety import protected_reason  # noqa: PLC0415
+
+    def _val(key: str) -> Any:
+        return (slots.get(key) or {}).get("value")
+
+    def _list(value: Any) -> list[str] | None:
+        if value is None:
+            return None
+        return [str(v) for v in value] if isinstance(value, list) else [str(value)]
+
+    if not any(_val(k) for k in ("name", "area", "floor", "domain", "device_class")):
+        return None  # timers, time, weather, shopping list: no device targets
+    constraints = intent.MatchTargetsConstraints(
+        name=_val("name"),
+        area_name=_val("area"),
+        floor_name=_val("floor"),
+        domains=_list(_val("domain")),
+        device_classes=_list(_val("device_class")),
+        assistant="conversation",
+        allow_duplicate_names=True,
+    )
+    matched = intent.async_match_targets(
+        hass, constraints, intent.MatchTargetsPreferences(area_id=area_id)
+    )
+    candidates = list(matched.states or [])
+    if not candidates and _val("name"):
+        # also look without area preference (superset)
+        candidates = list(intent.async_match_targets(hass, constraints).states or [])
+    for state in candidates:
+        reason = protected_reason(hass, state.entity_id, sensitive_entities=sensitive, extra_names=extra_names)
+        if reason:
+            return f"{state.entity_id}: {reason}"
     return None
 
 
@@ -169,10 +243,7 @@ async def async_handle_builtin(
     agent_id: str | None,
 ) -> intent.IntentResponse:
     """Run the built-in handler and render Home Assistant's own answer."""
-    slots: dict[str, Any] = {
-        name: {"value": ent.value, "text": ent.text or ent.value}
-        for name, ent in (result.entities or {}).items()
-    }
+    slots = build_slots(result)
     if (area_id := preferred_area(hass, satellite_id, device_id)) is not None:
         slots["preferred_area_id"] = {"value": area_id}
     response = await intent.async_handle(
@@ -193,6 +264,8 @@ async def async_handle_builtin(
         template_text = (responses.get(result.intent.name) or {}).get(key)
         if template_text:
             speech_slots = {name: ent.text or ent.value for name, ent in (result.entities or {}).items()}
+            if "name" in speech_slots and response.matched_states:
+                speech_slots["name"] = response.matched_states[0].name
             speech_slots |= response.speech_slots
             state1 = (response.matched_states or response.unmatched_states or [None])[0]
             from homeassistant.helpers.template import TemplateState  # noqa: PLC0415

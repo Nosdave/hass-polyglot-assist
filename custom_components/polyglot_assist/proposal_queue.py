@@ -39,20 +39,22 @@ class ProposalQueue:
             hass, STORAGE_VERSION, f"{DOMAIN}.proposals.{entry_id}", atomic_writes=True
         )
         self._items: list[dict[str, Any]] | None = None
+        self._rejected: list[str] = []
 
     async def async_items(self) -> list[dict[str, Any]]:
         if self._items is None:
             stored = await self._store.async_load() or {}
             self._items = list(stored.get("items") or [])
+            self._rejected = list(stored.get("rejected") or [])
         return self._items
 
     async def _save(self) -> None:
-        await self._store.async_save({"items": self._items or []})
+        await self._store.async_save({"items": self._items or [], "rejected": self._rejected[-2000:]})
 
     async def async_add(self, items: list[dict[str, Any]]) -> list[str]:
         """Add proposals (deduplicated by content). Returns the new ids."""
         current = await self.async_items()
-        known = {i["id"] for i in current}
+        known = {i["id"] for i in current} | set(self._rejected)
         added: list[str] = []
         for item in items:
             if item.get("op") not in OPS:
@@ -70,6 +72,12 @@ class ProposalQueue:
         del current[:-MAX_ITEMS]
         await self._save()
         return added
+
+    async def async_reject(self, ids: list[str]) -> int:
+        """Remove and remember: a rejected proposal is never proposed again."""
+        await self.async_items()
+        self._rejected = [i for i in self._rejected if i not in set(ids)] + list(dict.fromkeys(ids))
+        return await self.async_remove(ids)
 
     async def async_remove(self, ids: list[str]) -> int:
         current = await self.async_items()

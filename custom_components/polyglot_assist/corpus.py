@@ -254,7 +254,7 @@ def validate(
             if value is not None and value not in allowed:
                 problems.append(f"{name}: {key} must be one of {', '.join(allowed)}")
         category = (cfg or {}).get("category")
-        if category is not None and categories is not None and category not in categories:
+        if category is not None and categories is not None and category not in categories and category != OTHER_CATEGORY:
             problems.append(f"{name}: unknown category {category!r}")
         safety = (cfg or {}).get("safety")
         if safety is not None and safety not in SAFETY_LEVELS:

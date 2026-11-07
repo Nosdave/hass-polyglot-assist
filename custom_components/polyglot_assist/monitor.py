@@ -1,9 +1,10 @@
 """Optional voice-flow monitoring with the household's own AI task.
 
 When switched on, Polyglot keeps a local log of the last ``MAX_LOG`` requests
-it saw (text only — no audio — stays in Home Assistant): hit or handed to the
-assistant, what the assistant then did (targets of its answer), errors and
-duration. Once a day (configurable) it evaluates the log:
+it saw (stays in Home Assistant, no audio): the sentence, hit or handed to the
+assistant, the tools the assistant called (shortened arguments), the first
+200 characters of its answer (which may contain web results), errors,
+duration and the device id. Switching monitoring off deletes the log. Once a day (configurable) it evaluates the log:
 
 * sentences that repeatedly needed the assistant although they led to a
   plain device action → proposals for Polyglot sentences (via the AI task
@@ -34,7 +35,8 @@ _LOGGER = logging.getLogger(__name__)
 MAX_LOG = 500
 CORRECTION_WINDOW = timedelta(seconds=90)
 CORRECTION_RE = re.compile(
-    r"^(nein|ne|falsch|stop|ich hab(e)? (doch )?gesagt|nicht (das|den|die)|no|wrong|i said|non|pas (ça|celui))\b",
+    r"^(nein|falsch|ich hab(e)? (doch )?gesagt|ich meinte|nicht (das|den|die)|"
+    r"no[,!]|wrong|i said|i meant|non[,!]|pas (ça|celui)|je voulais dire)",
     re.I,
 )
 
@@ -88,6 +90,11 @@ class Monitor:
             self._unsub()
             self._unsub = None
 
+    async def async_flush(self) -> None:
+        """Write pending changes now (on unload) so no timer writes later."""
+        if self._log is not None:
+            await self._store.async_save({"log": self._log, "summary": self._summary})
+
     async def async_clear(self) -> None:
         self._log = []
         self._summary = {}
@@ -103,6 +110,8 @@ class Monitor:
     def find_corrections(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out = []
         for prev, cur in zip(entries, entries[1:]):
+            if prev.get("device") != cur.get("device"):
+                continue
             t_prev, t_cur = dt_util.parse_datetime(prev["ts"]), dt_util.parse_datetime(cur["ts"])
             if t_prev and t_cur and t_cur - t_prev <= CORRECTION_WINDOW and CORRECTION_RE.search(cur.get("text", "").strip()):
                 out.append({"before": prev.get("text"), "answer": prev.get("speech"), "correction": cur.get("text"),

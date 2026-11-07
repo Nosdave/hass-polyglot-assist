@@ -63,8 +63,7 @@ async def async_prepare_catalog_actions(
     hass: HomeAssistant, config: dict[str, Any], own: list[str] | None = None
 ) -> list[CatalogIntentHandler]:
     """Validate every catalog action (async) without registering anything."""
-    own = own or []
-    taken = {h.intent_type for h in intent.async_get(hass)} - set(own)
+    taken = {h.intent_type for h in intent.async_get(hass) if not isinstance(h, CatalogIntentHandler)}
     handlers: list[CatalogIntentHandler] = []
     for name, cfg in (config.get("intents") or {}).items():
         if not isinstance(cfg, dict) or not cfg.get("action"):
@@ -91,12 +90,16 @@ def async_swap_catalog_actions(
     """Replace the previous handlers in one synchronous step (no gap)."""
     new_names = {h.intent_type for h in handlers}
     async_unregister_catalog_actions(hass, [n for n in old if n not in new_names])
+    registered: list[str] = []
     for handler in handlers:
         current = next((h for h in intent.async_get(hass) if h.intent_type == handler.intent_type), None)
-        if isinstance(current, CatalogIntentHandler):
+        if current is not None and not isinstance(current, CatalogIntentHandler):
+            continue  # an intent_script registered meanwhile: it wins
+        if current is not None:
             intent.async_remove(hass, handler.intent_type)  # avoid the overwrite warning
         intent.async_register(hass, handler)
-    return sorted(new_names)
+        registered.append(handler.intent_type)
+    return sorted(registered)
 
 
 async def async_register_catalog_actions(hass: HomeAssistant, config: dict[str, Any]) -> list[str]:

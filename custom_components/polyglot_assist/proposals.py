@@ -401,8 +401,20 @@ class QueueError(Exception):
     """Proposal cannot be applied (message safe to show)."""
 
 
+def _canonical(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _canonical(v) for k, v in value.items()}
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return sorted(value)
+    if isinstance(value, list):
+        return [_canonical(v) for v in value]
+    return value
+
+
 def proposal_id(item: dict[str, Any]) -> str:
-    raw = json.dumps({k: item.get(k) for k in ("op", "payload")}, sort_keys=True, ensure_ascii=False, default=str)
+    raw = json.dumps(
+        _canonical({k: item.get(k) for k in ("op", "payload")}), sort_keys=True, ensure_ascii=False, default=str
+    )
     return hashlib.sha256(raw.encode()).hexdigest()[:12]
 
 
@@ -415,12 +427,26 @@ def _intent(data: dict[str, Any], name: str) -> dict[str, Any]:
 
 def apply_op(data: dict[str, Any], item: dict[str, Any]) -> None:
     """Apply one proposal to an intents document (in place). Raises QueueError."""
+    try:
+        _apply_op(data, item)
+    except QueueError:
+        raise
+    except (KeyError, TypeError, AttributeError) as err:
+        raise QueueError(f"malformed proposal ({err})") from None
+
+
+def _apply_op(data: dict[str, Any], item: dict[str, Any]) -> None:
     op, p = item.get("op"), item.get("payload") or {}
     if op == "add_intent":
         intents = data.setdefault("intents", {})
         if p["name"] in intents:
             raise QueueError(f"a command named {p['name']} already exists")
         intents[p["name"]] = copy.deepcopy(p["intent"])
+        category = p["intent"].get("category")
+        if category and category != "Sonstiges":
+            cats = data.setdefault("categories", [])
+            if category not in cats:
+                cats.append(category)
     elif op in ("add_sentences", "remove_sentences"):
         sentences = _intent(data, p["intent"]).setdefault("sentences", {})
         current = list(sentences.get(p["lang"]) or [])
@@ -441,7 +467,7 @@ def apply_op(data: dict[str, Any], item: dict[str, Any]) -> None:
             target.pop(p["field"], None)
         else:
             target[p["field"]] = copy.deepcopy(p["value"])
-        if p["field"] == "category" and p.get("value"):
+        if p["field"] == "category" and p.get("value") and p["value"] != "Sonstiges":
             cats = data.setdefault("categories", [])
             if p["value"] not in cats:
                 cats.append(p["value"])
@@ -451,6 +477,8 @@ def apply_op(data: dict[str, Any], item: dict[str, Any]) -> None:
         if op == "add_names":
             per_lang[p["lang"]] = current + [n for n in p["names"] if n not in current]
         else:
+            if not any(n in current for n in p["names"]):
+                raise QueueError("these names are no longer there")
             per_lang[p["lang"]] = [n for n in current if n not in p["names"]]
             if not per_lang[p["lang"]]:
                 del per_lang[p["lang"]]
@@ -483,11 +511,28 @@ SAFE_ACTIONS = {
     "fan.turn_on", "fan.turn_off", "media_player.media_play", "media_player.media_pause",
     "media_player.turn_on", "media_player.turn_off",
 }
-SENSITIVE_WORDS = ("lock", "alarm", "garage", "door", "tuer", "tür", "gate", "tor", "valve", "ventil", "safe")
+ENTITY_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+TARGET_KEYS = {"entity_id", "device_id", "area_id", "floor_id", "label_id"}
+# whole words (also between "_"), de/en/fr
+PROTECTED_WORDS = re.compile(
+    r"(^|[\W_])("
+    r"tür|tuer|türe|haustür|haustuer|eingangstür|tor|garagentor|garage|schloss|öffner|oeffner|summer|riegel|"
+    r"door|doors|gate|lock|unlock|opener|deadbolt|"
+    r"porte|portail|serrure|verrou|"
+    r"alarm|alarme|sirene|siren|"
+    r"auto|car|fahrzeug|vehicle|voiture|tesla|frunk|trunk|kofferraum|coffre|ladeklappe"
+    r")($|[\W_])",
+    re.I,
+)
 
 
 def check_action_safe(action: Any) -> str | None:
-    """None if ``action`` is a list of allowed one-entity steps, else the reason."""
+    """Static check: list of allowed one-entity steps, else the reason.
+
+    The dynamic check against the real entity (domain, device class, names,
+    what a script/scene touches) happens when a proposal is accepted
+    (safety.action_target_reason).
+    """
     steps = action if isinstance(action, list) else [action]
     if not steps or len(steps) > 3:
         return "a proposal may contain 1 to 3 simple steps"
@@ -499,14 +544,18 @@ def check_action_safe(action: Any) -> str | None:
             return f"{service} cannot be created by a proposal — add it by hand"
         target = step.get("target") or {}
         entity = target.get("entity_id") if isinstance(target, dict) else None
-        if not isinstance(entity, str) or set(target) - {"entity_id"}:
+        if not isinstance(target, dict) or set(target) - {"entity_id"} or not isinstance(entity, str):
             return "a proposal step targets exactly one entity"
-        if any(word in entity.lower() for word in SENSITIVE_WORDS):
+        if not ENTITY_RE.match(entity) or entity.split(".", 1)[0] != service.split(".", 1)[0]:
+            return "the target must be one entity of the action's domain"
+        if PROTECTED_WORDS.search(entity.replace("-", " ")):
             return f"{entity} looks security-relevant — add it by hand"
         data = step.get("data") or {}
-        if not isinstance(data, dict) or any(not isinstance(v, (str, int, float, bool)) for v in data.values()):
+        if not isinstance(data, dict) or set(data) & TARGET_KEYS:
+            return "step data must not contain targets"
+        if any(not isinstance(v, (str, int, float, bool)) for v in data.values()):
             return "step data must be simple values"
-        if any(isinstance(v, str) and ("{{" in v or "{%" in v) for v in data.values()):
+        if any(isinstance(v, str) and ("{" in v or "%" in v) for v in data.values()):
             return "templates are not allowed in proposal steps"
     return None
 
@@ -524,8 +573,33 @@ def check_item(item: dict[str, Any]) -> str | None:
         for text in (intent.get("speech") or {}).values():
             if not isinstance(text, str) or "{%" in text or len(text) > 200:
                 return "answers must be short plain text"
-    if item.get("op") == "set_field" and (item.get("payload") or {}).get("field") == "llm_equivalent":
-        value = (item.get("payload") or {}).get("value") or {}
-        if not isinstance(value, dict) or not isinstance(value.get("tool"), str):
+        if "llm_equivalent" in intent and _bad_equivalent(intent["llm_equivalent"]):
             return "invalid llm_equivalent"
+    if item.get("op") == "set_field" and (item.get("payload") or {}).get("field") == "llm_equivalent":
+        if _bad_equivalent((item.get("payload") or {}).get("value")):
+            return "invalid llm_equivalent"
+    return None
+
+
+def _bad_equivalent(value: Any) -> bool:
+    if not isinstance(value, dict) or not isinstance(value.get("tool"), str) or not re.match(r"^[A-Za-z0-9_]+$", value["tool"]):
+        return True
+    args = value.get("args") or {}
+    return not isinstance(args, dict) or any(not isinstance(v, str) or len(v) > 80 for v in args.values())
+
+
+SAFETY_ORDER = {"normal": 0, None: 0, "sensitive": 1, "disabled": 2}
+
+
+def check_item_against(item: dict[str, Any], data: dict[str, Any]) -> str | None:
+    """Checks that need the current intents document (no Home Assistant)."""
+    op, p = item.get("op"), item.get("payload") or {}
+    intents = data.get("intents") or {}
+    if op in ("add_sentences", "remove_sentences", "set_field") and isinstance(intents.get(p.get("intent")), dict):
+        current = intents[p["intent"]].get("safety")
+        if op == "set_field" and p.get("field") == "safety":
+            if SAFETY_ORDER.get(p.get("value"), 2) < SAFETY_ORDER.get(current, 2):
+                return "a proposal can only make a command stricter — lower the protection by hand"
+        elif current not in (None, "normal"):
+            return "security-relevant or switched-off command — change it by hand"
     return None

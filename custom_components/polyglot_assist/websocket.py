@@ -17,6 +17,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import intent
 
 from .const import (
     CONF_CHAT_LOG_TOOLS,
@@ -33,7 +34,10 @@ from .guard import GuardError, async_guarded_update, revision
 from .source import SourceError
 from .assistant import async_discover
 from .proposal_queue import ProposalQueue
-from .proposals import QueueError, apply_op, check_item
+from .actions import CatalogIntentHandler
+from .corpus import names_table
+from .proposals import QueueError, apply_op, check_item, check_item_against
+from .safety import action_target_reason, protected_reason, sensitive_entities
 from .translate import (
     ProposalError,
     async_propose_languages,
@@ -412,16 +416,28 @@ async def ws_proposals_accept(hass: HomeAssistant, connection, msg) -> None:
     queue = _queue(hass, runtime)
     wanted = set(msg["ids"])
     items = [i for i in await queue.async_items() if i["id"] in wanted]
-    refused = {}
+    config = runtime["matcher"].config
+    sensitive = sensitive_entities(config)
+    extra_names = names_table(config)
+    registered = {h.intent_type for h in intent.async_get(hass) if not isinstance(h, CatalogIntentHandler)}
+    refused: dict[str, str] = {}
+    trial = copy.deepcopy(config)
+    usable = []
     for item in items:
-        reason = check_item(item) or (
-            "; ".join(item.get("check", {}).get("notes", [])[:1]) or "has errors"
-            if item.get("check", {}).get("status") == "error"
-            else None
+        reason = check_item(item) or check_item_against(item, trial) or _dynamic_reason(
+            hass, item, sensitive, extra_names, registered
         )
+        if not reason and item.get("check", {}).get("status") == "error":
+            reason = "; ".join(item.get("check", {}).get("notes", [])[:1]) or "has errors"
+        if not reason:
+            try:
+                apply_op(trial, item)  # stale items are refused, the rest goes on
+            except QueueError as err:
+                reason = str(err)
         if reason:
             refused[item["id"]] = reason
-    usable = [i for i in items if i["id"] not in refused]
+        else:
+            usable.append(item)
     if not usable:
         connection.send_result(msg["id"], {"saved": False, "code": "nothing_usable", "refused": refused})
         return
@@ -462,7 +478,7 @@ async def ws_proposals_reject(hass: HomeAssistant, connection, msg) -> None:
     _, runtime = _runtime(hass, connection, msg)
     if runtime is None:
         return
-    removed = await _queue(hass, runtime).async_remove(msg["ids"])
+    removed = await _queue(hass, runtime).async_reject(msg["ids"])
     connection.send_result(msg["id"], {"removed": removed})
 
 
@@ -757,3 +773,23 @@ async def ws_options(hass: HomeAssistant, connection, msg) -> None:
     if any(k in changes for k in (CONF_LANGUAGES_ENABLED, CONF_MONITOR, CONF_MONITOR_TIME, CONF_CHAT_LOG_TOOLS)):
         hass.async_create_task(hass.config_entries.async_reload(entry_id))
     connection.send_result(msg["id"], {"options": {k: v for k, v in new_options.items() if k in PANEL_OPTIONS}})
+
+
+
+def _dynamic_reason(hass: HomeAssistant, item: dict, sensitive: set[str], extra_names: dict, registered: set[str]) -> str | None:
+    """Checks against the real installation before a proposal may be applied."""
+    op, p = item.get("op"), item.get("payload") or {}
+    if op == "add_intent":
+        if p.get("name") in registered:
+            return "a command with this name already exists (e.g. intent_script)"
+        for step in (p.get("intent") or {}).get("action") or []:
+            entity = ((step or {}).get("target") or {}).get("entity_id")
+            if isinstance(entity, str):
+                reason = action_target_reason(hass, entity, sensitive=sensitive, extra_names=extra_names)
+                if reason:
+                    return reason
+    if op == "set_list_value" and isinstance(p.get("out"), str) and "." in p["out"]:
+        return protected_reason(hass, p["out"], sensitive_entities=sensitive, extra_names=extra_names)
+    if op in ("add_names", "remove_names") and not str(p.get("target", "")).startswith("area."):
+        return protected_reason(hass, p.get("target", ""), sensitive_entities=sensitive, extra_names=extra_names)
+    return None

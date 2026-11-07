@@ -332,9 +332,17 @@ Home Assistant pipelines run in one language. Polyglot also understands Home
 Assistant's own commands (lights, switches, covers, timers, time, weather,
 shopping list, media …) in every enabled language, using Home Assistant's
 sentence collection with Polyglot's lists — so the name table works for them
-too. Locks, alarms, valves, garage/door/gate covers, area-only switching and
-free-text timer names are never handled this way; such sentences go on to
-your assistant. Order: Polyglot commands → built-in commands → assistant.
+too. Order: Polyglot commands → built-in commands → assistant.
+
+Before a built-in command runs, Polyglot resolves its real targets with Home
+Assistant's own matching (duplicate names included) and refuses — handing the
+sentence to your assistant instead — if any target is protected: locks,
+alarms, valves, sirens, cameras, scripts, scenes, buttons, covers that are not
+clearly window coverings, anything whose name, alias, room or device mentions
+doors, gates, garages, locks, openers, alarms or cars (de/en/fr), and anything
+a command marked *security-relevant* or *off* uses. This is deliberately
+cautious: even a lamp named "Garage" is left to the assistant. Area-only
+switching and free-text timer names are not handled this way either.
 
 ## Answer as a tone
 

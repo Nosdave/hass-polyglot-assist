@@ -133,6 +133,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.exception("Polyglot Assist: panel could not be registered")
     if entry.options.get(CONF_BUILTIN, True):
         await async_setup_builtin(hass, hass.data[DOMAIN][entry.entry_id], matcher)
+    if not entry.options.get(CONF_MONITOR, False):
+        # switched off → the local log is deleted, not kept around
+        await Monitor(hass, entry.entry_id).async_clear()
     if entry.options.get(CONF_MONITOR, False):
         monitor = Monitor(hass, entry.entry_id)
         await monitor.async_load()
@@ -147,9 +150,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except Exception:
+        failed = hass.data[DOMAIN].pop(entry.entry_id, {})
         lists.async_stop()
+        if failed.get("builtin_lists") is not None:
+            failed["builtin_lists"].async_stop()
+        if failed.get("monitor") is not None:
+            failed["monitor"].async_stop()
         async_unregister_catalog_actions(hass, actions)
-        hass.data[DOMAIN].pop(entry.entry_id, None)
         raise
 
     # Reload service (no per-entry needed for v0.1 — one global service)
@@ -375,6 +382,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             async_unregister_catalog_actions(hass, data.get("actions", []))
             if data.get("monitor") is not None:
                 data["monitor"].async_stop()
+                await data["monitor"].async_flush()
         # Last entry → unregister services
         if not hass.data[DOMAIN]:
             from .panel import async_unregister as async_unregister_panel  # noqa: PLC0415
@@ -393,6 +401,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await IntentSource(hass, entry).async_remove_catalog()
     await ProposalQueue(hass, entry.entry_id).async_clear()
     await Monitor(hass, entry.entry_id).async_clear()
+    from homeassistant.helpers.storage import Store  # noqa: PLC0415
+
+    await Store(hass, 1, f"{DOMAIN}.seen.{entry.entry_id}").async_remove()
 
 
 async def async_run_monitor(hass: HomeAssistant, data: dict) -> dict:
