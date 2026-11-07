@@ -31,7 +31,7 @@ from .const import (
     DOMAIN,
     SOURCE_CATALOG,
 )
-from .history import CatalogHistory
+from .history import change_summary, get_history, loosened
 from .corpus import count_summary, validate
 from .guard import GuardError, async_guarded_update, revision
 from .source import SourceError
@@ -60,7 +60,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_proposals_generate, ws_suggest_languages,
         ws_monitor_status, ws_monitor_run,
         ws_overview, ws_categories, ws_names_set, ws_options, ws_entries,
-        ws_history_list, ws_history_restore,
+        ws_history_list, ws_history_diff, ws_history_restore,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -821,8 +821,8 @@ def ws_entries(hass: HomeAssistant, connection, msg) -> None:
     )
 
 
-def _history(runtime: dict[str, Any]) -> CatalogHistory:
-    return runtime.setdefault("history", CatalogHistory(runtime["source"].hass, runtime["entry"].entry_id))
+def _history(runtime: dict[str, Any]):
+    return get_history(runtime["source"].hass, runtime["entry"].entry_id)
 
 
 @websocket_api.require_admin
@@ -835,7 +835,30 @@ async def ws_history_list(hass: HomeAssistant, connection, msg) -> None:
     _entry_id, runtime = _runtime(hass, connection, msg)
     if runtime is None:
         return
+    if runtime["source"].kind != SOURCE_CATALOG:
+        connection.send_error(msg["id"], "yaml_source_read_only", "the history belongs to the catalog — the active source is intents.yaml")
+        return
     connection.send_result(msg["id"], {"items": await _history(runtime).async_list()})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/history/diff", vol.Optional("entry_id"): str, vol.Required("rev"): str}
+)
+@websocket_api.async_response
+async def ws_history_diff(hass: HomeAssistant, connection, msg) -> None:
+    """What a restore of ``rev`` would change compared with now (preview)."""
+    _entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    old = await _history(runtime).async_get(msg["rev"])
+    if old is None:
+        connection.send_error(msg["id"], "not_found", "this state is no longer in the history")
+        return
+    current = await runtime["source"].async_load()
+    connection.send_result(msg["id"], {
+        "summary": change_summary(current, old), "loosened": loosened(current, old), "base_rev": revision(current),
+    })
 
 
 @websocket_api.require_admin
@@ -846,6 +869,7 @@ async def ws_history_list(hass: HomeAssistant, connection, msg) -> None:
         vol.Required("rev"): str,
         vol.Optional("base_rev"): str,
         vol.Optional("force", default=False): bool,
+        vol.Optional("confirm_loosened", default=False): bool,
     }
 )
 @websocket_api.async_response
@@ -860,7 +884,15 @@ async def ws_history_restore(hass: HomeAssistant, connection, msg) -> None:
         return
 
     def _mutate(data: dict[str, Any]) -> None:
+        # checked against the CURRENT state inside the write lock
+        weaker = loosened(data, old)
+        if weaker and not msg["confirm_loosened"]:
+            raise GuardError(
+                "confirm_loosened",
+                f"{len(weaker)} command(s) would be less protected than now — confirm explicitly",
+                {"loosened": weaker},
+            )
         data.clear()
-        data.update(old)
+        data.update(copy.deepcopy(old))
 
     await _guarded(hass, connection, msg, runtime, _mutate, actor=f"restore {msg['rev'][:8]}")

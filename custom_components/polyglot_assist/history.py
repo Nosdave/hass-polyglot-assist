@@ -18,6 +18,40 @@ from .const import DOMAIN
 
 KEEP = 20
 STORAGE_VERSION = 1
+COALESCE_SECONDS = 60  # several saves by the same actor within this time are one entry
+SAFETY_ORDER = {"normal": 0, None: 0, "sensitive": 1, "disabled": 2}
+
+
+def get_history(hass: HomeAssistant, entry_id: str) -> "CatalogHistory":
+    """The one history object of an entry (survives entry reloads)."""
+    store = hass.data.setdefault(f"{DOMAIN}_history", {})
+    if entry_id not in store:
+        store[entry_id] = CatalogHistory(hass, entry_id)
+    return store[entry_id]
+
+
+def loosened(current: dict[str, Any], old: dict[str, Any]) -> list[dict[str, Any]]:
+    """Commands a restore of ``old`` would make less protected than they are now.
+
+    Lower safety level, or a command that is gone now but would come back
+    (with an action or without protection).
+    """
+    out: list[dict[str, Any]] = []
+    now_i = current.get("intents") or {}
+    old_i = old.get("intents") or {}
+    for name, cfg in old_i.items():
+        if not isinstance(cfg, dict):
+            continue
+        then = cfg.get("safety")
+        if name in now_i and isinstance(now_i[name], dict):
+            now = now_i[name].get("safety")
+            if SAFETY_ORDER.get(then, 2) < SAFETY_ORDER.get(now, 2):
+                out.append({"intent": name, "now": now or "normal", "then": then or "normal"})
+            elif cfg.get("action") and cfg.get("action") != now_i[name].get("action"):
+                out.append({"intent": name, "now": "action", "then": "other action"})
+        elif name not in now_i and then != "disabled":  # a switched-off command coming back stays off
+            out.append({"intent": name, "now": "removed", "then": then or "normal"})
+    return out
 
 
 def change_summary(before: dict[str, Any], after: dict[str, Any]) -> dict[str, list[str]]:
@@ -40,6 +74,15 @@ def change_summary(before: dict[str, Any], after: dict[str, Any]) -> dict[str, l
     return out
 
 
+async def async_record(hass: HomeAssistant, entry_id: str, before: dict[str, Any] | None, after: dict[str, Any], actor: str) -> None:
+    """Record a write that does not go through the guard (import, source switch, repair)."""
+    if before is None:
+        return
+    from .guard import revision  # noqa: PLC0415 — guard imports this module
+
+    await get_history(hass, entry_id).async_add(before, after, rev=revision(before), actor=actor)
+
+
 class CatalogHistory:
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self._store: Store[dict[str, Any]] = Store(
@@ -60,12 +103,27 @@ class CatalogHistory:
         if not summary:
             return
         items = await self._load()
-        items.insert(0, {
-            "rev": rev, "at": dt_util.utcnow().isoformat(), "actor": actor,
-            "summary": summary, "catalog": copy.deepcopy(before),
-        })
-        del items[KEEP:]
+        now = dt_util.utcnow()
+        head = items[0] if items else None
+        head_at = dt_util.parse_datetime(head["at"]) if head and isinstance(head.get("at"), str) else None
+        if head and head.get("actor") == actor and head_at and (now - head_at).total_seconds() < COALESCE_SECONDS:
+            # same person, a moment later: keep the state before the first save,
+            # merge what changed
+            merged = dict(head.get("summary") or {})
+            for key, names in summary.items():
+                merged[key] = sorted(set(merged.get(key, [])) | set(names))[:50]
+            head.update(at=now.isoformat(), summary=merged, count=head.get("count", 1) + 1)
+        else:
+            items.insert(0, {
+                "rev": rev, "at": now.isoformat(), "actor": actor,
+                "summary": summary, "catalog": copy.deepcopy(before),
+            })
+            del items[KEEP:]
         await self._store.async_save({"items": items})
+
+    async def async_clear(self) -> None:
+        self._items = []
+        await self._store.async_remove()
 
     async def async_list(self) -> list[dict[str, Any]]:
         return [{k: v for k, v in i.items() if k != "catalog"} for i in await self._load()]

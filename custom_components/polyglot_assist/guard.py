@@ -28,7 +28,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DEFAULT_TESTS_FILE, SOURCE_CATALOG
 from .corpus import parse_corpus, run_corpus, validate
-from .history import CatalogHistory
+from .history import get_history
 from .loader import MatcherLoader
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,11 +49,16 @@ def revision(data: dict[str, Any]) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
+_LOCKS: dict[str, asyncio.Lock] = {}
+
+
 def write_lock(runtime: dict[str, Any]) -> asyncio.Lock:
-    lock = runtime.get("write_lock")
-    if lock is None:
-        lock = runtime["write_lock"] = asyncio.Lock()
-    return lock
+    """One lock per config entry — also shared with the runtime of an entry reload."""
+    entry = runtime.get("entry")
+    key = entry.entry_id if entry is not None else str(id(runtime))
+    if key not in _LOCKS:
+        _LOCKS[key] = asyncio.Lock()
+    return _LOCKS[key]
 
 
 async def _load_cases(hass: HomeAssistant) -> list:
@@ -144,8 +149,7 @@ async def async_guarded_update(
         await source.async_save(candidate)
         if kind == SOURCE_CATALOG:
             try:
-                history = runtime.setdefault("history", CatalogHistory(hass, runtime["entry"].entry_id))
-                await history.async_add(current, candidate, rev=revision(current), actor=actor)
+                await get_history(hass, runtime["entry"].entry_id).async_add(current, candidate, rev=revision(current), actor=actor)
             except Exception:  # noqa: BLE001 — the save itself succeeded; history is a convenience
                 _LOGGER.exception("Polyglot Assist: could not record the catalog history")
         old_matcher = runtime["matcher"]

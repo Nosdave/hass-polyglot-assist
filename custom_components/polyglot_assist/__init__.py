@@ -409,6 +409,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from homeassistant.helpers.storage import Store  # noqa: PLC0415
 
     await Store(hass, 1, f"{DOMAIN}.seen.{entry.entry_id}").async_remove()
+    from .history import get_history  # noqa: PLC0415
+
+    await get_history(hass, entry.entry_id).async_clear()
 
 
 async def async_run_monitor(hass: HomeAssistant, data: dict) -> dict:

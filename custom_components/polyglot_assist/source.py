@@ -202,6 +202,9 @@ class IntentSource:
             if previous is not None:
                 await self._store.async_save({"catalog": previous, "saved": dt_util.utcnow().isoformat()})
             raise
+        from .history import async_record  # noqa: PLC0415
+
+        await async_record(self.hass, self.entry.entry_id, previous, data, "import")
         return data
 
     async def async_export_yaml(self) -> Path:

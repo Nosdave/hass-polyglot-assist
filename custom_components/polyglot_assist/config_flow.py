@@ -15,6 +15,8 @@ integration:
 """
 from __future__ import annotations
 
+import copy
+
 import logging
 from typing import Any
 
@@ -51,6 +53,7 @@ from .const import (
 )
 from .corpus import same_document, validate
 from .fallback import fallback_error
+from .history import async_record
 from .guard import GuardError, async_guarded_update, write_lock
 from .loader import MatcherLoader
 from .source import IntentSource, SourceError
@@ -258,6 +261,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                     if catalog is not None:
                         await src.async_export_yaml()  # keep the replaced catalog as a file
                     await src.async_save_catalog(yaml_data)  # verified write
+                    await async_record(self.hass, self._entry.entry_id, catalog, yaml_data, "source switch")
                     catalog = await src.async_load_catalog()
                 elif not same_document(catalog, yaml_data) and choice != "keep_other":
                     errors["base"] = "sources_differ"
@@ -709,11 +713,14 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                     before = set(validate(data))
                 except Exception:  # noqa: BLE001 — the broken document is what we repair
                     before = set()
+                original = copy.deepcopy(data)
                 mutate(data)
                 new = [p for p in validate(data) if p not in before]
                 if new:
                     return "the change has errors: " + "; ".join(new[:5])
                 await self._source.async_save(data)
+                if self._source.kind == SOURCE_CATALOG:
+                    await async_record(self.hass, self._entry.entry_id, original, data, "options")
                 await self.hass.config_entries.async_reload(self._entry.entry_id)
                 return None
             await async_guarded_update(self.hass, runtime, mutate, actor="options")
