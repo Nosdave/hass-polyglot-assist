@@ -23,6 +23,7 @@ from homeassistant.helpers import intent
 from .const import (
     CONF_BUILTIN,
     CONF_CHAT_LOG_TOOLS,
+    CONF_FALLBACK_AGENT,
     CONF_LANGUAGES_ENABLED,
     CONF_MONITOR,
     CONF_MONITOR_TIME,
@@ -32,6 +33,9 @@ from .const import (
     SOURCE_CATALOG,
 )
 from .history import change_summary, get_history, loosened
+from .fallback import fallback_error
+from .settings import async_language_check, pipelines_overview
+from .ui_texts import UiTextError, get_ui_texts, shipped_languages
 from .corpus import count_summary, validate
 from .guard import GuardError, async_guarded_update, revision
 from .source import SourceError
@@ -61,6 +65,8 @@ def async_register(hass: HomeAssistant) -> None:
         ws_monitor_status, ws_monitor_run,
         ws_overview, ws_categories, ws_names_set, ws_options, ws_entries,
         ws_history_list, ws_history_diff, ws_history_restore,
+        ws_fallback_set, ws_pipelines, ws_languages_check,
+        ws_ui_texts_get, ws_ui_texts_languages, ws_ui_texts_set, ws_ui_texts_translate, ws_ui_texts_export,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -896,3 +902,149 @@ async def ws_history_restore(hass: HomeAssistant, connection, msg) -> None:
         data.update(copy.deepcopy(old))
 
     await _guarded(hass, connection, msg, runtime, _mutate, actor=f"restore {msg['rev'][:8]}")
+
+
+# ── settings: AI assistant, voice assistants, languages ─────────────────
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/fallback/set", vol.Optional("entry_id"): str, vol.Required("agent_id"): str}
+)
+@websocket_api.async_response
+async def ws_fallback_set(hass: HomeAssistant, connection, msg) -> None:
+    """Same setting as the options flow (stored in the entry data), then reload."""
+    from homeassistant.components import conversation  # noqa: PLC0415
+
+    entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    agent_id = msg["agent_id"]
+    if err := fallback_error(hass, agent_id):
+        connection.send_error(msg["id"], err, "Polyglot cannot be its own fallback (endless loop)" if err == "fallback_is_polyglot" else "choose an agent")
+        return
+    if conversation.async_get_agent(hass, agent_id) is None:
+        connection.send_error(msg["id"], "not_found", "this conversation agent does not exist")
+        return
+    entry = runtime["entry"]
+    hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_FALLBACK_AGENT: agent_id})
+    await hass.config_entries.async_reload(entry_id)  # wait: the panel shows the new state afterwards
+    connection.send_result(msg["id"], {"fallback_agent": agent_id})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): "polyglot_assist/pipelines"})
+@callback
+def ws_pipelines(hass: HomeAssistant, connection, msg) -> None:
+    """Voice assistants (read only): is Polyglot active, prefer local, STT/TTS, devices."""
+    connection.send_result(msg["id"], pipelines_overview(hass))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "polyglot_assist/languages/check",
+        vol.Optional("entry_id"): str,
+        vol.Optional("pipeline_id"): str,
+        vol.Required("languages"): [vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$")],
+    }
+)
+@websocket_api.async_response
+async def ws_languages_check(hass: HomeAssistant, connection, msg) -> None:
+    """Which of these languages work end to end (STT, AI, Polyglot, TTS)."""
+    entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    config = runtime["matcher"].config if runtime.get("matcher") else {}
+    polyglot = {
+        "sentences": count_summary(config).get("sentences", {}),
+        "builtin": runtime["builtin"].loaded if runtime.get("builtin") else [],
+    }
+    try:
+        async with asyncio.timeout(CALL_BUDGET):
+            result = await async_language_check(
+                hass, pipeline_id=msg.get("pipeline_id"), languages=msg["languages"], polyglot=polyglot,
+                ai_task=_ai_task_entity(hass, entry_id), context=connection.context(msg),
+            )
+    except TimeoutError:
+        connection.send_error(msg["id"], "timeout", "the check took too long")
+        return
+    except Exception as err:  # noqa: BLE001 — e.g. unknown pipeline
+        connection.send_error(msg["id"], "failed", str(err)[:200])
+        return
+    connection.send_result(msg["id"], result)
+
+
+# ── interface texts (panel translations) ────────────────────────────────
+
+_LANG = vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$")
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): "polyglot_assist/ui_texts/get", vol.Required("lang"): _LANG})
+@websocket_api.async_response
+async def ws_ui_texts_get(hass: HomeAssistant, connection, msg) -> None:
+    connection.send_result(msg["id"], await get_ui_texts(hass).async_get(msg["lang"]))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): "polyglot_assist/ui_texts/languages"})
+@websocket_api.async_response
+async def ws_ui_texts_languages(hass: HomeAssistant, connection, msg) -> None:
+    shipped = await hass.async_add_executor_job(shipped_languages)
+    connection.send_result(msg["id"], {"shipped": shipped, "languages": await get_ui_texts(hass).async_languages()})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/ui_texts/set", vol.Required("lang"): _LANG,
+     vol.Required("key"): vol.All(str, vol.Length(max=120)), vol.Required("text"): vol.Any(None, str)}
+)
+@websocket_api.async_response
+async def ws_ui_texts_set(hass: HomeAssistant, connection, msg) -> None:
+    try:
+        await get_ui_texts(hass).async_set(msg["lang"], msg["key"], msg["text"])
+    except UiTextError as err:
+        connection.send_error(msg["id"], "invalid", str(err))
+        return
+    connection.send_result(msg["id"], {"saved": True})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/ui_texts/translate", vol.Optional("entry_id"): str, vol.Required("lang"): _LANG}
+)
+@websocket_api.async_response
+async def ws_ui_texts_translate(hass: HomeAssistant, connection, msg) -> None:
+    entry_id, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    try:
+        result = await get_ui_texts(hass).async_translate(msg["lang"], _ai_task_entity(hass, entry_id) or "", connection.context(msg))
+    except UiTextError as err:
+        connection.send_error(msg["id"], "invalid", str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): "polyglot_assist/ui_texts/export", vol.Required("lang"): _LANG})
+@websocket_api.async_response
+async def ws_ui_texts_export(hass: HomeAssistant, connection, msg) -> None:
+    """A complete translation file (nested, like the shipped ones) for a pull request."""
+    store = get_ui_texts(hass)
+    english = await store.async_english()
+    own = (await store.async_get(msg["lang"]))["texts"]
+    nested: dict[str, Any] = {}
+    missing = []
+    for key in english:
+        text = own.get(key)
+        if text is None:
+            missing.append(key)
+            continue
+        node = nested
+        *path, leaf = key.split(".")
+        for part in path:
+            node = node.setdefault(part, {})
+        node[leaf] = text
+    connection.send_result(msg["id"], {"file": f"{msg['lang']}.json", "content": nested, "missing": missing})
