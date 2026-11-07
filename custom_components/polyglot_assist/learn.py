@@ -106,7 +106,8 @@ class VoiceLearn:
     listing: dict[tuple, tuple[float, list[str]]] = field(default_factory=dict)
     pending: dict[tuple, _Pending] = field(default_factory=dict)
     last: dict[str, dict[str, Any]] = field(default_factory=dict)  # satellite → last voice acceptance (also stored)
-    focus: dict[tuple, str] = field(default_factory=dict)  # item last talked about → "accept it" means this one
+    focus: dict[tuple, str] = field(default_factory=dict)
+    _rt_lists: dict = field(default_factory=dict)  # item last talked about → "accept it" means this one
 
     def recognize(self, text: str, languages: list[str]) -> tuple[str, str, int | None] | None:
         """(kind, lang, nth) of a learn command, or None (blocking — call in the executor)."""
@@ -146,8 +147,24 @@ class VoiceLearn:
             return say("learn_item_name", lang, names=" / ".join(p.get("names") or []),
                        target=st.name if st else str(p.get("target", "")))
         cfg = ((config or {}).get("intents") or {}).get(p.get("intent")) or {}
-        return say("learn_item_sentence", lang, sentence=_example(p.get("sentences") or [], lang),
+        lists, rules = self._lists_rules(config or {})
+        return say("learn_item_sentence", lang, sentence=_example(p.get("sentences") or [], lang, lists, rules),
                    command=cfg.get("description") or str(p.get("intent", "")))
+
+    def _lists_rules(self, config: dict[str, Any]) -> tuple[dict, dict]:
+        """Static + runtime lists and parsed rules, for speakable examples."""
+        from .corpus import build_intents, string_rules  # noqa: PLC0415
+        from .matcher import MultilangMatcher  # noqa: PLC0415
+        from .proposals import parse_rules  # noqa: PLC0415
+
+        cached = getattr(self, "_lr_cache", None)
+        if cached is None or cached[0] is not config:  # once per catalog state, not per item
+            try:
+                lists = MultilangMatcher(build_intents(config)).static_slot_lists()
+            except Exception:  # noqa: BLE001
+                lists = {}
+            cached = self._lr_cache = (config, lists, parse_rules(string_rules(config)))
+        return {**cached[1], **(self._rt_lists or {})}, cached[2]
 
     async def async_handle(
         self, runtime: dict, *, text: str, conversation_id: str | None, satellite_id: str | None,
@@ -173,8 +190,8 @@ class VoiceLearn:
         await self._load_last()
         if kind in ("yes", "no", "later") and not pending:
             return None
-        if kind == "undo" and not self._undoable(satellite_id):
-            return None
+        if kind == "undo" and (not self._undoable(satellite_id) or runtime["source"].kind != _catalog()):
+            return None  # nothing to undo — or the active source is no longer the catalog
         if kind in ("detail", "accept", "reject") and not listed:
             return None
         from .accept import queue_of  # noqa: PLC0415
@@ -183,6 +200,7 @@ class VoiceLearn:
         queue = queue_of(self.hass, runtime)
         config = runtime["matcher"].config
         rt_lists = runtime["lists"].async_get()
+        self._rt_lists = rt_lists
 
         if kind == "list":
             if runtime["source"].kind != SOURCE_CATALOG:
@@ -283,6 +301,8 @@ class VoiceLearn:
         queue = queue_of(self.hass, runtime)
         if p.action == "undo":
             undo = p.undo or {}
+            if runtime["source"].kind != _catalog():
+                return say("learn_panel_only", lang), lang, False
 
             def _mutate(data: dict) -> None:
                 apply_op(data, undo["inverse"])  # exactly what that acceptance added, nothing else
@@ -325,7 +345,13 @@ class VoiceLearn:
         return say("learn_accepted", lang), lang, False
 
 
-def _example(sentences: list[str], lang: str) -> str:
+def _catalog() -> str:
+    from .const import SOURCE_CATALOG  # noqa: PLC0415
+
+    return SOURCE_CATALOG
+
+
+def _example(sentences: list[str], lang: str, slot_lists: dict | None = None, rules: dict | None = None) -> str:
     """A speakable example of a template ("(an|ein)schalten [bitte]" → "anschalten")."""
     from hassil.parse_expression import parse_sentence  # noqa: PLC0415
 
@@ -333,7 +359,7 @@ def _example(sentences: list[str], lang: str) -> str:
 
     for template in sentences:
         try:
-            samples = bounded_samples(parse_sentence(template), {}, {}, lang, 1)
+            samples = bounded_samples(parse_sentence(template), slot_lists or {}, rules or {}, lang, 1)
         except Exception:  # noqa: BLE001
             samples = []
         if samples:
@@ -345,12 +371,12 @@ def _added(item: dict[str, Any], config: dict[str, Any]) -> dict[str, Any] | Non
     """The counter-operation of only what is NEW (existing sentences/names stay on undo)."""
     p = item.get("payload") or {}
     if item.get("op") == "add_sentences":
-        have = {norm(x) for x in (((config.get("intents") or {}).get(p.get("intent")) or {}).get("sentences") or {}).get(p.get("lang"), []) or []}
-        new = [x for x in p.get("sentences") or [] if norm(x) not in have]
+        have = set((((config.get("intents") or {}).get(p.get("intent")) or {}).get("sentences") or {}).get(p.get("lang"), []) or [])
+        new = [x for x in p.get("sentences") or [] if x not in have]  # exact, as apply_op adds
         return {"op": "remove_sentences", "payload": {**p, "sentences": new}} if new else None
     if item.get("op") == "add_names":
-        have = {norm(x) for x in (((config.get("names") or {}).get(p.get("target")) or {}).get(p.get("lang")) or [])}
-        new = [x for x in p.get("names") or [] if norm(x) not in have]
+        have = set(((config.get("names") or {}).get(p.get("target")) or {}).get(p.get("lang")) or [])
+        new = [x for x in p.get("names") or [] if x not in have]  # exact, as apply_op adds
         return {"op": "remove_names", "payload": {**p, "names": new}} if new else None
     return None
 
