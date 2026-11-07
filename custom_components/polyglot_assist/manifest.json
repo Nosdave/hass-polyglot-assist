@@ -4,7 +4,8 @@
   "after_dependencies": [
     "assist_pipeline",
     "intent",
-    "conversation"
+    "conversation",
+    "ffmpeg"
   ],
   "codeowners": [
     "@Nosdave"
