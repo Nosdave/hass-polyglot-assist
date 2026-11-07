@@ -278,17 +278,20 @@ def _harden(check: dict[str, Any], *, name: str, cfg: dict[str, Any], template: 
         return warn("what this command switches is not known (intent_script) — review it")
     entities = _action_entities(cfg.get("action"))
     if entities is None:
-        return warn("the command's targets cannot be fully checked (template, nested steps or area/device targets) — review it")
+        return warn("the command's targets cannot be fully checked (template, script, nested steps or area/device targets) — review it")
     if not entities:
         return warn("the command names no device (e.g. it runs a script) — review it")
     calls = [t.get("args") for e in evidence for t in (e.get("targets") or [])]
-    said = {_n(v) for args in calls for v in _target_values(args)}
     if any(_area_only(args) for args in calls):
         return warn("the assistant switched a whole area or floor — review which devices it means")
+    # per sentence: each sentence the template recognises must have switched ALL targets itself
+    per_sentence = [{_n(v) for t in (e.get("targets") or []) for v in _target_values(t.get("args"))} for e in evidence]
+    said = set().union(*per_sentence) if per_sentence else set()
     if entities and said and names_of is not None:
         # EVERY target of the command must be one the assistant switched for these sentences
         # (complete names / ids only — "couch" is not "couch strip")
-        extra = [e for e in entities if not {_n(n) for n in [e, *names_of(e)] if n} & said]
+        extra = [e for e in entities
+                 if any(not {_n(n) for n in [e, *names_of(e)] if n} & one for one in per_sentence)]
         if extra:
             return fail(f"this command switches something else than the assistant did ({', '.join(extra[:3])})")
     elif entities and not said:
@@ -311,6 +314,10 @@ def _action_entities(action: Any) -> list[str] | None:
     for step in action if isinstance(action, list) else [action]:
         if not isinstance(step, dict) or set(step) - _PLAIN_STEP_KEYS:
             return None
+        service = str(step.get("action") or step.get("service") or "")
+        if service.split(".", 1)[0] in ("script", "scene", "automation", "homeassistant"):
+            return None  # can do anything — not checkable here
+        before = len(found)
         for container in (step, step.get("target") or {}, step.get("data") or {}):
             if isinstance(container, dict) and any(k in container for k in _OTHER_TARGETS):
                 return None
@@ -319,6 +326,8 @@ def _action_entities(action: Any) -> list[str] | None:
                 if not isinstance(v, str) or "{" in v or not _ENTITY_ID.match(v.strip()):
                     return None
                 found.append(v.strip())
+        if len(found) == before:
+            return None  # a service step without a named entity — not checkable
     return sorted(set(found))
 
 
