@@ -39,6 +39,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_translate, ws_suggest_names,
         ws_proposals_list, ws_proposals_accept, ws_proposals_reject,
         ws_proposals_generate, ws_suggest_languages,
+        ws_monitor_status, ws_monitor_run,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -507,3 +508,51 @@ async def ws_suggest_languages(hass: HomeAssistant, connection, msg) -> None:
         connection.send_error(msg["id"], "failed", str(err) or "timeout")
         return
     connection.send_result(msg["id"], {"languages": langs})
+
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "polyglot_assist/monitor/status",
+        vol.Optional("entry_id"): str,
+        vol.Optional("limit", default=50): vol.All(int, vol.Range(min=1, max=500)),
+    }
+)
+@callback
+def ws_monitor_status(hass: HomeAssistant, connection, msg) -> None:
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    monitor = runtime.get("monitor")
+    if monitor is None:
+        connection.send_result(msg["id"], {"enabled": False})
+        return
+    connection.send_result(
+        msg["id"],
+        {"enabled": True, "summary": monitor.summary, "today": monitor.stats(monitor.window(24)),
+         "log": list(reversed(monitor.log))[: msg["limit"]]},
+    )
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/monitor/run", vol.Optional("entry_id"): str}
+)
+@websocket_api.async_response
+async def ws_monitor_run(hass: HomeAssistant, connection, msg) -> None:
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    if runtime.get("monitor") is None:
+        connection.send_error(msg["id"], "disabled", "monitoring is switched off")
+        return
+    from . import async_run_monitor  # noqa: PLC0415
+
+    try:
+        async with asyncio.timeout(TOTAL_BUDGET):
+            summary = await async_run_monitor(hass, runtime)
+    except (ProposalError, TimeoutError) as err:
+        connection.send_error(msg["id"], "failed", str(err) or "timeout")
+        return
+    connection.send_result(msg["id"], {"summary": summary})

@@ -31,7 +31,8 @@
           "source": "Intents source (YAML file or catalog)",
           "translation": "Translation proposals (AI task)",
           "languages": "Languages",
-          "answers": "Answer to commands (speech or tone)"
+          "answers": "Answer to commands (speech or tone)",
+          "monitor": "Voice-flow monitoring"
         }
       },
       "change_fallback": {
@@ -118,6 +119,14 @@
         "description": "Speech: e.g. \"Couch light on.\" Tone: a short sound instead (needs Polyglot TTS; with other TTS engines choose Speech). Only for commands marked as switching commands; questions are always spoken.",
         "data": {
           "response_mode": "Answer"
+        }
+      },
+      "monitor": {
+        "title": "Voice-flow monitoring",
+        "description": "Polyglot keeps the last 500 voice requests (text only, no audio; stays in Home Assistant). Once a day your AI task (the one chosen for proposals, without tools) looks for sentences that often needed the assistant, and puts proposals into the proposal list. Nothing changes without you accepting it.",
+        "data": {
+          "monitor": "Monitor the voice flow",
+          "monitor_time": "Daily evaluation at"
         }
       }
     },

@@ -54,7 +54,8 @@ from .const import (
     SLOT_LANG,
     SLOT_UTTERANCE,
 )
-from .langguess import HINT_MARKER, build_extra_prompt
+from .builtin import async_handle_builtin, is_blocked
+from .langguess import HINT_MARKER, build_extra_prompt, guess_language
 from .matcher import MatchResult, MultilangMatcher
 
 _LOGGER = logging.getLogger(__name__)
@@ -166,6 +167,10 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             "Polyglot miss after %.1f ms — text=%r (lang_hint=%s) → proxy to %s",
             t_miss_ms, user_input.text, user_input.language, self._fallback_agent_id,
         )
+        builtin = await self._try_builtin(runtime, user_input, chat_log, matcher, t0)
+        if builtin is not None:
+            return builtin
+
         monitor = runtime.get("monitor")
         before = len(chat_log.content)
         result = await self._proxy_to_fallback(user_input, t_miss_ms, chat_log, matcher.languages)
@@ -271,6 +276,62 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             response=response,
             conversation_id=chat_log.conversation_id,
         )
+
+    async def _try_builtin(
+        self, runtime: dict[str, Any], user_input: ConversationInput, chat_log: ChatLog,
+        matcher: MultilangMatcher, t0: float,
+    ) -> ConversationResult | None:
+        """Home Assistant's built-in commands in the detected language."""
+        builtin = runtime.get("builtin")
+        if builtin is None:
+            return None
+        langs = builtin.languages
+        detected = guess_language(user_input.text, langs)
+        candidates = [lang for lang in dict.fromkeys([detected, user_input.language]) if lang in langs]
+        if not candidates:
+            return None
+        slot_lists = runtime["builtin_lists"].async_get()
+        for lang in candidates:
+            rec = await self.hass.async_add_executor_job(builtin.recognize, user_input.text, lang, slot_lists)
+            if rec is None:
+                continue
+            result, responses = rec
+            reason = is_blocked(self.hass, result)
+            if reason:
+                _LOGGER.debug("Polyglot built-in %s refused: %s", result.intent.name, reason)
+                return None
+            try:
+                response = await async_handle_builtin(
+                    self.hass, result, responses, text=user_input.text, lang=lang,
+                    context=user_input.context, satellite_id=user_input.satellite_id,
+                    device_id=user_input.device_id, agent_id=user_input.agent_id,
+                )
+            except (intent.MatchFailedError, intent.IntentHandleError) as err:
+                _LOGGER.debug("Polyglot built-in %s did not match targets: %s", result.intent.name, err)
+                return None
+            t_ms = (time.perf_counter() - t0) * 1000.0
+            self.hass.bus.async_fire(
+                EVENT_MATCH,
+                {"entry_id": self._entry.entry_id, "intent": result.intent.name, "lang": lang,
+                 "input": user_input.text, "took_ms": round(t_ms, 1), "builtin": True,
+                 "matched_sentence": result.intent_sentence.text if result.intent_sentence else ""},
+            )
+            if self._entry.options.get(CONF_CHAT_LOG_TOOLS, False):
+                await async_record_hit(
+                    self.hass, user_input=user_input, chat_log=chat_log,
+                    intent_cfg={"llm_equivalent": {"tool": result.intent.name, "args": {
+                        k: str(v.text or v.value) for k, v in (result.entities or {}).items()
+                        if k in ("name", "area", "domain", "floor")}}},
+                    slots={}, response=response, fallback_agent_id=self._fallback_agent_id,
+                )
+            if (monitor := runtime.get("monitor")) is not None:
+                monitor.async_record(
+                    text=user_input.text, lang=lang, result="hit", intent=result.intent.name,
+                    builtin=True, ms=round(t_ms, 1), device=user_input.device_id,
+                    error=response.response_type == intent.IntentResponseType.ERROR,
+                )
+            return ConversationResult(response=response, conversation_id=chat_log.conversation_id)
+        return None
 
     def _wants_chime(self, intent_cfg: dict[str, Any], response: intent.IntentResponse) -> bool:
         """Tone only for successful commands — questions are always spoken."""

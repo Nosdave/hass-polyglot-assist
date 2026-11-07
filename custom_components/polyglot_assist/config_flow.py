@@ -36,6 +36,9 @@ from .const import (
     CONF_LANGUAGE_HINT,
     CONF_INTENTS_FILE,
     CONF_LANGUAGES_ENABLED,
+    CONF_MONITOR,
+    CONF_MONITOR_TIME,
+    DEFAULT_MONITOR_TIME,
     CONF_RESPONSE_MODE,
     RESPONSE_CHIME,
     RESPONSE_TEXT,
@@ -138,6 +141,7 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                 "translation": "Translation proposals (AI task)",
                 "languages": "Languages",
                 "answers": "Answer to commands (speech or tone)",
+                "monitor": "Voice-flow monitoring",
                 "edit_visual": "Edit intents (visual)",
                 "edit_yaml": "Edit intents (YAML)",
                 "add_intent": "Add a new intent",
@@ -380,6 +384,27 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="answers", data_schema=schema)
+
+    async def async_step_monitor(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            at = str(user_input.get(CONF_MONITOR_TIME, DEFAULT_MONITOR_TIME))[:5]
+            new_options = {**self._entry.options, CONF_MONITOR: user_input[CONF_MONITOR], CONF_MONITOR_TIME: at}
+            self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+            await self.hass.config_entries.async_reload(self._entry.entry_id)
+            return self.async_create_entry(title="", data=new_options)
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_MONITOR, default=self._entry.options.get(CONF_MONITOR, False)): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_MONITOR_TIME,
+                    default=self._entry.options.get(CONF_MONITOR_TIME, DEFAULT_MONITOR_TIME) + ":00",
+                ): selector.TimeSelector(),
+            }
+        )
+        return self.async_show_form(step_id="monitor", data_schema=schema, errors=errors)
 
     # ─────────────────────────────────────────────────────────────────
     # Edit YAML (raw view)

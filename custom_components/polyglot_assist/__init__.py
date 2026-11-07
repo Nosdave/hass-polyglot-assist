@@ -29,7 +29,12 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
     CONF_FALLBACK_AGENT,
+    CONF_BUILTIN,
     CONF_LANGUAGES_ENABLED,
+    CONF_MONITOR,
+    CONF_MONITOR_TIME,
+    CONF_TRANSLATION_AI_TASK,
+    DEFAULT_MONITOR_TIME,
     DEFAULT_TESTS_FILE,
     DOMAIN,
     SERVICE_EXPORT_YAML,
@@ -48,7 +53,10 @@ from .actions import (
     async_unregister_catalog_actions,
 )
 from .chatlog import clear_tool_cache
+from .builtin import BuiltinIntents
 from .dynlists import DynamicLists
+from .monitor import Monitor
+from .proposal_queue import ProposalQueue
 from .loader import MatcherLoader
 from . import websocket
 from .source import IntentSource, SourceError
@@ -113,6 +121,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     clear_tool_cache()
+    if entry.options.get(CONF_BUILTIN, True):
+        await async_setup_builtin(hass, hass.data[DOMAIN][entry.entry_id], matcher)
+    if entry.options.get(CONF_MONITOR, False):
+        monitor = Monitor(hass, entry.entry_id)
+        await monitor.async_load()
+        hass.data[DOMAIN][entry.entry_id]["monitor"] = monitor
+
+        async def _daily(_now=None) -> None:
+            data = hass.data[DOMAIN].get(entry.entry_id)
+            if data is not None:
+                await async_run_monitor(hass, data)
+
+        monitor.async_schedule(entry.options.get(CONF_MONITOR_TIME, DEFAULT_MONITOR_TIME), _daily)
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except Exception:
@@ -275,6 +296,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def async_setup_builtin(hass: HomeAssistant, data: dict, matcher: MultilangMatcher) -> None:
+    """Home Assistant's built-in commands in every enabled language."""
+    builtin = BuiltinIntents(matcher.languages)
+    await hass.async_add_executor_job(builtin.load)
+    if not builtin.loaded:
+        return
+    # area/name lists (incl. the name table) for the built-in sentences
+    lists = DynamicLists(
+        hass,
+        {"names": matcher.config.get("names") or {},
+         "intents": {"_builtin": {"sentences": {"xx": ["{area} {name}"]}}}},
+    )
+    lists.async_start()
+    if data.get("builtin_lists") is not None:
+        data["builtin_lists"].async_stop()
+    data["builtin"] = builtin
+    data["builtin_lists"] = lists
+
+
 async def async_reload_entry_matcher(hass: HomeAssistant, data: dict) -> bool:
     """Rebuild matcher + lists of one entry from its source. True on success."""
     entry = data["entry"]
@@ -298,6 +338,8 @@ async def async_reload_entry_matcher(hass: HomeAssistant, data: dict) -> bool:
     data["lists"].async_stop()
     data["actions"] = async_swap_catalog_actions(hass, data.get("actions", []), handlers)
     data["matcher"] = new_matcher
+    if data.get("builtin") is not None:
+        await async_setup_builtin(hass, data, new_matcher)
     data["lists"] = new_lists
     clear_tool_cache()
     async_dispatcher_send(hass, f"{SIGNAL_LOADED}_{entry.entry_id}")
@@ -318,7 +360,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data = hass.data[DOMAIN].pop(entry.entry_id, None)
         if data is not None:
             data["lists"].async_stop()
+            if data.get("builtin_lists") is not None:
+                data["builtin_lists"].async_stop()
             async_unregister_catalog_actions(hass, data.get("actions", []))
+            if data.get("monitor") is not None:
+                data["monitor"].async_stop()
         # Last entry → unregister services
         if not hass.data[DOMAIN]:
             hass.services.async_remove(DOMAIN, SERVICE_RELOAD)
@@ -330,5 +376,36 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove the catalog of a deleted entry (intents.yaml is kept)."""
+    """Remove catalog, proposals and monitoring log of a deleted entry (intents.yaml is kept)."""
     await IntentSource(hass, entry).async_remove_catalog()
+    await ProposalQueue(hass, entry.entry_id).async_clear()
+    await Monitor(hass, entry.entry_id).async_clear()
+
+
+async def async_run_monitor(hass: HomeAssistant, data: dict) -> dict:
+    """Evaluate the last 24 h and put the proposals into the queue."""
+    from .monitor import build_monitor_items  # noqa: PLC0415
+    from .translate import async_propose_from_monitor  # noqa: PLC0415
+
+    entry = data["entry"]
+    monitor: Monitor = data["monitor"]
+    ai_task = entry.options.get(CONF_TRANSLATION_AI_TASK)
+    matcher = data["matcher"]
+
+    async def _propose(repeated: list) -> list:
+        if not ai_task:
+            return []
+        slot_lists = {**matcher.static_slot_lists(), **data["lists"].async_get()}
+        lines = await async_propose_from_monitor(
+            hass, ai_task_entity=ai_task, repeated=repeated, config=matcher.config
+        )
+        return await hass.async_add_executor_job(
+            build_monitor_items, repeated, lines, matcher.config,
+            lambda t, lang: matcher.match_all(t, lang, slot_lists), slot_lists,
+        )
+
+    result = await monitor.async_evaluate(data, _propose)
+    queue = data.get("queue") or ProposalQueue(hass, entry.entry_id)
+    data["queue"] = queue
+    await queue.async_add(result["items"])
+    return result["summary"]
