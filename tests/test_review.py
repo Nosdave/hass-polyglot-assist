@@ -197,3 +197,11 @@ def test_language_codes_cannot_break_the_data_fence():
     assert not any("</data>" in line and line.strip() == "</data>" for line in lines)
     assert all("\n" not in line for line in lines)
     assert "[?]" in lines[1]
+
+
+def test_insight_language_is_that_of_the_correction():
+    ep = [{**_turn(0, "What time is it", "hit"), "lang": "en"},
+          {**_turn(10, "Allume le salon", "hit", switched=["light.salon"]), "lang": "fr"},
+          {**_turn(20, "Non, la cuisine"), "lang": "fr"}]
+    out = R.parse_review(["E1 | correction | wrong_device | mauvaise pièce | la cuisine"], [ep])
+    assert out[0]["lang"] == "fr"

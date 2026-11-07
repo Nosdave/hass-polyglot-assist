@@ -647,7 +647,15 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
                     and async_should_expose(hass, "conversation", entity_id)
                     and action_target_reason(hass, entity_id, sensitive=sensitive, extra_names=extra) is None)
 
-        area_words = {aid: _re.compile(r"(?<!\w)" + _re.escape(name.lower()) + r"(?!\w)") for aid, name in areas.items() if name}
+        # every name a room goes by: registry name, its aliases and Polyglot's names per language
+        room_names: dict[str, set[str]] = {}
+        for area in ar.async_get(hass).async_list_areas():
+            room_names[area.id] = {n for n in (area.name, *(area.aliases or ())) if isinstance(n, str) and n}
+        for target, names in names_table(config).items():
+            if str(target).startswith("area.") and target[5:] in room_names:
+                room_names[target[5:]] |= {n for n in names if isinstance(n, str) and n}
+        area_words = {aid: _re.compile("|".join(r"(?<!\w)" + _re.escape(n.lower()) + r"(?!\w)" for n in sorted(names)))
+                      for aid, names in room_names.items() if names}
         one = _bind_one(config, registered, set(matcher.languages), slot_lists, existing_fps, command_lines,
                         area_of, allowed, area_words, areas)
         added = 0

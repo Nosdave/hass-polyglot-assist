@@ -131,7 +131,8 @@ def parse_review(lines: list[str], episodes: list[list[dict[str, Any]]]) -> list
         out.append({
             "episode": idx, "kind": kind, "went_wrong": went_wrong, "wanted": wanted,
             "ts": episode[-1].get("ts"),
-            "lang": next((t["lang"] for t in episode if isinstance(t.get("lang"), str) and LANG_RE.match(t["lang"])), None),
+            # the language of the correction itself (the latest turns), not of earlier context
+            "lang": next((t["lang"] for t in reversed(episode) if isinstance(t.get("lang"), str) and LANG_RE.match(t["lang"])), None),
             "said": [_clip(t.get("text"), 120) for t in episode][-4:],
             "satellites": sorted({t["satellite"] for t in episode if t.get("satellite")}),
         })

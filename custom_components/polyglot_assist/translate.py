@@ -509,7 +509,8 @@ async def async_propose_correction_command(
             "NAME: CamelCase, new. TEMPLATES: 1 to 4 sentence templates in the person's language, no {placeholders}. "
             "ACTION_JSON: a JSON list of at most 4 steps "
             '{"action": "light.turn_off", "target": {"entity_id": ["light.a", "light.b"]}} using ONLY entity ids from '
-            "the device list; allowed actions: light/switch/fan turn_on, turn_off, toggle; media_player media_play, "
+            "the device list; allowed actions: light and switch turn_on, turn_off, toggle; fan turn_on, turn_off; "
+            "media_player media_play, "
             "media_pause, turn_on, turn_off. light.turn_on may carry data brightness_pct (0-100) or "
             "color_temp_kelvin (1500-9000), nothing else.",
             "If the wish depends on the current state (e.g. 'warmer than now'), needs a condition, or needs "
