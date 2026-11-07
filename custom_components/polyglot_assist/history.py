@@ -7,7 +7,9 @@ undone again.
 """
 from __future__ import annotations
 
+import asyncio
 import copy
+import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -15,6 +17,8 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
 
 KEEP = 20
 STORAGE_VERSION = 1
@@ -51,6 +55,11 @@ def loosened(current: dict[str, Any], old: dict[str, Any]) -> list[dict[str, Any
                 out.append({"intent": name, "now": "action", "then": "other action"})
         elif name not in now_i and then != "disabled":  # a switched-off command coming back stays off
             out.append({"intent": name, "now": "removed", "then": then or "normal"})
+    # devices protected today only because a sensitive/disabled command uses them
+    from .safety import sensitive_entities  # noqa: PLC0415
+
+    for entity in sorted(sensitive_entities(current) - sensitive_entities(old)):
+        out.append({"entity": entity, "now": "protected", "then": "unprotected"})
     return out
 
 
@@ -71,7 +80,16 @@ def change_summary(before: dict[str, Any], after: dict[str, Any]) -> dict[str, l
     other = sorted(k for k in set(before) | set(after) if k not in ("intents", "lists", "names") and before.get(k) != after.get(k))
     if other:
         out["other_changed"] = other
+    if not out and not _same_order(before, after):
+        # the order of commands decides which one wins — a reorder is a real change
+        out["order_changed"] = [p for p in ("intents", "lists", "names") if list(before.get(p) or {}) != list(after.get(p) or {})] or ["document"]
     return out
+
+
+def _same_order(a: Any, b: Any) -> bool:
+    from .corpus import same_document  # noqa: PLC0415
+
+    return same_document(a, b)
 
 
 async def async_record(hass: HomeAssistant, entry_id: str, before: dict[str, Any] | None, after: dict[str, Any], actor: str) -> None:
@@ -80,7 +98,10 @@ async def async_record(hass: HomeAssistant, entry_id: str, before: dict[str, Any
         return
     from .guard import revision  # noqa: PLC0415 — guard imports this module
 
-    await get_history(hass, entry_id).async_add(before, after, rev=revision(before), actor=actor)
+    try:
+        await get_history(hass, entry_id).async_add(before, after, rev=revision(before), actor=actor)
+    except Exception:  # noqa: BLE001 — the write itself succeeded; history is a convenience
+        _LOGGER.exception("Polyglot Assist: could not record the catalog history (%s)", actor)
 
 
 class CatalogHistory:
@@ -89,12 +110,15 @@ class CatalogHistory:
             hass, STORAGE_VERSION, f"{DOMAIN}.history.{entry_id}", atomic_writes=True
         )
         self._items: list[dict[str, Any]] | None = None
+        self._lock = asyncio.Lock()
 
     async def _load(self) -> list[dict[str, Any]]:
         if self._items is None:
-            stored = await self._store.async_load() or {}
-            items = stored.get("items")
-            self._items = items if isinstance(items, list) else []
+            async with self._lock:
+                if self._items is None:  # a second caller must not replace live items
+                    stored = await self._store.async_load() or {}
+                    items = stored.get("items")
+                    self._items = items if isinstance(items, list) else []
         return self._items
 
     async def async_add(self, before: dict[str, Any], after: dict[str, Any], *, rev: str, actor: str) -> None:
