@@ -281,11 +281,15 @@ def _harden(check: dict[str, Any], *, name: str, cfg: dict[str, Any], template: 
         return warn("the command's targets cannot be fully checked (template, script, nested steps or area/device targets) — review it")
     if not entities:
         return warn("the command names no device (e.g. it runs a script) — review it")
-    calls = [t.get("args") for e in evidence for t in (e.get("targets") or [])]
+    calls = [t.get("target") if isinstance(t.get("target"), dict) else t.get("args")
+             for e in evidence for t in (e.get("targets") or [])]
     if any(_area_only(args) for args in calls):
         return warn("the assistant switched a whole area or floor — review which devices it means")
     # per sentence: each sentence the template recognises must have switched ALL targets itself
-    per_sentence = [[_call_target(t.get("args")) for t in (e.get("targets") or [])] for e in evidence]
+    per_sentence = [[_call_target(t.get("target") if isinstance(t.get("target"), dict) else t.get("args"))
+                     for t in (e.get("targets") or [])] for e in evidence]
+    if any(c.get("unreadable") for one in per_sentence for c in one):
+        return warn("what the assistant switched cannot be read completely — review it")
     said = {n for one in per_sentence for call in one for n in call["names"]}
     if entities and said and names_of is not None:
         # EVERY target of the command must be one the assistant switched for these sentences
@@ -358,8 +362,8 @@ def _call_target(args: Any) -> dict[str, Any]:
             data = ast.literal_eval(args)
         except (ValueError, SyntaxError):
             data = None
-    if not isinstance(data, dict):
-        return {"names": {_n(v) for v in _target_values(args)}, "domains": set(), "area": False}
+    if not isinstance(data, dict):  # cut or garbled — its domain/area constraints are unknown
+        return {"names": set(), "domains": set(), "area": False, "unreadable": True}
     dom = data.get("domain")
     return {"names": {_n(v) for v in _target_values(data)},
             "domains": {d for d in (dom if isinstance(dom, list) else [dom]) if isinstance(d, str)},

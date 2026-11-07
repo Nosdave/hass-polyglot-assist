@@ -212,7 +212,11 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                 text=user_input.text,
                 lang=guess_language(user_input.text, matcher.languages) or (user_input.language or "").split("-")[0],
                 result="assistant",
-                targets=[{"tool": c["tool"], "args": str(c["args"])[:200]} for c in calls[:5]],
+                targets=[{"tool": c["tool"], "args": str(c["args"])[:200],
+                          # target fields kept whole (the text above may be cut) — for the target check
+                          "target": {k: c["args"][k] for k in ("name", "entity_id", "domain", "area", "floor")
+                                     if isinstance(c["args"], dict) and isinstance(c["args"].get(k), (str, list))}}
+                         for c in calls[:5]],
                 speech=speech[:200],
                 ms=round((time.perf_counter() - t0) * 1000.0, 1),
                 error=result.response.response_type == intent.IntentResponseType.ERROR,
