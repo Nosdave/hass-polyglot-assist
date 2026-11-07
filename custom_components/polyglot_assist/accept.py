@@ -63,11 +63,13 @@ async def async_accept(
     actor: str,
     force: bool = False,
     extra_reason: Callable[[dict, dict], str | None] | None = None,
+    base_rev: str | None = None,
 ) -> dict[str, Any]:
     """Apply the selected proposals in ONE guarded write.
 
-    Returns the guard result plus ``applied`` / ``refused``; raises
-    AcceptError (nothing usable, YAML source) or GuardError (refused save).
+    Returns the guard result plus ``applied`` / ``refused``; a refused save
+    comes back as ``saved: False`` with ``code`` (callers must check
+    ``saved``). Raises AcceptError only for the YAML source.
     """
     if runtime["source"].kind != SOURCE_CATALOG:
         raise AcceptError("yaml_source_read_only",
@@ -114,7 +116,7 @@ async def async_accept(
                 raise GuardError("stale", f"{item.get('title', item['id'])}: {err}") from None
 
     try:
-        result = await async_guarded_update(hass, runtime, _mutate, force=force, actor=actor)
+        result = await async_guarded_update(hass, runtime, _mutate, force=force, actor=actor, base_rev=base_rev)
     except GuardError as err:
         return {"saved": False, "code": err.code, "message": str(err), "refused": refused, "applied": [], **err.details}
     await queue.async_remove([i["id"] for i in usable])

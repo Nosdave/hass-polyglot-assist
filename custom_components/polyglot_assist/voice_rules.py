@@ -46,6 +46,21 @@ def _known_names(hass: HomeAssistant, config: dict[str, Any]) -> dict[str, str]:
         for alias in (entry.aliases if entry else None) or []:
             if isinstance(alias, str):
                 out.setdefault(norm(alias), st.entity_id)
+    from homeassistant.helpers import device_registry as dr  # noqa: PLC0415
+    from homeassistant.helpers import floor_registry as fr  # noqa: PLC0415
+
+    for device in dr.async_get(hass).devices:  # iterating yields the device entries
+        for n in (device.name_by_user, device.name):
+            if n:
+                out.setdefault(norm(n), f"device {device.id}")
+    for floor in fr.async_get(hass).async_list_floors():
+        out.setdefault(norm(floor.name), f"floor.{floor.floor_id}")
+    for name, spec in (config.get("lists") or {}).items():
+        for value in (spec or {}).get("values", []) if isinstance(spec, dict) else []:
+            if isinstance(value, dict) and isinstance(value.get("in"), str):
+                out.setdefault(norm(value["in"]), f"list {name}")
+            elif isinstance(value, str):
+                out.setdefault(norm(value), f"list {name}")
     for area in ar.async_get(hass).async_list_areas():
         out.setdefault(norm(area.name), f"area.{area.id}")
         for alias in area.aliases or []:
@@ -96,11 +111,20 @@ def check_voice_item(
         texts = [name or "", cfg.get("description") or "", *(p.get("sentences") or [])]
         if any(looks_protected(t) for t in texts):
             return "looks security-relevant — use the panel"
-        for step in cfg.get("action") or []:
-            entity = ((step or {}).get("target") or {}).get("entity_id") if isinstance(step, dict) else None
-            for e in entity if isinstance(entity, list) else [entity]:
-                if isinstance(e, str) and action_target_reason(hass, e, sensitive=sensitive, extra_names=extra):
-                    return "the command switches a protected device — use the panel"
+        # only commands whose action Polyglot itself runs and that is FULLY inspectable:
+        # plain service steps, literal entity ids, no templates, no script/scene/area targets
+        from .monitor import _action_entities  # noqa: PLC0415
+        from .safety import _has_template  # noqa: PLC0415
+
+        action = cfg.get("action")
+        if not action:
+            return "what this command does is not known to Polyglot (intent_script) — use the panel"
+        entities = _action_entities(action)
+        if not entities or _has_template(action):
+            return "this command's action cannot be fully checked — use the panel"
+        for e in entities:
+            if action_target_reason(hass, e, sensitive=sensitive, extra_names=extra):
+                return "the command switches a protected device — use the panel"
         from .matcher import MultilangMatcher  # noqa: PLC0415
         from .corpus import build_intents  # noqa: PLC0415
 
@@ -113,9 +137,29 @@ def check_voice_item(
                 return "not parsable"
             if any(isinstance(lists.get(r), WildcardSlotList) for r in refs):
                 return "free-text placeholders cannot be learned by voice"
+            # checked afresh against the CURRENT catalog (the stored result may be old)
+            from .monitor import _other_samples  # noqa: PLC0415
+            from .proposals import check_proposal  # noqa: PLC0415
+
+            matcher = MultilangMatcher(build_intents(config))
+            lang = p.get("lang") or ""
+            source = [x for lst in (cfg.get("sentences") or {}).values() for x in (lst or []) if isinstance(x, str)]
+            fresh = check_proposal(name, sentence, source, lambda t, lang=lang: matcher.match_all(t, lang, lists), lists,
+                                   string_rules(config), lang, _other_samples(config, lists, rules, lang, name))
+            if fresh.get("status") != "ok":
+                return "no longer fits the current commands — use the panel"
+            # every value a placeholder can produce must be harmless
+            for ref in refs:
+                for value in ((config.get("lists") or {}).get(ref) or {}).get("values", []) if isinstance((config.get("lists") or {}).get(ref), dict) else []:
+                    out = value.get("out") if isinstance(value, dict) else value
+                    if isinstance(out, str) and "." in out and out.split(".", 1)[0].isidentifier():
+                        if protected_reason(hass, out, sensitive_entities=sensitive, extra_names=extra):
+                            return f"a placeholder can reach a protected device ({out}) — use the panel"
     if op == "add_names":
         target = str(p.get("target", ""))
-        if not target.startswith("area.") and protected_reason(hass, target, sensitive_entities=sensitive, extra_names=extra):
+        if not target or target.startswith(("area.", "floor.")):
+            return "names for areas are only changed in the panel"
+        if protected_reason(hass, target, sensitive_entities=sensitive, extra_names=extra):
             return "protected device — use the panel"
         known = _known_names(hass, config)
         for n in p.get("names") or []:
@@ -128,34 +172,53 @@ def check_voice_item(
 
 
 class VoiceRate:
-    """At most MAX_PER_HOUR voice acceptances per entry and hour (persisted)."""
+    """At most MAX_PER_HOUR voice acceptances per entry and hour (persisted).
+
+    Use ``async with rate.slot() as ok:`` around the acceptance and call
+    ``rate.charge()`` only after it was saved — the own lock serialises
+    concurrent "yes" from two satellites (never take it inside the write lock).
+    """
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
+        import asyncio  # noqa: PLC0415
+
         self._store: Store[dict[str, Any]] = Store(hass, 1, f"{DOMAIN}.voice.{entry_id}", atomic_writes=True)
         self._times: list[float] | None = None
+        self.lock = asyncio.Lock()
 
     async def _load(self) -> list[float]:
         if self._times is None:
             data = await self._store.async_load() or {}
-            self._times = [t for t in data.get("accepted", []) if isinstance(t, (int, float))]
+            if self._times is None:
+                self._times = [t for t in data.get("accepted", []) if isinstance(t, (int, float))]
         return self._times
 
     async def async_left(self, now: float | None = None) -> int:
         now = time.time() if now is None else now
-        return max(0, MAX_PER_HOUR - sum(1 for t in await self._load() if now - t < 3600))
+        return max(0, MAX_PER_HOUR - sum(1 for t in await self._load() if 0 <= now - t < 3600))
 
-    async def async_take(self, now: float | None = None) -> bool:
-        """Count one acceptance if allowed (call under the entry's write lock)."""
+    async def async_charge(self, now: float | None = None) -> None:
+        """Count one acceptance that WAS saved (call while holding ``lock``)."""
         now = time.time() if now is None else now
-        times = [t for t in await self._load() if now - t < 3600]
-        if len(times) >= MAX_PER_HOUR:
-            self._times = times
-            return False
-        times.append(now)
+        times = [t for t in await self._load() if 0 <= now - t < 3600] + [now]
         self._times = times
         await self._store.async_save({"accepted": times})
-        return True
+
+    async def async_take(self, now: float | None = None) -> bool:
+        """Check and count in one step (tests / simple callers)."""
+        async with self.lock:
+            if await self.async_left(now) <= 0:
+                return False
+            await self.async_charge(now)
+            return True
 
     async def async_clear(self) -> None:
         self._times = []
         await self._store.async_remove()
+
+
+def get_rate(hass: HomeAssistant, entry_id: str) -> VoiceRate:
+    store = hass.data.setdefault(f"{DOMAIN}_voice_rate", {})
+    if entry_id not in store:
+        store[entry_id] = VoiceRate(hass, entry_id)
+    return store[entry_id]
