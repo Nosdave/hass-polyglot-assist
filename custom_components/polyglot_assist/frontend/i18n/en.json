@@ -49,7 +49,7 @@
     "uitexts": "The texts of this interface. German, English and French are included. For any other language your AI translates the texts; you can change every line. “Export” creates a file you can share with everyone.",
     "dry_run": "Shows what the starter set would suggest – without putting anything into the suggestions and without remembering devices. Good for trying out an AI.",
     "tone": "Home Assistant plays its own confirmation tone only for its built-in assistant. So that the tone works with any speech output, Polyglot brings a small speech output “Polyglot Assist (tone)”: it passes every text on to the speech output chosen here and only plays a short tone for switching commands. With Polyglot TTS you do not need this.",
-    "voicelearn": "You can talk about suggestions: “What have you learned?”, “Tell me more about the first one”, “Accept it” – Polyglot asks back and only applies it after your “Yes”. By voice, only new sentences and names for harmless commands are possible; anything security-related, new commands and protection levels stay in the panel. At most 5 per hour, only on the chosen devices, and “Undo that” takes it back at any time."
+    "voicelearn": "You can talk about suggestions: “What have you learned?”, “Tell me more about the first one”, “Accept it” – Polyglot asks back and only applies it after your “Yes”. By voice, only new sentences and names for harmless commands are possible; anything security-related, new commands and protection levels stay in the panel. At most 5 per hour, only on the chosen devices, and “Undo that” takes it back within 24 hours."
   },
   "kinds": {
     "new": "new",

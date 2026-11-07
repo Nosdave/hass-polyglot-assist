@@ -49,7 +49,7 @@
     "uitexts": "Die Texte dieser Oberfläche. Mitgeliefert sind Deutsch, Englisch und Französisch. Für jede weitere Sprache übersetzt deine KI die Texte; du kannst jede Zeile ändern. Mit „Exportieren“ entsteht eine Datei, die sich mit allen teilen lässt.",
     "dry_run": "Zeigt, was der Grundstock vorschlagen würde – ohne etwas in die Vorschlagsliste zu legen und ohne sich Geräte zu merken. Gut zum Ausprobieren einer KI.",
     "tone": "Home Assistant spielt seinen eigenen Quittierton nur für seinen eingebauten Assistenten. Damit der Ton mit jeder Sprachausgabe klappt, bringt Polyglot eine kleine Sprachausgabe „Polyglot Assist (Ton)“ mit: Sie gibt jeden Text an die hier gewählte Sprachausgabe weiter und spielt nur bei Schaltbefehlen einen kurzen Ton. Mit Polyglot TTS brauchst du das nicht.",
-    "voicelearn": "Du kannst Vorschläge per Sprache besprechen: „Was hast du gelernt?“, „Erzähl mir mehr zum ersten“, „Übernimm ihn“ – Polyglot fragt nach und übernimmt erst nach deinem „Ja“. Per Sprache gehen nur neue Sätze und Namen für harmlose Befehle; alles Sicherheitsrelevante, neue Befehle und Schutzstufen bleiben im Panel. Höchstens 5 pro Stunde, nur auf den gewählten Geräten, und mit „Mach das rückgängig“ jederzeit zurücknehmbar."
+    "voicelearn": "Du kannst Vorschläge per Sprache besprechen: „Was hast du gelernt?“, „Erzähl mir mehr zum ersten“, „Übernimm ihn“ – Polyglot fragt nach und übernimmt erst nach deinem „Ja“. Per Sprache gehen nur neue Sätze und Namen für harmlose Befehle; alles Sicherheitsrelevante, neue Befehle und Schutzstufen bleiben im Panel. Höchstens 5 pro Stunde, nur auf den gewählten Geräten, und mit „Mach das rückgängig“ innerhalb von 24 Stunden zurücknehmbar."
   },
   "kinds": {
     "new": "neu",

@@ -140,7 +140,8 @@ def check_voice_item(
         from .matcher import MultilangMatcher  # noqa: PLC0415
         from .corpus import build_intents  # noqa: PLC0415
 
-        lists = {**MultilangMatcher(build_intents(config)).static_slot_lists(), **(runtime_lists or {})}
+        matcher = MultilangMatcher(build_intents(config))  # built once per check
+        lists = {**matcher.static_slot_lists(), **(runtime_lists or {})}
         rules = parse_rules(string_rules(config))
         for sentence in p.get("sentences") or []:
             try:
@@ -153,7 +154,6 @@ def check_voice_item(
             from .monitor import _other_samples  # noqa: PLC0415
             from .proposals import check_proposal  # noqa: PLC0415
 
-            matcher = MultilangMatcher(build_intents(config))
             lang = p.get("lang") or ""
             source = [x for lst in (cfg.get("sentences") or {}).values() for x in (lst or []) if isinstance(x, str)]
             fresh = check_proposal(name, sentence, source, lambda t, lang=lang: matcher.match_all(t, lang, lists), lists,
