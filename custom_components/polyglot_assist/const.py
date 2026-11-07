@@ -38,6 +38,9 @@ RESPONSE_CHIME: Final = "chime"
 CHIME_MARKER: Final = "[[polyglot:chime]]"
 # speech output behind the "Polyglot Assist (tone)" TTS entity
 CONF_CHIME_TTS: Final = "chime_tts"
+# learning by voice ("What have you learned?" → "Accept it" → "Yes"): off by default
+CONF_VOICE_LEARN: Final = "voice_learn"
+CONF_VOICE_SATELLITES: Final = "voice_learn_satellites"
 # Languages this installation speaks (empty = all languages of the intents)
 CONF_LANGUAGES_ENABLED: Final = "languages_enabled"
 

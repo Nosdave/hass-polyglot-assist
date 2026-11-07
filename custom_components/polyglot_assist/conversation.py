@@ -44,6 +44,8 @@ from .chatlog import async_record_hit
 from .const import (
     CHIME_MARKER,
     CONF_RESPONSE_MODE,
+    CONF_VOICE_LEARN,
+    CONF_VOICE_SATELLITES,
     RESPONSE_CHIME,
     RESPONSE_TEXT,
     DEFAULT_LANGUAGES,
@@ -58,6 +60,7 @@ from .const import (
 )
 from .speech import say
 from .fallback import IN_FALLBACK, is_polyglot_agent
+from .learn import get_learn
 from .builtin import (
     async_handle_builtin,
     build_slots,
@@ -141,6 +144,20 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         if runtime is None:  # entry is (re)loading — never drop the request
             return await self._proxy_to_fallback(user_input, 0.0, chat_log, [])
         matcher: MultilangMatcher = runtime["matcher"]
+        # learning by voice — before the catalog, but only when switched on and on approved satellites
+        if self._entry.options.get(CONF_VOICE_LEARN) and user_input.satellite_id and not IN_FALLBACK.get():
+            learned = await get_learn(self.hass, self._entry.entry_id).async_handle(
+                runtime, text=user_input.text, conversation_id=chat_log.conversation_id,
+                satellite_id=user_input.satellite_id,
+                approved=set(self._entry.options.get(CONF_VOICE_SATELLITES) or []),
+                languages=matcher.languages,
+            )
+            if learned is not None:
+                speech, lang, ask_again = learned
+                response = intent.IntentResponse(language=lang)
+                response.async_set_speech(speech)
+                return ConversationResult(response=response, conversation_id=chat_log.conversation_id,
+                                          continue_conversation=ask_again)
         original_input = user_input
         latin = transliterate_cyrillic(user_input.text, matcher.languages)
         if latin is not None:

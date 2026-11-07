@@ -25,6 +25,8 @@ from .const import (
     CONF_CHAT_LOG_TOOLS,
     CONF_CHIME_TTS,
     CONF_FALLBACK_AGENT,
+    CONF_VOICE_LEARN,
+    CONF_VOICE_SATELLITES,
     CONF_LANGUAGES_ENABLED,
     CONF_MONITOR,
     CONF_MONITOR_TIME,
@@ -732,6 +734,7 @@ async def ws_names_set(hass: HomeAssistant, connection, msg) -> None:
 PANEL_OPTIONS = (
     CONF_LANGUAGES_ENABLED, CONF_RESPONSE_MODE, CONF_MONITOR, CONF_MONITOR_TIME,
     CONF_TRANSLATION_AI_TASK, CONF_CHAT_LOG_TOOLS, CONF_BUILTIN, CONF_CHIME_TTS,
+    CONF_VOICE_LEARN, CONF_VOICE_SATELLITES,
 )
 
 
@@ -748,6 +751,8 @@ PANEL_OPTIONS = (
         vol.Optional(CONF_CHAT_LOG_TOOLS): bool,
         vol.Optional(CONF_BUILTIN): bool,
         vol.Optional(CONF_CHIME_TTS): vol.Any(None, vol.Match(r"^tts\.[a-z0-9_]+$")),
+        vol.Optional(CONF_VOICE_LEARN): bool,
+        vol.Optional(CONF_VOICE_SATELLITES): [vol.Match(r"^assist_satellite\.[a-z0-9_]+$")],
     }
 )
 @websocket_api.async_response

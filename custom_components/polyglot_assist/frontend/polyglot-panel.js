@@ -500,6 +500,11 @@ class PolyglotAssistPanel extends HTMLElement {
         <select data-act="aitask" aria-label="${t("settings.ai_task_label")}"><option value="">${t("settings.ai_task_none")}</option>${aiTasks.map((e) => `<option value="${esc(e)}" ${opts.translation_ai_task === e ? "selected" : ""}>${esc(this._hass.states[e]?.attributes?.friendly_name || e)}</option>`).join("")}</select></div>
       <div class="set"><div><div class="t">${t("settings.builtin")}${this._tip("builtin")}</div><div class="hint">${t("settings.builtin_hint")}</div></div>
         <button class="switch" role="switch" data-act="opt" data-k="builtin_commands" aria-checked="${opts.builtin_commands === false ? "false" : "true"}" aria-label="${t("settings.builtin_label")}"></button></div>
+      <div class="set"><div><div class="t">${t("voicelearn.title")}${this._tip("voicelearn")}</div><div class="hint">${t("voicelearn.hint")}</div></div>
+        <button class="switch" role="switch" data-act="opt" data-k="voice_learn" aria-checked="${opts.voice_learn ? "true" : "false"}" aria-label="${t("voicelearn.title")}"></button></div>
+      ${opts.voice_learn ? `<div class="set"><div><div class="t">${t("voicelearn.satellites")}</div>
+        <div class="langs" style="margin-top:6px">${Object.keys(this._hass.states).filter((e) => e.startsWith("assist_satellite.")).map((e) => `<label><input type="checkbox" data-vsat="${esc(e)}" ${(opts.voice_learn_satellites || []).includes(e) ? "checked" : ""}> ${esc(this._hass.states[e]?.attributes?.friendly_name || e)}</label>`).join("") || `<span class="hint">${t("voicelearn.no_satellites")}</span>`}</div>
+        ${(opts.voice_learn_satellites || []).length ? "" : `<div class="hint">${t("voicelearn.choose")}</div>`}</div><span></span></div>` : ""}
       <div class="set"><div><div class="t">${t("settings.followup")}${this._tip("followup")}</div></div>
         <button class="switch" role="switch" data-act="opt" data-k="chat_log_tools" aria-checked="${opts.chat_log_tools ? "true" : "false"}" aria-label="${t("settings.followup_label")}"></button></div>
       ${this._msg("set")}</div>
@@ -719,7 +724,7 @@ class PolyglotAssistPanel extends HTMLElement {
         const k = el.dataset.k; const v = el.dataset.v !== undefined ? el.dataset.v : el.getAttribute("aria-checked") !== "true";
         const extra = k === "monitor" ? { monitor_time: (this.shadowRoot.getElementById("mtime")?.value || "03:00").slice(0, 5) } : {};
         await this.ws("options", { [k]: v, ...extra });
-        setTimeout(() => this._reload(["overview", "monitor"]), k === "monitor" || k === "chat_log_tools" || k === "builtin_commands" ? 1500 : 0);
+        setTimeout(() => this._reload(["overview", "monitor"]), k === "monitor" || k === "chat_log_tools" || k === "builtin_commands" || k === "voice_learn" ? 1500 : 0);
         this._setMsg(k === "monitor" ? "mon" : "set", t("messages.saved"), "ok");
       } else if (a === "langask") {
         const run = this.s.langRun = (this.s.langRun || 0) + 1;
@@ -804,6 +809,13 @@ class PolyglotAssistPanel extends HTMLElement {
       const set = new Set(this.s.langChosen || this._enabledLangs());
       if (el.checked) set.add(el.dataset.langOpt); else set.delete(el.dataset.langOpt);
       this.s.langChosen = [...set]; this._render(); return;
+    }
+    if (el.dataset.vsat) {
+      const cur = new Set(((this.s.overview || {}).options || {}).voice_learn_satellites || []);
+      if (el.checked) cur.add(el.dataset.vsat); else cur.delete(el.dataset.vsat);
+      try { await this.ws("options", { voice_learn_satellites: [...cur] }); this._setMsg("set", this.t("messages.saved"), "ok"); setTimeout(() => this._reload(["overview"]), 1500); }
+      catch (err) { this._setMsg("set", this.t("messages.error", { error: err.message || err.code }), "err"); }
+      return;
     }
     if (el.dataset.act === "chimetts") {
       try { await this.ws("options", { chime_tts: el.value || null }); this._setMsg("set", this.t("messages.saved"), "ok"); setTimeout(() => this._reload(["overview"]), 1500); }

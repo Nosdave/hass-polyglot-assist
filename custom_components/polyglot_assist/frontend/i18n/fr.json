@@ -48,7 +48,8 @@
     "amp": "Pour qu’une phrase fonctionne dans une langue, il faut quatre choses : la reconnaissance vocale doit la comprendre, ton IA doit la parler, Polyglot doit y connaître des commandes, et la synthèse doit pouvoir y répondre. Home Assistant n’indique pas si la reconnaissance détecte la langue toute seule – « Tester la reconnaissance vocale » le vérifie.",
     "uitexts": "Les textes de cette interface. L’allemand, l’anglais et le français sont fournis. Pour toute autre langue, ton IA traduit les textes ; tu peux modifier chaque ligne. « Exporter » crée un fichier que tu peux partager avec tous.",
     "dry_run": "Montre ce que le kit de départ proposerait – sans rien ajouter aux suggestions et sans retenir d’appareils. Pratique pour essayer une IA.",
-    "tone": "Home Assistant ne joue son propre son de confirmation que pour son assistant intégré. Pour que le son fonctionne avec n’importe quelle synthèse vocale, Polyglot apporte une petite synthèse « Polyglot Assist (son) » : elle transmet chaque texte à la synthèse choisie ici et ne joue un court son que pour les commandes. Avec Polyglot TTS, ce n’est pas nécessaire."
+    "tone": "Home Assistant ne joue son propre son de confirmation que pour son assistant intégré. Pour que le son fonctionne avec n’importe quelle synthèse vocale, Polyglot apporte une petite synthèse « Polyglot Assist (son) » : elle transmet chaque texte à la synthèse choisie ici et ne joue un court son que pour les commandes. Avec Polyglot TTS, ce n’est pas nécessaire.",
+    "voicelearn": "Tu peux parler des suggestions : « Qu’as-tu appris ? », « Dis-m’en plus sur la première », « Accepte-la » – Polyglot redemande et n’applique qu’après ton « Oui ». À la voix, seules de nouvelles phrases et de nouveaux noms pour des commandes inoffensives sont possibles ; tout ce qui touche à la sécurité, les nouvelles commandes et les niveaux de protection restent dans le panneau. 5 au plus par heure, uniquement sur les appareils choisis, et « Annule ça » revient en arrière à tout moment."
   },
   "kinds": {
     "new": "ajout",
@@ -372,5 +373,12 @@
     "hint": "Choisis ensuite « Polyglot Assist (son) » comme synthèse vocale de ton assistant vocal.",
     "none": "– Polyglot TTS directement –",
     "is_polyglot": "C’est la sortie son de Polyglot elle-même – elle ne peut pas se transmettre à elle-même."
+  },
+  "voicelearn": {
+    "title": "Accepter les suggestions à la voix",
+    "hint": "« Qu’as-tu appris ? » – « Accepte la première » – « Oui »",
+    "satellites": "Autorisé sur ces assistants vocaux",
+    "no_satellites": "Aucun satellite vocal trouvé.",
+    "choose": "Choisis-en au moins un – sinon cela ne fonctionne nulle part."
   }
 }

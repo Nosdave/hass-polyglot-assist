@@ -48,7 +48,8 @@
     "amp": "For a sentence to work in a language, four things are needed: speech recognition must understand it, your AI must speak it, Polyglot must know commands in it, and speech output must be able to answer in it. Home Assistant does not report whether speech recognition detects the language by itself – “Test speech recognition” checks that.",
     "uitexts": "The texts of this interface. German, English and French are included. For any other language your AI translates the texts; you can change every line. “Export” creates a file you can share with everyone.",
     "dry_run": "Shows what the starter set would suggest – without putting anything into the suggestions and without remembering devices. Good for trying out an AI.",
-    "tone": "Home Assistant plays its own confirmation tone only for its built-in assistant. So that the tone works with any speech output, Polyglot brings a small speech output “Polyglot Assist (tone)”: it passes every text on to the speech output chosen here and only plays a short tone for switching commands. With Polyglot TTS you do not need this."
+    "tone": "Home Assistant plays its own confirmation tone only for its built-in assistant. So that the tone works with any speech output, Polyglot brings a small speech output “Polyglot Assist (tone)”: it passes every text on to the speech output chosen here and only plays a short tone for switching commands. With Polyglot TTS you do not need this.",
+    "voicelearn": "You can talk about suggestions: “What have you learned?”, “Tell me more about the first one”, “Accept it” – Polyglot asks back and only applies it after your “Yes”. By voice, only new sentences and names for harmless commands are possible; anything security-related, new commands and protection levels stay in the panel. At most 5 per hour, only on the chosen devices, and “Undo that” takes it back at any time."
   },
   "kinds": {
     "new": "new",
@@ -372,5 +373,12 @@
     "hint": "Then choose “Polyglot Assist (tone)” as speech output of your voice assistant.",
     "none": "– Polyglot TTS directly –",
     "is_polyglot": "This is Polyglot's own tone output – it cannot forward to itself."
+  },
+  "voicelearn": {
+    "title": "Accept suggestions by voice",
+    "hint": "“What have you learned?” – “Accept the first one” – “Yes”",
+    "satellites": "Allowed on these voice assistants",
+    "no_satellites": "No voice satellites found.",
+    "choose": "Choose at least one – until then it works nowhere."
   }
 }

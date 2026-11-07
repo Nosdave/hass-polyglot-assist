@@ -380,6 +380,22 @@ built-in agent answered (and every target is in the satellite's area); a
 custom conversation agent cannot ask for it. The companion app never gets the
 tone (it would show the marker as text) — only voice satellites do.
 
+## Learning by voice (optional, off by default)
+
+Talk about suggestions on approved voice satellites:
+“What have you learned?” → “Tell me more about the first one” → “Accept it” →
+Polyglot asks back (“Shall I accept … ? Say yes.”) → “Yes”. “Undo that” takes
+the last acceptance back. Works in German, English and French.
+
+Because anyone in earshot can say “yes”, voice may only add **new sentences
+and names for harmless commands**: commands Polyglot runs itself with a
+plain, fully inspectable action on unprotected devices, no free text, no name
+that already means something else. Suggestions from monitoring additionally
+need to have been said at least twice, on approved satellites, in two
+conversations an hour apart. Everything else — new commands, protection
+levels, anything security-related — stays in the panel. At most 5 per hour.
+Switch it on and choose the satellites in the panel (Settings).
+
 ## Events
 
 | Event | When | Payload |
