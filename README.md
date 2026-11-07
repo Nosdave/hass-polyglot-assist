@@ -365,8 +365,20 @@ switching and free-text timer names are not handled this way either.
 
 With *Answer to commands = Tone*, successful switching commands
 (`kind: command`) answer with a short tone instead of speech. Polyglot sends
-the marker `[[polyglot:chime]]` to TTS; Polyglot TTS turns it into a tone. With
-other TTS engines keep *Speech*. Questions are always spoken.
+the marker `[[polyglot:chime]]` to TTS. Questions are always spoken.
+
+- **Polyglot TTS** turns the marker into a tone by itself.
+- **Any other TTS** (Piper, Home Assistant Cloud, …): Polyglot brings a small
+  speech output **Polyglot Assist (tone)**. Choose your real TTS under
+  *Speech output behind the tone* (panel → Settings, or the options), then
+  select *Polyglot Assist (tone)* as speech output of your voice assistant.
+  Every text — streamed answers of your AI included — is passed on unchanged;
+  only the marker becomes a short tone.
+
+Why this detour: Home Assistant plays its own acknowledge sound only when its
+built-in agent answered (and every target is in the satellite's area); a
+custom conversation agent cannot ask for it. The companion app never gets the
+tone (it would show the marker as text) — only voice satellites do.
 
 ## Events
 

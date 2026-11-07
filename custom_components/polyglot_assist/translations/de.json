@@ -1,0 +1,244 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Polyglot Assist",
+        "description": "Sprachassistent für mehrere Sprachen, der deine Befehle schnell selbst erkennt.\n\nWähle einen KI-Assistenten, der alles übernimmt, was Polyglot nicht erkennt. Die Befehle werden aus `/config/{intents_default}` gelesen und lassen sich mit dem Dienst `polyglot_assist.reload` neu laden.",
+        "data": {
+          "fallback_agent": "KI-Assistent für alles Übrige",
+          "intents_file": "Befehlsdatei (relativ zu /config)"
+        }
+      }
+    },
+    "error": {
+      "intents_not_found": "Unter diesem Pfad wurde keine Befehlsdatei gefunden.",
+      "intents_invalid": "Die Befehlsdatei enthält Fehler. Details findest du im Protokoll.",
+      "fallback_is_polyglot": "Polyglot kann nicht an sich selbst weitergeben (das wäre eine Endlosschleife). Wähle deinen KI-Assistenten oder den Home-Assistant-Agenten.",
+      "fallback_missing": "Wähle einen KI-Assistenten aus."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Polyglot Assist",
+        "description": "Was möchtest du tun?",
+        "menu_options": {
+          "change_fallback": "KI-Assistent ändern",
+          "language_hint": "Sprachhinweis für den KI-Assistenten",
+          "edit_visual": "Befehle bearbeiten (visuell)",
+          "edit_yaml": "Befehle bearbeiten (YAML)",
+          "add_intent": "Neuen Befehl hinzufügen",
+          "reload": "Befehle neu laden (intents.yaml neu einlesen)",
+          "chat_log": "Treffer im Gesprächsverlauf",
+          "source": "Quelle der Befehle (YAML-Datei oder Katalog)",
+          "translation": "Übersetzungsvorschläge (KI-Aufgabe)",
+          "languages": "Sprachen",
+          "answers": "Antwort auf Befehle (Sprache oder Ton)",
+          "monitor": "Sprachanfragen beobachten"
+        }
+      },
+      "change_fallback": {
+        "title": "KI-Assistent für alles Übrige",
+        "description": "Wähle den Assistenten, der alle Sätze erhält, die Polyglot nicht erkannt hat.",
+        "data": {
+          "fallback_agent": "KI-Assistent für alles Übrige"
+        }
+      },
+      "language_hint": {
+        "title": "Sprachhinweis für den KI-Assistenten",
+        "description": "Wenn eingeschaltet, bekommt der KI-Assistent bei nicht erkannten Sätzen, die eindeutig in einer anderen eingerichteten Sprache sind (Wortlisten für de/en/fr), einen kurzen Hinweis, in dieser Sprache zu antworten. Standardmäßig aus; sonst wird der Satz unverändert weitergegeben.",
+        "data": {
+          "fallback_language_hint": "KI-Assistenten bitten, in der erkannten Sprache zu antworten"
+        }
+      },
+      "edit_visual": {
+        "title": "Befehl zum Bearbeiten wählen",
+        "description": "Wähle den Befehl, dessen Sätze du bearbeiten möchtest.",
+        "data": {
+          "intent_name": "Befehl"
+        }
+      },
+      "edit_intent": {
+        "title": "Befehl bearbeiten: {intent_name}",
+        "description": "Bearbeite die Sätze je Sprache (einer pro Zeile). Bereits vorhandene Sprachen: {existing_langs}. Für eine weitere Sprache wähle unten ihren Code und speichere – dann erscheint ein leeres Feld dafür.",
+        "data": {
+          "description": "Beschreibung (optional)",
+          "response_intent": "Name des Ziel-Skripts (intent_script in Home Assistant)",
+          "add_language": "Weitere Sprache hinzufügen (Sprachcode, z. B. 'es')"
+        }
+      },
+      "edit_yaml": {
+        "title": "intents.yaml bearbeiten",
+        "description": "Bearbeite den YAML-Text von /config/polyglot_assist/intents.yaml direkt. Beim Speichern wird geprüft – ist das YAML fehlerhaft, wird nichts geschrieben.",
+        "data": {
+          "yaml_content": "YAML"
+        }
+      },
+      "add_intent": {
+        "title": "Neuen Befehl hinzufügen",
+        "description": "Lege einen neuen Befehl an. Nach dem Speichern kannst du im visuellen Editor Sätze hinzufügen.",
+        "data": {
+          "new_intent_name": "Name des Befehls (Buchstaben, Ziffern und Unterstrich, z. B. 'EnergieZusammenfassung')",
+          "description": "Beschreibung (optional)",
+          "initial_language": "Erste Sprache"
+        }
+      },
+      "reload": {
+        "title": "Befehle neu laden",
+        "description": "Liest die intents.yaml neu ein und baut die Befehlserkennung neu auf. Praktisch, wenn du die Datei außerhalb von Home Assistant bearbeitet hast."
+      },
+      "chat_log": {
+        "title": "Treffer im Gesprächsverlauf",
+        "description": "Wenn eingeschaltet, wird ein Polyglot-Treffer, dessen Befehl `llm_equivalent` angibt, im Gesprächsverlauf als Aufruf eines Werkzeugs eingetragen, das dein KI-Assistent wirklich hat (aus seinen Einstellungen gelesen). So funktionieren Nachfragen wie \"und das Klavier auch\". Befehle ohne passendes Werkzeug werden nie eingetragen.",
+        "data": {
+          "chat_log_tools": "Treffer als Werkzeugaufrufe eintragen"
+        }
+      },
+      "source": {
+        "title": "Quelle der Befehle",
+        "description": "YAML-Datei (Standard) oder Katalog im Speicher von Home Assistant. Beim ersten Wechsel zum Katalog wird die intents.yaml 1:1 übernommen (vor dem Schreiben geprüft). Unterscheiden sich beide, entscheidest du; die Seite, die ersetzt wird, wird vorher nach polyglot_assist/export/ exportiert. {err}",
+        "data": {
+          "source": "Quelle",
+          "when_different": "Wenn YAML-Datei und Katalog sich unterscheiden"
+        }
+      },
+      "translation": {
+        "title": "Übersetzungsvorschläge",
+        "description": "KI-Aufgaben-Entität, die Sätze und Namen für andere Sprachen vorschlägt. Vorschläge werden geprüft und nur übernommen, wenn du sie annimmst. KI-Aufgaben mit Werkzeugen (einer LLM-API) sind nicht erlaubt: Sätze und Gerätenamen sind für das Modell nicht vertrauenswürdiger Text. Sätze und Namen werden an diese KI-Aufgabe gesendet – bei einem Cloud-Anbieter verlassen sie dein Zuhause.",
+        "data": {
+          "translation_ai_task": "KI-Aufgaben-Entität"
+        }
+      },
+      "languages": {
+        "title": "Sprachen",
+        "description": "Die Sprachen, die bei dir zu Hause gesprochen werden. Polyglot hört nur auf Sätze in diesen Sprachen.",
+        "data": {
+          "languages_enabled": "Sprachen"
+        }
+      },
+      "answers": {
+        "title": "Antwort auf Befehle",
+        "description": "Sprache: z. B. \"Sofalicht an.\" Ton: stattdessen ein kurzer Klang. Gilt nur für Befehle, die als Schaltbefehle markiert sind; Fragen werden immer gesprochen. Für den Ton mit beliebiger Sprachausgabe: Wähle unten die Sprachausgabe, die du nutzt, und stelle dann \"Polyglot Assist (Ton)\" als Sprachausgabe deines Sprachassistenten ein.",
+        "data": {
+          "response_mode": "Antwort",
+          "chime_tts": "Sprachausgabe hinter dem Ton"
+        },
+        "data_description": {
+          "chime_tts": "Jeder Text wird an diese Sprachausgabe weitergegeben; nur die Ton-Markierung wird zu einem kurzen Ton. Leer lassen, wenn du Polyglot TTS direkt nutzt."
+        }
+      },
+      "monitor": {
+        "title": "Sprachanfragen beobachten",
+        "description": "Polyglot merkt sich die letzten 500 Sprachanfragen (nur Text, kein Ton; bleibt in Home Assistant). Einmal am Tag sucht deine KI-Aufgabe (die für Vorschläge gewählte, ohne Werkzeuge) nach Sätzen, die oft den KI-Assistenten gebraucht haben, und legt Vorschläge in die Vorschlagsliste. Nichts ändert sich, ohne dass du zustimmst.",
+        "data": {
+          "monitor": "Sprachanfragen beobachten",
+          "monitor_time": "Tägliche Auswertung um"
+        }
+      }
+    },
+    "error": {
+      "invalid_yaml": "Das YAML konnte nicht gelesen werden: {err}. Korrigiere die Schreibweise und speichere erneut.",
+      "invalid_name": "Der Name des Befehls darf nur Buchstaben, Ziffern und Unterstriche enthalten.",
+      "name_exists": "Einen Befehl mit diesem Namen gibt es schon.",
+      "import_failed": "Die Quelle konnte nicht gewechselt werden: {err}",
+      "refused": "Nicht gespeichert: {err}",
+      "sources_differ": "YAML-Datei und Katalog unterscheiden sich. Wähle unten, was mit den Unterschieden passieren soll.",
+      "ai_task_has_tools": "Diese KI-Aufgabe hat Werkzeuge (eine LLM-API). Wähle eine ohne Werkzeuge.",
+      "fallback_is_polyglot": "Polyglot kann nicht an sich selbst weitergeben (das wäre eine Endlosschleife). Wähle deinen KI-Assistenten oder den Home-Assistant-Agenten.",
+      "fallback_missing": "Wähle einen KI-Assistenten aus.",
+      "chime_tts_is_polyglot": "Das ist die eigene Ton-Ausgabe von Polyglot – sie kann nicht an sich selbst weitergeben.",
+      "chime_tts_not_tts": "Wähle eine Sprachausgabe (tts.…).",
+      "chime_tts_missing": "Wähle eine Sprachausgabe."
+    },
+    "abort": {
+      "no_intents": "In der Datei wurden keine Befehle gefunden. Lege mit 'Neuen Befehl hinzufügen' einen an."
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "Befehle neu laden",
+      "description": "Baut die mehrsprachige Befehlserkennung aus der eingestellten Befehlsdatei neu auf."
+    },
+    "test_match": {
+      "name": "Erkennung testen",
+      "description": "Prüft einen Satz mit der Befehlserkennung, ohne etwas auszuführen.",
+      "fields": {
+        "text": {
+          "name": "Text",
+          "description": "Der Satz, der getestet werden soll."
+        },
+        "language": {
+          "name": "Sprachhinweis",
+          "description": "Optionaler Sprachhinweis (de, en, fr)."
+        }
+      }
+    },
+    "run_tests": {
+      "name": "Prüfsätze ausführen",
+      "description": "Prüft jeden Satz einer Prüfsatz-Datei mit der Befehlserkennung und meldet Fehlschläge. Es wird nichts ausgeführt. Nur für Administratoren.",
+      "fields": {
+        "file": {
+          "name": "Prüfsatz-Datei",
+          "description": "YAML-Datei im Ordner polyglot_assist des Konfigurationsverzeichnisses (Standard: polyglot_assist/tests.yaml)."
+        },
+        "language": {
+          "name": "Sprachhinweis",
+          "description": "Sprache der Sprachassistenten-Pipeline, die wie im echten Betrieb an die Erkennung übergeben wird."
+        }
+      }
+    },
+    "import_yaml": {
+      "name": "intents.yaml in den Katalog importieren",
+      "description": "Kopiert die YAML-Datei 1:1 in den Katalog (.storage) und prüft, dass nichts verloren geht. Die Quelle wird dabei nicht gewechselt. Nur für Administratoren.",
+      "fields": {
+        "overwrite": {
+          "name": "Aktiven Katalog überschreiben",
+          "description": "Ersetzt den Katalog auch dann, wenn er gerade die aktive Quelle ist (er wird vorher exportiert)."
+        }
+      }
+    },
+    "export_yaml": {
+      "name": "Katalog als YAML exportieren",
+      "description": "Schreibt den Katalog nach polyglot_assist/export/intents-TIMESTAMP.yaml. Nur für Administratoren."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "intents": {
+        "name": "Befehle"
+      }
+    },
+    "tts": {
+      "tone": {
+        "name": "Polyglot Assist (Ton)"
+      }
+    }
+  },
+  "selector": {
+    "source": {
+      "options": {
+        "yaml": "YAML-Datei (intents.yaml)",
+        "catalog": "Katalog (.storage)"
+      }
+    },
+    "when_different": {
+      "options": {
+        "ask": "Anhalten und mich fragen",
+        "use_yaml": "YAML-Datei verwenden (Katalog vorher exportieren)",
+        "keep_other": "Ziel so lassen, wie es ist (Katalog beim Verlassen exportieren)"
+      }
+    },
+    "response_mode": {
+      "options": {
+        "text": "Sprache",
+        "chime": "Ton (Polyglot TTS)"
+      }
+    }
+  },
+  "issues": {
+    "load_failed": {
+      "title": "Polyglot Assist konnte seine Befehle nicht laden",
+      "description": "Quelle: {source}. Fehler: {error}. Öffne unter Einstellungen → Geräte & Dienste die Optionen von Polyglot Assist → Quelle der Befehle, um zur anderen Quelle zu wechseln, oder stelle die Datei wieder her. Polyglot wechselt nicht von selbst, damit Befehle, die du ausgeschaltet hast, ausgeschaltet bleiben."
+    }
+  }
+}

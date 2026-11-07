@@ -494,6 +494,8 @@ class PolyglotAssistPanel extends HTMLElement {
       <div class="grid" style="gap:16px;align-content:start"><div class="card"><h2>${t("settings.title")}</h2>
       <div class="set"><div><div class="t">${t("settings.confirmation")}${this._tip("answer")}</div></div>
         <div class="seg" role="group" aria-label="${t("settings.confirmation_label")}"><button data-act="opt" data-k="response_mode" data-v="text" aria-pressed="${mode === "text"}">${t("answer.text")}</button><button data-act="opt" data-k="response_mode" data-v="chime" aria-pressed="${mode === "chime"}">${t("answer.chime")}</button></div></div>
+      ${mode === "chime" ? `<div class="set"><div><div class="t">${t("tone.inner")}${this._tip("tone")}</div><div class="hint">${t("tone.hint")}</div></div>
+        <select data-act="chimetts" aria-label="${t("tone.inner")}"><option value="">${t("tone.none")}</option>${Object.keys(this._hass.states).filter((e) => e.startsWith("tts.") && !(o.polyglot_tts || []).includes(e)).map((e) => `<option value="${esc(e)}" ${opts.chime_tts === e ? "selected" : ""}>${esc(this._hass.states[e]?.attributes?.friendly_name || e)}</option>`).join("")}</select></div>` : ""}
       <div class="set"><div><div class="t">${t("settings.ai_task")}${this._tip("aitask")}</div></div>
         <select data-act="aitask" aria-label="${t("settings.ai_task_label")}"><option value="">${t("settings.ai_task_none")}</option>${aiTasks.map((e) => `<option value="${esc(e)}" ${opts.translation_ai_task === e ? "selected" : ""}>${esc(this._hass.states[e]?.attributes?.friendly_name || e)}</option>`).join("")}</select></div>
       <div class="set"><div><div class="t">${t("settings.builtin")}${this._tip("builtin")}</div><div class="hint">${t("settings.builtin_hint")}</div></div>
@@ -802,6 +804,11 @@ class PolyglotAssistPanel extends HTMLElement {
       const set = new Set(this.s.langChosen || this._enabledLangs());
       if (el.checked) set.add(el.dataset.langOpt); else set.delete(el.dataset.langOpt);
       this.s.langChosen = [...set]; this._render(); return;
+    }
+    if (el.dataset.act === "chimetts") {
+      try { await this.ws("options", { chime_tts: el.value || null }); this._setMsg("set", this.t("messages.saved"), "ok"); setTimeout(() => this._reload(["overview"]), 1500); }
+      catch (err) { this._setMsg("set", err.code === "chime_tts_is_polyglot" ? this.t("tone.is_polyglot") : this.t("messages.error", { error: err.message || err.code }), "err"); }
+      return;
     }
     if (el.dataset.act === "fallback") {
       this.s.fbBusy = true; this._setMsg("fb", this.t("fallback.saving"));

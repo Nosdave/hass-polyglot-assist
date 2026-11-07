@@ -118,9 +118,13 @@
       },
       "answers": {
         "title": "Answer to commands",
-        "description": "Speech: e.g. \"Couch light on.\" Tone: a short sound instead (needs Polyglot TTS; with other TTS engines choose Speech). Only for commands marked as switching commands; questions are always spoken.",
+        "description": "Speech: e.g. \"Couch light on.\" Tone: a short sound instead. Only for commands marked as switching commands; questions are always spoken. For the tone with any speech output: choose the speech output you use below, then select \"Polyglot Assist (tone)\" as speech output of your voice assistant.",
         "data": {
-          "response_mode": "Answer"
+          "response_mode": "Answer",
+          "chime_tts": "Speech output behind the tone"
+        },
+        "data_description": {
+          "chime_tts": "Every text is passed on to this speech output; only the tone marker becomes a short tone. Leave empty if you use Polyglot TTS directly."
         }
       },
       "monitor": {
@@ -141,7 +145,10 @@
       "sources_differ": "YAML file and catalog differ. Choose what to do with the differences below.",
       "ai_task_has_tools": "This AI task has tools (an LLM API). Choose one without tools.",
       "fallback_is_polyglot": "Polyglot cannot be its own fallback (that would be an endless loop). Choose your AI assistant or the Home Assistant agent.",
-      "fallback_missing": "Choose a fallback agent."
+      "fallback_missing": "Choose a fallback agent.",
+      "chime_tts_is_polyglot": "This is Polyglot's own tone output — it cannot forward to itself.",
+      "chime_tts_not_tts": "Choose a speech output (tts.…).",
+      "chime_tts_missing": "Choose a speech output."
     },
     "abort": {
       "no_intents": "No intents found in the file. Use 'Add a new intent' to create one."
@@ -199,6 +206,11 @@
     "sensor": {
       "intents": {
         "name": "Intents"
+      }
+    },
+    "tts": {
+      "tone": {
+        "name": "Polyglot Assist (tone)"
       }
     }
   },

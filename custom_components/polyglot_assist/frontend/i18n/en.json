@@ -47,7 +47,8 @@
     "apply": "Polyglot will then only listen to the selected languages and load Home Assistant's built-in commands for them. This takes about a second. Your own commands stay as they are. At least one language must be selected.",
     "amp": "For a sentence to work in a language, four things are needed: speech recognition must understand it, your AI must speak it, Polyglot must know commands in it, and speech output must be able to answer in it. Home Assistant does not report whether speech recognition detects the language by itself – “Test speech recognition” checks that.",
     "uitexts": "The texts of this interface. German, English and French are included. For any other language your AI translates the texts; you can change every line. “Export” creates a file you can share with everyone.",
-    "dry_run": "Shows what the starter set would suggest – without putting anything into the suggestions and without remembering devices. Good for trying out an AI."
+    "dry_run": "Shows what the starter set would suggest – without putting anything into the suggestions and without remembering devices. Good for trying out an AI.",
+    "tone": "Home Assistant plays its own confirmation tone only for its built-in assistant. So that the tone works with any speech output, Polyglot brings a small speech output “Polyglot Assist (tone)”: it passes every text on to the speech output chosen here and only plays a short tone for switching commands. With Polyglot TTS you do not need this."
   },
   "kinds": {
     "new": "new",
@@ -365,5 +366,11 @@
     "summary": "{total} suggestions in {seconds} s: {ok} fit, {warn} with a note, {error} with an error.",
     "notes": "Notes: {notes}",
     "nothing_changed": "The suggestions and your commands are unchanged."
+  },
+  "tone": {
+    "inner": "Speech output behind the tone",
+    "hint": "Then choose “Polyglot Assist (tone)” as speech output of your voice assistant.",
+    "none": "– Polyglot TTS directly –",
+    "is_polyglot": "This is Polyglot's own tone output – it cannot forward to itself."
   }
 }

@@ -41,6 +41,7 @@ from .const import (
     CONF_MONITOR,
     CONF_MONITOR_TIME,
     DEFAULT_MONITOR_TIME,
+    CONF_CHIME_TTS,
     CONF_RESPONSE_MODE,
     RESPONSE_CHIME,
     RESPONSE_TEXT,
@@ -380,10 +381,22 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
     async def async_step_answers(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            new_options = {**self._entry.options, CONF_RESPONSE_MODE: user_input[CONF_RESPONSE_MODE]}
-            self.hass.config_entries.async_update_entry(self._entry, options=new_options)
-            return self.async_create_entry(title="", data=new_options)
+            inner = user_input.get(CONF_CHIME_TTS)
+            from .tts import inner_tts_error  # noqa: PLC0415
+
+            if inner and (err := inner_tts_error(self.hass, inner)):
+                errors[CONF_CHIME_TTS] = f"chime_tts_{err}"
+            else:
+                new_options = {**self._entry.options, CONF_RESPONSE_MODE: user_input[CONF_RESPONSE_MODE]}
+                if inner:
+                    new_options[CONF_CHIME_TTS] = inner
+                else:
+                    new_options.pop(CONF_CHIME_TTS, None)
+                self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+                return self.async_create_entry(title="", data=new_options)
+        current_inner = self._entry.options.get(CONF_CHIME_TTS)
         schema = vol.Schema(
             {
                 vol.Required(
@@ -391,9 +404,12 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=[RESPONSE_TEXT, RESPONSE_CHIME], translation_key="response_mode")
                 ),
+                vol.Optional(
+                    CONF_CHIME_TTS, **({"description": {"suggested_value": current_inner}} if current_inner else {})
+                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="tts")),
             }
         )
-        return self.async_show_form(step_id="answers", data_schema=schema)
+        return self.async_show_form(step_id="answers", data_schema=schema, errors=errors)
 
     async def async_step_monitor(
         self, user_input: dict[str, Any] | None = None

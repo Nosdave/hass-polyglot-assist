@@ -1,0 +1,244 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Polyglot Assist",
+        "description": "Assistant vocal multilingue qui reconnaît lui-même tes commandes, rapidement.\n\nChoisis un assistant IA qui prend le relais pour tout ce que Polyglot ne reconnaît pas. Les commandes sont lues depuis `/config/{intents_default}` et peuvent être rechargées avec le service `polyglot_assist.reload`.",
+        "data": {
+          "fallback_agent": "Assistant IA pour tout le reste",
+          "intents_file": "Fichier des commandes (relatif à /config)"
+        }
+      }
+    },
+    "error": {
+      "intents_not_found": "Aucun fichier de commandes trouvé à cet emplacement.",
+      "intents_invalid": "Le fichier des commandes contient des erreurs. Consulte le journal pour plus de détails.",
+      "fallback_is_polyglot": "Polyglot ne peut pas se relayer à lui-même (ce serait une boucle sans fin). Choisis ton assistant IA ou l'agent Home Assistant.",
+      "fallback_missing": "Choisis un assistant IA."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Polyglot Assist",
+        "description": "Que veux-tu faire ?",
+        "menu_options": {
+          "change_fallback": "Changer d'assistant IA",
+          "language_hint": "Indication de langue pour l'assistant IA",
+          "edit_visual": "Modifier les commandes (éditeur visuel)",
+          "edit_yaml": "Modifier les commandes (YAML)",
+          "add_intent": "Ajouter une commande",
+          "reload": "Recharger les commandes (relire intents.yaml)",
+          "chat_log": "Commandes reconnues dans l'historique de conversation",
+          "source": "Source des commandes (fichier YAML ou catalogue)",
+          "translation": "Suggestions de traduction (tâche IA)",
+          "languages": "Langues",
+          "answers": "Réponse aux commandes (voix ou son)",
+          "monitor": "Suivi des demandes vocales"
+        }
+      },
+      "change_fallback": {
+        "title": "Assistant IA pour tout le reste",
+        "description": "Choisis l'assistant qui reçoit les phrases que Polyglot n'a pas reconnues.",
+        "data": {
+          "fallback_agent": "Assistant IA pour tout le reste"
+        }
+      },
+      "language_hint": {
+        "title": "Indication de langue pour l'assistant IA",
+        "description": "Si activé, quand une phrase non reconnue est clairement dans une autre langue configurée (listes de mots de/en/fr), l'assistant IA reçoit une courte consigne pour répondre dans cette langue. Désactivé par défaut ; sinon, la phrase est transmise telle quelle.",
+        "data": {
+          "fallback_language_hint": "Demander à l'assistant IA de répondre dans la langue détectée"
+        }
+      },
+      "edit_visual": {
+        "title": "Choisir une commande à modifier",
+        "description": "Choisis la commande dont tu veux modifier les phrases.",
+        "data": {
+          "intent_name": "Commande"
+        }
+      },
+      "edit_intent": {
+        "title": "Modifier la commande : {intent_name}",
+        "description": "Modifie les phrases par langue (une par ligne). Langues déjà présentes : {existing_langs}. Pour ajouter une langue, choisis son code ci-dessous et enregistre – un champ vide apparaît alors pour elle.",
+        "data": {
+          "description": "Description (facultative)",
+          "response_intent": "Nom du script cible (intent_script de Home Assistant)",
+          "add_language": "Ajouter une langue (code de langue, p. ex. 'es')"
+        }
+      },
+      "edit_yaml": {
+        "title": "Modifier intents.yaml",
+        "description": "Modifie directement le texte YAML de /config/polyglot_assist/intents.yaml. Il est vérifié à l'enregistrement – si le YAML est incorrect, rien n'est écrit.",
+        "data": {
+          "yaml_content": "YAML"
+        }
+      },
+      "add_intent": {
+        "title": "Ajouter une commande",
+        "description": "Crée une nouvelle commande. Après l'enregistrement, tu pourras ajouter des phrases dans l'éditeur visuel.",
+        "data": {
+          "new_intent_name": "Nom de la commande (lettres, chiffres et tiret bas, p. ex. 'EnergieZusammenfassung')",
+          "description": "Description (facultative)",
+          "initial_language": "Première langue"
+        }
+      },
+      "reload": {
+        "title": "Recharger les commandes",
+        "description": "Relit le fichier intents.yaml et reconstruit la reconnaissance des commandes. Pratique si tu as modifié le fichier en dehors de Home Assistant."
+      },
+      "chat_log": {
+        "title": "Commandes reconnues dans l'historique de conversation",
+        "description": "Si activé, une commande reconnue par Polyglot qui indique `llm_equivalent` est inscrite dans l'historique de conversation comme l'appel d'un outil dont ton assistant IA dispose vraiment (lu dans ses paramètres). Ainsi, les relances comme \"et le piano aussi\" fonctionnent. Les commandes sans outil correspondant ne sont jamais inscrites.",
+        "data": {
+          "chat_log_tools": "Inscrire les commandes reconnues comme appels d'outils"
+        }
+      },
+      "source": {
+        "title": "Source des commandes",
+        "description": "Fichier YAML (par défaut) ou catalogue dans le stockage de Home Assistant. Au premier passage au catalogue, intents.yaml est repris à l'identique (vérifié avant l'écriture). Si les deux diffèrent, c'est toi qui décides ; le côté remplacé est d'abord exporté dans polyglot_assist/export/. {err}",
+        "data": {
+          "source": "Source",
+          "when_different": "Si le fichier YAML et le catalogue diffèrent"
+        }
+      },
+      "translation": {
+        "title": "Suggestions de traduction",
+        "description": "Entité de tâche IA qui propose des phrases et des noms pour d'autres langues. Les suggestions sont vérifiées et appliquées uniquement si tu les acceptes. Les tâches IA avec outils (une API LLM) ne sont pas autorisées : les phrases et les noms d'appareils sont du texte non fiable pour le modèle. Les phrases et les noms sont envoyés à cette tâche IA – avec un fournisseur cloud, ils quittent ta maison.",
+        "data": {
+          "translation_ai_task": "Entité de tâche IA"
+        }
+      },
+      "languages": {
+        "title": "Langues",
+        "description": "Les langues parlées chez toi. Polyglot n'écoute que les phrases dans ces langues.",
+        "data": {
+          "languages_enabled": "Langues"
+        }
+      },
+      "answers": {
+        "title": "Réponse aux commandes",
+        "description": "Voix : p. ex. \"Lumière du canapé allumée.\" Son : un court son à la place. Uniquement pour les commandes marquées comme commandes de commutation ; les questions reçoivent toujours une réponse parlée. Pour le son avec n'importe quelle synthèse vocale : choisis ci-dessous la synthèse vocale que tu utilises, puis sélectionne \"Polyglot Assist (son)\" comme synthèse vocale de ton assistant vocal.",
+        "data": {
+          "response_mode": "Réponse",
+          "chime_tts": "Synthèse vocale derrière le son"
+        },
+        "data_description": {
+          "chime_tts": "Chaque texte est transmis à cette synthèse vocale ; seul le marqueur de son devient un court son. Laisse vide si tu utilises directement Polyglot TTS."
+        }
+      },
+      "monitor": {
+        "title": "Suivi des demandes vocales",
+        "description": "Polyglot garde les 500 dernières demandes vocales (texte uniquement, pas d'audio ; elles restent dans Home Assistant). Une fois par jour, ta tâche IA (celle choisie pour les suggestions, sans outils) cherche les phrases qui ont souvent eu besoin de l'assistant IA et ajoute des suggestions à la liste des suggestions. Rien ne change sans ton accord.",
+        "data": {
+          "monitor": "Suivre les demandes vocales",
+          "monitor_time": "Analyse quotidienne à"
+        }
+      }
+    },
+    "error": {
+      "invalid_yaml": "Impossible de lire le YAML : {err}. Corrige la syntaxe et enregistre à nouveau.",
+      "invalid_name": "Le nom de la commande ne peut contenir que des lettres, des chiffres et des tirets bas.",
+      "name_exists": "Une commande portant ce nom existe déjà.",
+      "import_failed": "Impossible de changer de source : {err}",
+      "refused": "Non enregistré : {err}",
+      "sources_differ": "Le fichier YAML et le catalogue diffèrent. Choisis ci-dessous quoi faire des différences.",
+      "ai_task_has_tools": "Cette tâche IA dispose d'outils (une API LLM). Choisis-en une sans outils.",
+      "fallback_is_polyglot": "Polyglot ne peut pas se relayer à lui-même (ce serait une boucle sans fin). Choisis ton assistant IA ou l'agent Home Assistant.",
+      "fallback_missing": "Choisis un assistant IA.",
+      "chime_tts_is_polyglot": "C'est la sortie son de Polyglot elle-même – elle ne peut pas se relayer à elle-même.",
+      "chime_tts_not_tts": "Choisis une synthèse vocale (tts.…).",
+      "chime_tts_missing": "Choisis une synthèse vocale."
+    },
+    "abort": {
+      "no_intents": "Aucune commande trouvée dans le fichier. Utilise 'Ajouter une commande' pour en créer une."
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "Recharger les commandes",
+      "description": "Reconstruit la reconnaissance multilingue des commandes à partir du fichier de commandes configuré."
+    },
+    "test_match": {
+      "name": "Tester la reconnaissance",
+      "description": "Vérifie une phrase avec la reconnaissance des commandes, sans rien exécuter.",
+      "fields": {
+        "text": {
+          "name": "Texte",
+          "description": "La phrase à tester."
+        },
+        "language": {
+          "name": "Indication de langue",
+          "description": "Indication de langue facultative (de, en, fr)."
+        }
+      }
+    },
+    "run_tests": {
+      "name": "Lancer les phrases de test",
+      "description": "Vérifie chaque phrase d'un fichier de phrases de test avec la reconnaissance des commandes et signale les échecs. Rien n'est exécuté. Réservé aux administrateurs.",
+      "fields": {
+        "file": {
+          "name": "Fichier de phrases de test",
+          "description": "Fichier YAML dans le dossier polyglot_assist du répertoire de configuration (par défaut polyglot_assist/tests.yaml)."
+        },
+        "language": {
+          "name": "Indication de langue",
+          "description": "Langue du pipeline de l'assistant vocal, transmise à la reconnaissance comme en fonctionnement réel."
+        }
+      }
+    },
+    "import_yaml": {
+      "name": "Importer intents.yaml dans le catalogue",
+      "description": "Copie le fichier YAML à l'identique dans le catalogue (.storage) et vérifie que rien ne se perd. Ne change pas de source. Réservé aux administrateurs.",
+      "fields": {
+        "overwrite": {
+          "name": "Écraser le catalogue actif",
+          "description": "Remplace le catalogue même s'il est actuellement la source active (il est d'abord exporté)."
+        }
+      }
+    },
+    "export_yaml": {
+      "name": "Exporter le catalogue en YAML",
+      "description": "Écrit le catalogue dans polyglot_assist/export/intents-TIMESTAMP.yaml. Réservé aux administrateurs."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "intents": {
+        "name": "Commandes"
+      }
+    },
+    "tts": {
+      "tone": {
+        "name": "Polyglot Assist (son)"
+      }
+    }
+  },
+  "selector": {
+    "source": {
+      "options": {
+        "yaml": "Fichier YAML (intents.yaml)",
+        "catalog": "Catalogue (.storage)"
+      }
+    },
+    "when_different": {
+      "options": {
+        "ask": "M'arrêter et me demander",
+        "use_yaml": "Utiliser le fichier YAML (exporter d'abord le catalogue)",
+        "keep_other": "Garder la cible telle quelle (exporter le catalogue en le quittant)"
+      }
+    },
+    "response_mode": {
+      "options": {
+        "text": "Voix",
+        "chime": "Son (Polyglot TTS)"
+      }
+    }
+  },
+  "issues": {
+    "load_failed": {
+      "title": "Polyglot Assist n'a pas pu charger ses commandes",
+      "description": "Source : {source}. Erreur : {error}. Dans Paramètres → Appareils et services, ouvre les options de Polyglot Assist → Source des commandes pour passer à l'autre source, ou restaure le fichier. Polyglot ne bascule pas tout seul, afin que les commandes que tu as désactivées restent désactivées."
+    }
+  }
+}

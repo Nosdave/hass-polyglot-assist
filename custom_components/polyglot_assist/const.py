@@ -36,6 +36,8 @@ RESPONSE_TEXT: Final = "text"
 RESPONSE_CHIME: Final = "chime"
 # Text sent to TTS instead of the answer; Polyglot TTS turns it into a tone
 CHIME_MARKER: Final = "[[polyglot:chime]]"
+# speech output behind the "Polyglot Assist (tone)" TTS entity
+CONF_CHIME_TTS: Final = "chime_tts"
 # Languages this installation speaks (empty = all languages of the intents)
 CONF_LANGUAGES_ENABLED: Final = "languages_enabled"
 

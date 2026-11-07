@@ -23,6 +23,7 @@ from homeassistant.helpers import intent
 from .const import (
     CONF_BUILTIN,
     CONF_CHAT_LOG_TOOLS,
+    CONF_CHIME_TTS,
     CONF_FALLBACK_AGENT,
     CONF_LANGUAGES_ENABLED,
     CONF_MONITOR,
@@ -703,6 +704,10 @@ def ws_overview(hass: HomeAssistant, connection, msg) -> None:
                 e.entity_id for e in er.async_get(hass).entities.values()
                 if e.platform == DOMAIN and e.domain == "conversation"
             ),
+            "polyglot_tts": sorted(
+                e.entity_id for e in er.async_get(hass).entities.values()
+                if e.platform == DOMAIN and e.domain == "tts"
+            ),
             "summary": count_summary(config),
             "problems": validate(config, extra_lists=runtime["lists"].names)[:50],
             "categories": list(config.get("categories") or []),
@@ -779,7 +784,7 @@ async def ws_names_set(hass: HomeAssistant, connection, msg) -> None:
 
 PANEL_OPTIONS = (
     CONF_LANGUAGES_ENABLED, CONF_RESPONSE_MODE, CONF_MONITOR, CONF_MONITOR_TIME,
-    CONF_TRANSLATION_AI_TASK, CONF_CHAT_LOG_TOOLS, CONF_BUILTIN,
+    CONF_TRANSLATION_AI_TASK, CONF_CHAT_LOG_TOOLS, CONF_BUILTIN, CONF_CHIME_TTS,
 )
 
 
@@ -795,6 +800,7 @@ PANEL_OPTIONS = (
         vol.Optional(CONF_TRANSLATION_AI_TASK): vol.Any(None, vol.Match(r"^ai_task\.[a-z0-9_]+$")),
         vol.Optional(CONF_CHAT_LOG_TOOLS): bool,
         vol.Optional(CONF_BUILTIN): bool,
+        vol.Optional(CONF_CHIME_TTS): vol.Any(None, vol.Match(r"^tts\.[a-z0-9_]+$")),
     }
 )
 @websocket_api.async_response
@@ -809,11 +815,19 @@ async def ws_options(hass: HomeAssistant, connection, msg) -> None:
     if ai_task and ai_task_has_tools(hass, ai_task):
         connection.send_error(msg["id"], "ai_task_has_tools", "this AI task has tools — choose one without tools")
         return
+    if changes.get(CONF_CHIME_TTS):
+        from .tts import inner_tts_error  # noqa: PLC0415
+
+        if err := inner_tts_error(hass, changes[CONF_CHIME_TTS]):
+            connection.send_error(msg["id"], f"chime_tts_{err}", "this speech output cannot be used behind the tone")
+            return
     new_options = {**entry.options, **changes}
     if CONF_TRANSLATION_AI_TASK in changes and not ai_task:
         new_options.pop(CONF_TRANSLATION_AI_TASK, None)
+    if CONF_CHIME_TTS in changes and not changes[CONF_CHIME_TTS]:
+        new_options.pop(CONF_CHIME_TTS, None)
     hass.config_entries.async_update_entry(entry, options=new_options)
-    if any(k in changes for k in (CONF_LANGUAGES_ENABLED, CONF_MONITOR, CONF_MONITOR_TIME, CONF_CHAT_LOG_TOOLS, CONF_BUILTIN)):
+    if any(k in changes for k in (CONF_LANGUAGES_ENABLED, CONF_MONITOR, CONF_MONITOR_TIME, CONF_CHAT_LOG_TOOLS, CONF_BUILTIN, CONF_CHIME_TTS)):
         hass.async_create_task(hass.config_entries.async_reload(entry_id))
     connection.send_result(msg["id"], {"options": {k: v for k, v in new_options.items() if k in PANEL_OPTIONS}})
 

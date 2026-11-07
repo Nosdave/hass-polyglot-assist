@@ -78,7 +78,7 @@ class _CorpusError(Exception):
 # read once at import (integrations are imported in the executor)
 MANIFEST_VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text("utf-8"))["version"]
 
-PLATFORMS: list[Platform] = [Platform.CONVERSATION, Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.CONVERSATION, Platform.SENSOR, Platform.TTS]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
