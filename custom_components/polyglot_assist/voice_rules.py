@@ -30,6 +30,9 @@ from .corpus import names_table, string_rules
 from .proposals import looks_protected, norm, parse_rules
 from .safety import action_target_reason, protected_reason, sensitive_entities
 
+import re
+
+_ENTITY = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 MAX_PER_HOUR = 5
 MIN_SPAN_S = 3600
 MIN_CONVERSATIONS = 2
@@ -76,6 +79,7 @@ def _known_names(hass: HomeAssistant, config: dict[str, Any]) -> dict[str, str]:
 
 def check_voice_item(
     hass: HomeAssistant, item: dict[str, Any], config: dict[str, Any], *, approved_satellites: set[str],
+    entry_id: str | None = None, runtime_lists: dict | None = None,
 ) -> str | None:
     """Why this proposal must NOT be accepted by voice (None = allowed)."""
     from hassil.intents import WildcardSlotList  # noqa: PLC0415
@@ -119,6 +123,14 @@ def check_voice_item(
         action = cfg.get("action")
         if not action:
             return "what this command does is not known to Polyglot (intent_script) — use the panel"
+        # what really runs is the REGISTERED handler — it must be this entry's catalog action
+        from homeassistant.helpers import intent as ha_intent  # noqa: PLC0415
+
+        from .actions import CatalogIntentHandler  # noqa: PLC0415
+
+        handler = next((h for h in ha_intent.async_get(hass) if h.intent_type == name), None)
+        if not isinstance(handler, CatalogIntentHandler) or (entry_id is not None and handler.owner != entry_id):
+            return "another handler (e.g. intent_script) runs this command — use the panel"
         entities = _action_entities(action)
         if not entities or _has_template(action):
             return "this command's action cannot be fully checked — use the panel"
@@ -128,7 +140,7 @@ def check_voice_item(
         from .matcher import MultilangMatcher  # noqa: PLC0415
         from .corpus import build_intents  # noqa: PLC0415
 
-        lists = MultilangMatcher(build_intents(config)).static_slot_lists()
+        lists = {**MultilangMatcher(build_intents(config)).static_slot_lists(), **(runtime_lists or {})}
         rules = parse_rules(string_rules(config))
         for sentence in p.get("sentences") or []:
             try:
@@ -148,7 +160,19 @@ def check_voice_item(
                                    string_rules(config), lang, _other_samples(config, lists, rules, lang, name))
             if fresh.get("status") != "ok":
                 return "no longer fits the current commands — use the panel"
-            # every value a placeholder can produce must be harmless
+            # every value a placeholder can produce must be harmless (runtime lists too: {name} …)
+            from hassil.intents import TextSlotList  # noqa: PLC0415
+
+            for ref in refs:
+                lst = lists.get(ref)
+                if isinstance(lst, TextSlotList):
+                    for v in lst.values:
+                        out = getattr(v, "value_out", None)
+                        if isinstance(out, str) and _ENTITY.match(out) and protected_reason(
+                                hass, out, sensitive_entities=sensitive, extra_names=extra):
+                            return f"a placeholder can reach a protected device ({out}) — use the panel"
+                elif ref in ("name", "area", "floor") or lst is None:
+                    return "a placeholder whose values are not known — use the panel"
             for ref in refs:
                 for value in ((config.get("lists") or {}).get(ref) or {}).get("values", []) if isinstance((config.get("lists") or {}).get(ref), dict) else []:
                     out = value.get("out") if isinstance(value, dict) else value
