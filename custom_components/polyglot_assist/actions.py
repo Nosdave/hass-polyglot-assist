@@ -39,26 +39,65 @@ class CatalogIntentHandler(intent.IntentHandler):
     """Runs the catalog action of one intent and answers in the hit language."""
 
     def __init__(
-        self, hass: HomeAssistant, intent_type: str, script: Script, speech: dict[str, str], owner: str
+        self, hass: HomeAssistant, intent_type: str, script: Script | None, speech: dict[str, str], owner: str,
+        kind: str | None = None,
     ) -> None:
         self.intent_type = intent_type
         self.owner = owner  # config entry id
         self.platforms = {DOMAIN}
         self.description = f"Polyglot catalog command {intent_type}"
         self._script = script
+        self._kind = kind
+        # "*" = one template for every language (taken over from YAML: it branches on `lang` itself)
         self._speech = {lang: Template(text, hass) for lang, text in speech.items() if isinstance(text, str)}
 
     async def async_handle(self, intent_obj: intent.Intent) -> intent.IntentResponse:
+        from homeassistant.exceptions import TemplateError  # noqa: PLC0415
+
         variables: dict[str, Any] = {name: slot.get("value") for name, slot in intent_obj.slots.items()}
         lang = variables.get("lang") or intent_obj.language
-        result = await self._script.async_run(variables, intent_obj.context)
-        if result is not None and result.service_response is not None:
-            variables["action_response"] = result.service_response
         response = intent_obj.create_response()
-        template = self._speech.get(lang)
-        text = template.async_render(variables, parse_result=False) if template else say("done", lang)
-        response.async_set_speech(text)
+        if self._script is not None:
+            result = await self._script.async_run(variables, intent_obj.context)
+            if result is not None and result.service_response is not None:
+                variables["action_response"] = result.service_response
+            # what was switched (monitor, ChatLog): the entities the action names
+            response.async_set_results(success_results=[
+                intent.IntentResponseTarget(type=intent.IntentResponseTargetType.ENTITY, name=e, id=e)
+                for e in sorted(self._script.referenced_entities)[:10]])
+        if self._kind == "question":
+            response.response_type = intent.IntentResponseType.QUERY_ANSWER  # spoken, never a tone
+        template = self._speech.get(lang) or self._speech.get((lang or "").split("-")[0]) or self._speech.get("*")
+        try:
+            text = template.async_render(variables, parse_result=False) if template else say("done", lang)
+        except TemplateError as err:
+            # the action (if any) HAS run — say so instead of "failed"
+            _LOGGER.warning("Polyglot Assist: answer of %s could not be rendered: %s", self.intent_type, err)
+            text = say("done", lang)
+        response.async_set_speech(" ".join(str(text).split()))
         return response
+
+
+async def async_prepare_owned(hass: HomeAssistant, config: dict[str, Any], owner: str) -> dict[str, CatalogIntentHandler]:
+    """Handlers for commands taken over from YAML (``owned``): called by Polyglot DIRECTLY.
+
+    They are not registered (the intent_script keeps its name in HA's registry
+    and stays the fallback for the LLM tool); Polyglot's matcher calls them.
+    """
+    out: dict[str, CatalogIntentHandler] = {}
+    for name, cfg in (config.get("intents") or {}).items():
+        if not isinstance(cfg, dict) or not cfg.get("owned"):
+            continue
+        script = None
+        if cfg.get("action"):
+            try:
+                actions = await async_validate_actions_config(hass, cv.SCRIPT_SCHEMA(cfg["action"]))
+                script = Script(hass, actions, f"Polyglot {name}", DOMAIN, script_mode="parallel")
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error("Polyglot Assist: action of %s (taken over) is invalid: %s", name, err)
+                continue  # never run half a command — the YAML handler stays in charge
+        out[name] = CatalogIntentHandler(hass, name, script, cfg.get("speech") or {}, owner, cfg.get("kind"))
+    return out
 
 
 async def async_prepare_catalog_actions(
@@ -73,8 +112,8 @@ async def async_prepare_catalog_actions(
     }
     handlers: list[CatalogIntentHandler] = []
     for name, cfg in (config.get("intents") or {}).items():
-        if not isinstance(cfg, dict) or not cfg.get("action"):
-            continue
+        if not isinstance(cfg, dict) or not cfg.get("action") or cfg.get("owned"):
+            continue  # owned commands are called directly (async_prepare_owned)
         if name in taken:
             _LOGGER.warning(
                 "Polyglot Assist: %s already has a handler (e.g. intent_script) — catalog action ignored",
@@ -87,7 +126,7 @@ async def async_prepare_catalog_actions(
         except Exception as err:  # noqa: BLE001 — one broken action must not break the rest
             _LOGGER.error("Polyglot Assist: action of %s is invalid: %s", name, err)
             continue
-        handlers.append(CatalogIntentHandler(hass, name, script, cfg.get("speech") or {}, owner))
+        handlers.append(CatalogIntentHandler(hass, name, script, cfg.get("speech") or {}, owner, cfg.get("kind")))
     return handlers
 
 

@@ -260,18 +260,32 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         slots[SLOT_LANG] = {"value": match.lang}
         slots[SLOT_UTTERANCE] = {"value": user_input.text}
 
+        owned = ((self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id) or {}).get("owned") or {}).get(match.intent_name)
         try:
-            response = await intent.async_handle(
-                self.hass,
-                DOMAIN,
-                intent_type=match.intent_name,
-                slots=slots,
-                text_input=user_input.text,
-                context=user_input.context,
-                language=match.lang,
-                conversation_agent_id=user_input.agent_id,
-                device_id=user_input.device_id,
-            )
+            if owned is not None:
+                # taken over from YAML: Polyglot's own handler — the intent_script keeps its
+                # registry entry (fallback, LLM tool), so it is called directly, not via the registry
+                try:
+                    response = await owned.async_handle(intent.Intent(
+                        self.hass, DOMAIN, match.intent_name, slots, user_input.text, user_input.context,
+                        match.lang, device_id=user_input.device_id, satellite_id=user_input.satellite_id,
+                        conversation_agent_id=user_input.agent_id))
+                except intent.IntentError:
+                    raise
+                except Exception as err:  # noqa: BLE001 — same as the registry path does for handlers
+                    raise intent.IntentUnexpectedError(str(err)) from err
+            else:
+                response = await intent.async_handle(
+                    self.hass,
+                    DOMAIN,
+                    intent_type=match.intent_name,
+                    slots=slots,
+                    text_input=user_input.text,
+                    context=user_input.context,
+                    language=match.lang,
+                    conversation_agent_id=user_input.agent_id,
+                    device_id=user_input.device_id,
+                )
         except (intent.IntentHandleError, intent.IntentUnexpectedError) as err:
             _LOGGER.error(
                 "Polyglot match %s found but intent handler failed: %s",

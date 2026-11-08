@@ -51,6 +51,7 @@ from .const import (
 from .corpus import Case, parse_corpus, run_corpus
 from .actions import (
     async_prepare_catalog_actions,
+    async_prepare_owned,
     async_register_catalog_actions,
     async_swap_catalog_actions,
     async_unregister_catalog_actions,
@@ -118,8 +119,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     lists = DynamicLists(hass, matcher.config)
     lists.async_start()
     actions = await async_register_catalog_actions(hass, matcher.config, entry.entry_id)
+    owned = await async_prepare_owned(hass, matcher.config, entry.entry_id)
     hass.data[DOMAIN][entry.entry_id] = {
         "actions": actions,
+        "owned": owned,
         "matcher": matcher,
         "lists": lists,
         "source": source,
@@ -354,12 +357,14 @@ async def async_reload_entry_matcher(hass: HomeAssistant, data: dict) -> bool:
     if data.get("generation") != generation:
         return False  # a newer reload started meanwhile; it wins
     handlers = await async_prepare_catalog_actions(hass, new_matcher.config, entry.entry_id)
+    owned = await async_prepare_owned(hass, new_matcher.config, entry.entry_id)
     if data.get("generation") != generation:
         return False
     new_lists = DynamicLists(hass, new_matcher.config)
     new_lists.async_start()
     data["lists"].async_stop()
     data["actions"] = async_swap_catalog_actions(hass, data.get("actions", []), handlers, entry.entry_id)
+    data["owned"] = owned  # swapped together with the matcher: a hit always finds its own handler
     data["matcher"] = new_matcher
     if data.get("builtin") is not None:
         await async_setup_builtin(hass, data, new_matcher)

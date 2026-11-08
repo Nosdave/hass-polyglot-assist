@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import re
 import time
 from typing import Any
@@ -71,6 +72,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_fallback_set, ws_pipelines, ws_languages_check, ws_stt_test, ws_ai_task_check,
         ws_ui_texts_get, ws_ui_texts_languages, ws_ui_texts_set, ws_ui_texts_translate, ws_ui_texts_export,
         ws_tone_preview, ws_tone_upload, ws_tone_delete, ws_tone_play,
+        ws_answer_preview, ws_answer_entities, ws_answer_source, ws_answer_takeover, ws_answer_release, ws_answer_save,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -1224,3 +1226,365 @@ async def ws_tone_play(hass: HomeAssistant, connection, msg) -> None:
         connection.send_error(msg["id"], "failed", str(err)[:200])
         return
     connection.send_result(msg["id"], {"played": True})
+
+
+# ── answer editor: preview and entity picker ─────────────────────────────────
+_PREVIEW_GAP_S = 0.3
+_last_preview: dict[int, float] = {}
+
+
+def _units(hass: HomeAssistant, entities: list[str]) -> dict[str, str]:
+    out = {}
+    for e in entities:
+        st = hass.states.get(e)
+        unit = st.attributes.get("unit_of_measurement") if st else None
+        if isinstance(unit, str):
+            out[e] = unit
+    return out
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/answer/preview", vol.Optional("entry_id"): str,
+     vol.Required("lang"): vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$"),
+     vol.Exclusive("blocks", "src"): list, vol.Exclusive("template", "src"): vol.All(str, vol.Length(max=6000)),
+     vol.Optional("overrides"): {vol.Match(r"^[a-z0-9_]+\.[a-z0-9_]+$"): vol.Any(str, int, float)}}
+)
+@websocket_api.async_response
+async def ws_answer_preview(hass: HomeAssistant, connection, msg) -> None:
+    """Render an answer with the CURRENT values — nothing is executed (Jinja cannot call services).
+
+    Blocks: the template is compiled here and may read only the entities the
+    blocks name. A raw template (expert mode, admins only) must not read all
+    states or whole domains. Same safeguards as HA's own render_template:
+    validity check, 3 s timeout, render info.
+    """
+    from homeassistant.exceptions import TemplateError  # noqa: PLC0415
+    from homeassistant.helpers.template import Template  # noqa: PLC0415
+
+    from .answer import AnswerError, compile_answer, read_entities, validate  # noqa: PLC0415
+
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    now = time.monotonic()
+    key = id(connection)
+    if now - _last_preview.get(key, 0) < _PREVIEW_GAP_S:
+        connection.send_error(msg["id"], "too_fast", "one preview at a time")
+        return
+    _last_preview[key] = now
+    if len(_last_preview) > 200:
+        _last_preview.clear()
+    lang = msg["lang"]
+    allowed: set[str] | None = None
+    try:
+        if "blocks" in msg:
+            blocks = validate(msg["blocks"])
+            allowed = set(read_entities(blocks))
+            source = compile_answer(blocks, lang, _units(hass, sorted(allowed)))
+        elif "template" in msg:
+            source = msg["template"]
+        else:
+            connection.send_error(msg["id"], "invalid", "blocks or template")
+            return
+    except AnswerError as err:
+        connection.send_error(msg["id"], "answer_invalid", str(err))
+        return
+    variables = {"lang": lang.split("-")[0], "utterance": ""}
+    template = Template(source, hass)
+    try:
+        template.ensure_valid()
+        if await template.async_render_will_timeout(3.0, variables, strict=False):
+            connection.send_error(msg["id"], "timeout", "the answer takes too long to render")
+            return
+        info = template.async_render_to_info(variables, strict=False)
+        text = info.result()
+    except TemplateError as err:
+        connection.send_error(msg["id"], "template_error", str(err)[:300])
+        return
+    if info.all_states or info.all_states_lifecycle or info.domains or info.domains_lifecycle:
+        connection.send_error(msg["id"], "reads_too_much", "an answer may only read single entities")
+        return
+    read = sorted(info.entities)
+    if allowed is not None and set(read) - allowed:
+        connection.send_error(msg["id"], "reads_too_much", "the answer reads entities it does not name")
+        return
+    text = " ".join(str(text).split())
+    connection.send_result(msg["id"], {"text": text, "chars": len(text), "reads": read, "template": source})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/answer/entities", vol.Optional("entry_id"): str,
+     vol.Optional("query", default=""): vol.All(str, vol.Length(max=80)),
+     vol.Optional("lang", default="de"): vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$")}
+)
+@callback
+def ws_answer_entities(hass: HomeAssistant, connection, msg) -> None:
+    """Entities an answer may read: exposed to Assist, not protected — grouped by area, with the current value."""
+    from homeassistant.components.homeassistant.exposed_entities import async_should_expose  # noqa: PLC0415
+
+    from .answer import SPOKEN_STATES, spoken_unit  # noqa: PLC0415
+    from .safety import protected_reason, sensitive_entities  # noqa: PLC0415
+
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    config = runtime["matcher"].config
+    sensitive, extra = sensitive_entities(config), names_table(config)
+    ents, devs = er.async_get(hass), dr.async_get(hass)
+    areas = {a.id: a.name for a in ar.async_get(hass).async_list_areas()}
+    lang = msg["lang"].split("-")[0]
+    q = msg["query"].strip().lower()
+    out = []
+    for st in hass.states.async_all():
+        if not async_should_expose(hass, "conversation", st.entity_id):
+            continue
+        entry = ents.async_get(st.entity_id)
+        area_id = (entry.area_id if entry else None) or (
+            (devs.async_get(entry.device_id).area_id if entry and entry.device_id and devs.async_get(entry.device_id) else None))
+        area = areas.get(area_id or "", "")
+        if q and q not in f"{st.name} {st.entity_id} {area}".lower():
+            continue
+        if protected_reason(hass, st.entity_id, sensitive_entities=sensitive, extra_names=extra):
+            continue
+        unit = st.attributes.get("unit_of_measurement")
+        try:
+            number = float(st.state)
+        except ValueError:
+            number = None
+        out.append({
+            "entity_id": st.entity_id, "name": st.name, "area": area, "state": st.state,
+            "unit": unit if isinstance(unit, str) else None, "number": number is not None,
+            "spoken": (f"{st.state} {spoken_unit(unit, lang)}".strip() if number is not None
+                       else SPOKEN_STATES.get(lang, {}).get(st.state, st.state)),
+        })
+    out.sort(key=lambda x: (x["area"] or "~", x["name"].lower()))
+    connection.send_result(msg["id"], {"entities": out[:80], "more": max(0, len(out) - 80)})
+
+
+# ── answer editor: where an answer lives, take over from YAML, save ──────────
+def _script_handler(hass: HomeAssistant, name: str):
+    """The intent_script handler of ``name`` (or None) — read defensively (internal class)."""
+    for h in intent.async_get(hass):
+        if h.intent_type == name and type(h).__name__ == "ScriptIntentHandler" and isinstance(getattr(h, "config", None), dict):
+            return h
+    return None
+
+
+def _as_data(value: Any) -> Any:
+    """Validated script config → plain catalog data (Templates back to their source text)."""
+    from homeassistant.helpers.template import Template  # noqa: PLC0415
+
+    if isinstance(value, Template):
+        return value.template
+    if isinstance(value, dict):
+        return {str(k): _as_data(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_as_data(v) for v in value]
+    return value
+
+
+def _yaml_answer(handler) -> dict[str, Any]:
+    """Speech template, action and what they use — of an intent_script handler."""
+    import hashlib  # noqa: PLC0415
+
+    import jinja2  # noqa: PLC0415
+    from jinja2 import meta  # noqa: PLC0415
+
+    cfg = handler.config
+    speech = cfg.get("speech") or {}
+    text = getattr(speech.get("text"), "template", None) if isinstance(speech, dict) else None
+    script = cfg.get("action")
+    action = _as_data(getattr(script, "sequence", None)) if script is not None else None
+    variables: list[str] = []
+    if isinstance(text, str):
+        try:
+            variables = sorted(meta.find_undeclared_variables(jinja2.Environment().parse(text)))
+        except jinja2.TemplateSyntaxError:
+            variables = []
+    from .source import json_roundtrip_equal  # noqa: PLC0415
+
+    action_ok = action is None or json_roundtrip_equal({"a": action})
+    raw = json.dumps({"speech": text, "action": action if action_ok else None}, sort_keys=True, ensure_ascii=False, default=str)
+    return {
+        "speech": text, "action": action if action_ok else None, "action_ok": action_ok,
+        "entities": sorted(getattr(script, "referenced_entities", set()) or set()) if script is not None else [],
+        "async_action": bool(cfg.get("async_action")),
+        "has_card": bool(cfg.get("card")), "has_reprompt": bool(cfg.get("reprompt")),
+        "variables": variables,
+        "unknown_variables": [v for v in variables if v not in KNOWN_ANSWER_VARIABLES and not v.startswith("_")],
+        "hash": hashlib.sha256(raw.encode()).hexdigest()[:12],
+    }
+
+
+# what Polyglot gives an answer template (slots come on top)
+KNOWN_ANSWER_VARIABLES = {"lang", "utterance", "action_response", "states", "state_attr", "is_state", "now",
+                          "as_timestamp", "today_at", "float", "int", "round", "range", "namespace"}
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/answer/source", vol.Optional("entry_id"): str,
+     vol.Required("name"): vol.Match(NAME_RE)}
+)
+@callback
+def ws_answer_source(hass: HomeAssistant, connection, msg) -> None:
+    """Who answers this command (Polyglot / YAML / nobody) and what the answer is."""
+    from .answer import is_block_answer  # noqa: PLC0415
+
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    name = msg["name"]
+    cfg = (runtime["matcher"].config.get("intents") or {}).get(name)
+    if not isinstance(cfg, dict):
+        connection.send_error(msg["id"], "not_found", "unknown command")
+        return
+    handler = _script_handler(hass, name)
+    yaml = _yaml_answer(handler) if handler is not None else None
+    owned = bool(cfg.get("owned"))
+    blocks = cfg.get("answer_blocks") or {}
+    units = _units(hass, sorted({p["e"] for bl in blocks.values() if isinstance(bl, list) for b in bl if isinstance(b, dict)
+                                 for p in [*(b.get("p") or []), *(b.get("other") or []), *[q for c in (b.get("cases") or []) for q in (c.get("p") or [])]]
+                                 if isinstance(p, dict) and isinstance(p.get("e"), str)}))
+    speech = cfg.get("speech") or {}
+    per_lang = {lang: {"template": text, "blocks": blocks.get(lang) if is_block_answer(text, blocks.get(lang), lang, units) else None}
+                for lang, text in speech.items() if isinstance(text, str)}
+    connection.send_result(msg["id"], {
+        "name": name, "kind": cfg.get("kind"),
+        "answered_by": "polyglot" if owned or (cfg.get("action") and handler is None) or (speech and handler is None)
+        else "yaml" if handler is not None else "none",
+        "owned": owned, "yaml": yaml,
+        "yaml_changed": bool(owned and yaml and cfg.get("source_hash") and yaml["hash"] != cfg.get("source_hash")),
+        "answers": per_lang, "action": cfg.get("action"),
+    })
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/answer/takeover", vol.Optional("entry_id"): str,
+     vol.Required("name"): vol.Match(NAME_RE), vol.Optional("base_rev"): str,
+     vol.Optional("force", default=False): bool}
+)
+@websocket_api.async_response
+async def ws_answer_takeover(hass: HomeAssistant, connection, msg) -> None:
+    """Copy answer and action of the intent_script into the catalog; Polyglot answers from now on."""
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    name = msg["name"]
+    handler = _script_handler(hass, name)
+    if handler is None:
+        connection.send_error(msg["id"], "no_yaml", "this command has no intent_script to take over")
+        return
+    yaml = _yaml_answer(handler)
+    if not yaml["action_ok"]:
+        connection.send_error(msg["id"], "action_not_copyable", "the action cannot be stored as data — keep it in YAML")
+        return
+    if yaml["async_action"]:
+        connection.send_error(msg["id"], "async_action", "this command answers before its action finishes — keep it in YAML")
+        return
+
+    def _mutate(data: dict) -> None:
+        cfg = (data.get("intents") or {}).get(name)
+        if not isinstance(cfg, dict):
+            raise GuardError("not_found", "unknown command")
+        cfg["owned"] = True
+        cfg["source_hash"] = yaml["hash"]
+        if yaml["speech"] is not None:
+            cfg["speech"] = {"*": yaml["speech"]}  # one template for all languages (branches on `lang`)
+        if yaml["action"]:
+            cfg["action"] = yaml["action"]
+        cfg.setdefault("llm_equivalent", {"tool": f"intent_script__{name.lower()}", "args": {}})
+
+    await _guarded(hass, connection, msg, runtime, _mutate, actor="takeover")
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/answer/release", vol.Optional("entry_id"): str,
+     vol.Required("name"): vol.Match(NAME_RE), vol.Optional("base_rev"): str,
+     vol.Optional("force", default=False): bool}
+)
+@websocket_api.async_response
+async def ws_answer_release(hass: HomeAssistant, connection, msg) -> None:
+    """Back to the YAML file: the intent_script answers again (Polyglot's copy stays in the history)."""
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    name = msg["name"]
+
+    def _mutate(data: dict) -> None:
+        cfg = (data.get("intents") or {}).get(name)
+        if not isinstance(cfg, dict) or not cfg.get("owned"):
+            raise GuardError("not_owned", "this command is not taken over")
+        for key in ("owned", "source_hash", "speech", "answer_blocks", "action"):
+            cfg.pop(key, None)
+
+    await _guarded(hass, connection, msg, runtime, _mutate, actor="release")
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/answer/save", vol.Optional("entry_id"): str,
+     vol.Required("name"): vol.Match(NAME_RE),
+     vol.Required("answers"): {vol.Match(r"^(\*|[a-z]{2,3}(-[A-Za-z]{2,4})?)$"): vol.Any(
+         {vol.Required("blocks"): list}, {vol.Required("template"): vol.All(str, vol.Length(max=6000))}, None)},
+     vol.Optional("base_rev"): str, vol.Optional("force", default=False): bool}
+)
+@websocket_api.async_response
+async def ws_answer_save(hass: HomeAssistant, connection, msg) -> None:
+    """Save answers per language: blocks are compiled HERE; a raw template only from the expert view (admin)."""
+    from .answer import AnswerError, compile_answer, read_entities, validate  # noqa: PLC0415
+
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    name = msg["name"]
+    cfg_now = (runtime["matcher"].config.get("intents") or {}).get(name)
+    if not isinstance(cfg_now, dict):
+        connection.send_error(msg["id"], "not_found", "unknown command")
+        return
+    if _script_handler(hass, name) is not None and not cfg_now.get("owned"):
+        connection.send_error(msg["id"], "take_over_first", "the YAML file answers this command — take it over first")
+        return
+    compiled: dict[str, tuple[str | None, list | None]] = {}
+    try:
+        for lang, ans in msg["answers"].items():
+            if ans is None:
+                compiled[lang] = (None, None)
+            elif "blocks" in ans:
+                blocks = validate(ans["blocks"])
+                compiled[lang] = (compile_answer(blocks, lang, _units(hass, read_entities(blocks))), blocks)
+            else:
+                compiled[lang] = (ans["template"], None)
+    except AnswerError as err:
+        connection.send_error(msg["id"], "answer_invalid", str(err))
+        return
+
+    def _mutate(data: dict) -> None:
+        cfg = (data.get("intents") or {}).get(name)
+        if not isinstance(cfg, dict):
+            raise GuardError("not_found", "unknown command")
+        speech = dict(cfg.get("speech") or {})
+        blocks_all = dict(cfg.get("answer_blocks") or {})
+        for lang, (template, blocks) in compiled.items():
+            if template is None:
+                speech.pop(lang, None)
+            else:
+                speech[lang] = template
+            if blocks is None:
+                blocks_all.pop(lang, None)
+            else:
+                blocks_all[lang] = blocks
+        if speech:
+            cfg["speech"] = speech
+        else:
+            cfg.pop("speech", None)
+        if blocks_all:
+            cfg["answer_blocks"] = blocks_all
+        else:
+            cfg.pop("answer_blocks", None)
+
+    await _guarded(hass, connection, msg, runtime, _mutate, actor="answer")
