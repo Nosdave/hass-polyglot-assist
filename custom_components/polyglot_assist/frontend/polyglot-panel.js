@@ -539,7 +539,12 @@ class PolyglotAnswerEditor extends HTMLElement {
     this.shadowRoot.addEventListener("click", (e) => this._click(e));
     window.addEventListener("beforeunload", (e) => { if (this.dirty) { e.preventDefault(); e.returnValue = ""; } });
     this.shadowRoot.addEventListener("change", (e) => this._change(e));
-    this.shadowRoot.addEventListener("input", (e) => { if (e.target.id === "pq") { clearTimeout(this._qt); const q = e.target.value; this._qt = setTimeout(() => this._search(q), 250); } if (e.target.dataset.a === "tpl") { this.st.model[this.st.lang] = e.target.value; this.st.dirty.add(this.st.lang); this._partial(); this._preview(); } if (e.target.dataset.a === "pickna" && this.st.pick) this.st.pick.v.na = e.target.value; });
+    this.shadowRoot.addEventListener("input", (e) => { if (e.target.id === "pq") { clearTimeout(this._qt); const q = e.target.value; this._qt = setTimeout(() => this._search(q), 250); } if (e.target.dataset.a === "tpl") {
+        const st = this.st, v = e.target.value;
+        if (st.mode[st.lang] === "shared") st.langs.forEach((x) => { if (st.mode[x] === "shared") st.model[x] = v; });  // ONE template for all
+        else st.model[st.lang] = v;
+        st.dirty.add(st.lang); this._partial(); this._preview();
+      } if (e.target.dataset.a === "pickna" && this.st.pick) this.st.pick.v.na = e.target.value; });
     this.shadowRoot.addEventListener("keydown", (e) => this._key(e));
   }
 
@@ -626,7 +631,10 @@ class PolyglotAnswerEditor extends HTMLElement {
     else if (a === "save") {
       s.busy = true; s.err = ""; this._paint();
       const answers = {};
-      for (const l of s.dirty) answers[l] = s.mode[l] === "blocks" ? ((s.model[l] || []).length ? { blocks: this._clean(s.model[l]) } : null) : { template: s.model[l] || "" };
+      for (const l of s.dirty) {
+        if (s.mode[l] === "shared") answers["*"] = { template: s.model[l] || "" };  // the shared template, for every language
+        else answers[l] = s.mode[l] === "blocks" ? ((s.model[l] || []).length ? { blocks: this._clean(s.model[l]) } : null) : { template: s.model[l] || "" };
+      }
       try { const r = await this.ws("answer/save", { name: s.name, answers, base_rev: this.panel.s.data?.rev });
         if (r && r.saved === false) throw new Error(this.panel._notSaved(r, this.panel._regressions(r)));
         s.dirty.clear(); s.draft = {}; s.busy = false; s.msg = t("aed.saved", { cases: r.corpus_cases || 0 }); await this.panel._reload(["overview", "data"]); this._paint(); }
