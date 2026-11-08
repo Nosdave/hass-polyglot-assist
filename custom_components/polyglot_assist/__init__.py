@@ -502,7 +502,8 @@ async def async_run_monitor(hass: HomeAssistant, data: dict, budget_s: float = N
     review = commands = None
     if ai_task and entry.options.get(CONF_MONITOR_REVIEW):
         review, commands = _correction_review(hass, data, ai_task, deadline, _builtin_match)
-    result = await monitor.async_evaluate(data, _propose, review, commands, add=_add)
+    result = await monitor.async_evaluate(data, _propose, review, commands, add=_add,
+                                          learn=_ai_answer_learner(hass, data, _builtin_match))
     return result["summary"]
 
 
@@ -747,3 +748,86 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
         return added
 
     return review, commands_entry
+
+
+def _ai_answer_learner(hass: HomeAssistant, data: dict, builtin_match):
+    """Questions the AI answered by reading ONE device, asked ≥ 2× → proposals (see learn_ai.py)."""
+    from homeassistant.components.homeassistant.exposed_entities import async_should_expose  # noqa: PLC0415
+
+    from .answer import SPOKEN_UNITS, AnswerError, validate  # noqa: PLC0415
+    from .corpus import OTHER_CATEGORY, names_table, string_rules  # noqa: PLC0415
+    from .learn_ai import answer_blocks_from, command_name, find_ai_answers, sentence_from  # noqa: PLC0415
+    from .proposals import bounded_samples, check_item, check_proposal, parse_rules  # noqa: PLC0415
+    from .safety import protected_reason, sensitive_entities  # noqa: PLC0415
+
+    matcher = data["matcher"]
+
+    async def learn(entries: list, add) -> int:
+        config = matcher.config
+        sensitive, extra = sensitive_entities(config), names_table(config)
+        slot_lists = {**matcher.static_slot_lists(), **data["lists"].async_get()}
+        enabled = set(matcher.languages)
+        added = 0
+        for cand in find_ai_answers(entries):
+            entity, lang = cand["entity"], cand.get("lang")
+            st = hass.states.get(entity)
+            if st is None or lang not in enabled or not async_should_expose(hass, "conversation", entity):
+                continue
+            if protected_reason(hass, entity, sensitive_entities=sensitive, extra_names=extra):
+                continue
+            unit = st.attributes.get("unit_of_measurement")
+            words = [w for w in (SPOKEN_UNITS.get(lang, {}).get(unit) if isinstance(unit, str) else None, unit) if w]
+            blocks = answer_blocks_from(cand["said"], entity, st.state, words)
+            if blocks is None:
+                # the value in the AI's answer was formatted differently today — use the recorded one
+                rec = next((r.get("s") for e in entries for r in (e.get("read") or []) if r.get("e") == entity), None)
+                blocks = answer_blocks_from(cand["said"], entity, rec, words)
+            try:
+                blocks = validate(blocks) if blocks else None
+            except AnswerError:
+                blocks = None
+            if not blocks:
+                continue
+            name = command_name(st.name)
+            if name in (config.get("intents") or {}):
+                continue
+            sentences = list(dict.fromkeys(s for s in (sentence_from(t) for t in cand["texts"]) if s))
+
+            def _check(sentences=sentences, name=name, lang=lang):
+                good, notes = [], []
+                for sent in sentences:
+                    r = check_proposal(name, sent, [], lambda x: matcher.match_all(x, lang, slot_lists),
+                                       slot_lists, string_rules(config), lang)
+                    from hassil.parse_expression import parse_sentence  # noqa: PLC0415
+
+                    hit = None
+                    if r["status"] != "error":
+                        hit = next((h for x in bounded_samples(parse_sentence(r["sentence"]), slot_lists,
+                                                               parse_rules(string_rules(config)), lang)
+                                    if (h := builtin_match(x, lang, True))), None)
+                    if r["status"] == "error" or hit:
+                        notes.append((r.get("notes") or [f"HA already answers it ({hit})"])[0])
+                    else:
+                        good.append(r["sentence"])
+                return good, notes
+
+            good, notes = await hass.async_add_executor_job(_check)
+            if not good:
+                continue
+            item = {
+                "op": "add_intent",
+                "payload": {"name": name, "intent": {
+                    "description": f"{st.name}?", "category": OTHER_CATEGORY, "kind": "question",
+                    "sentences": {lang: good}, "answer_blocks": {lang: blocks}}},
+                "title": f"{st.name} ({lang})",
+                "origin": {"source": "ai_answer", "detail": f"{cand['count']}× → {entity}",
+                           "evidence": [{"said": cand["texts"], "ai_said": cand["said"], "entity": entity,
+                                         "ms": cand["ms"], "conversations": cand["conversations"]}]},
+                "check": {"status": "ok" if not notes else "warn",
+                          "notes": [f"{len(good)} of {len(sentences)} questions recognised", *notes[:3]]},
+            }
+            if check_item(item) is None:
+                added += await add([item])
+        return added
+
+    return learn

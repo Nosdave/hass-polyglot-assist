@@ -42,7 +42,7 @@ const OP_KIND = {
   add_intent: "new", add_sentences: "new", add_names: "new", set_list_value: "change",
   set_field: "change", remove_sentences: "remove", remove_names: "remove", remove_list_value: "remove",
 };
-const ORIGINS = ["new_devices", "starter", "monitor", "correction", "translation", "manual"];
+const ORIGINS = ["new_devices", "starter", "monitor", "correction", "ai_answer", "translation", "manual"];
 const SAFETY = ["normal", "sensitive", "disabled"];
 // The backend's "no category" value (corpus.OTHER_CATEGORY). It is stored data,
 // so it stays as is; only its label is translated.
@@ -216,6 +216,16 @@ class PolyglotAnswerEditor extends HTMLElement {
         else { this.st.model[l] = []; this.st.mode[l] = "blocks"; }
       }
     } catch (e) { this.st.err = e.message || e.code || String(e); }
+    this._paint(); this._preview();
+  }
+
+  /** Edit the answer of a NEW-command proposal (nothing is saved to the catalog; the panel re-checks it). */
+  loadProposal(item, langs) {
+    const blocks = ((item.payload || {}).intent || {}).answer_blocks || {};
+    const use = [...new Set([...Object.keys(blocks), ...langs])];
+    this.st = { name: item.payload.name, langs: use, lang: Object.keys(blocks)[0] || use[0], model: {}, mode: {}, dirty: new Set(), busy: false, msg: "", err: "", prev: {}, dialog: null, pick: null, draft: {},
+      src: { answered_by: "polyglot", owned: false, proposal: item.id, answers: {} } };
+    use.forEach((l) => { this.st.model[l] = JSON.parse(JSON.stringify(blocks[l] || [])); this.st.mode[l] = "blocks"; });
     this._paint(); this._preview();
   }
 
@@ -527,6 +537,12 @@ class PolyglotAnswerEditor extends HTMLElement {
         await this.panel._reload(["overview", "data"]); s.msg = what === "takeover" ? t("aed.taken_over") : t("aed.released"); await this.load(s.name, s.langs); }
       catch (err) { s.busy = false; s.err = err.message || err.code; this._paint(); }
     }
+    else if (a === "save" && s.src.proposal) {
+      const blocks = {}; s.langs.forEach((l) => { if ((s.model[l] || []).length) blocks[l] = this._clean(s.model[l]); });
+      s.busy = true; s.err = ""; this._paint();
+      try { await this.panel._saveProposalEdit(s.src.proposal, blocks); s.dirty.clear(); s.busy = false; }
+      catch (err) { s.busy = false; s.err = err.message || err.code; this._paint(); }
+    }
     else if (a === "save") {
       s.busy = true; s.err = ""; this._paint();
       const answers = {};
@@ -639,6 +655,20 @@ class PolyglotAssistPanel extends HTMLElement {
   _cat(c) { return c === OTHER ? this.t("categories.other") : c; }
   _origin(src) { return ORIGINS.includes(src) ? this.t("origins." + src) : ""; }
   _q(text) { return this.t("messages.quoted", { text }); }
+  // an answer proposal: what the AI said and what Polyglot would say (values as names, never markup)
+  _answerLines(item) {
+    const blocks = ((item.payload || {}).intent || {}).answer_blocks;
+    if (!blocks) return "";
+    const ev = ((item.origin || {}).evidence || [])[0] || {};
+    const nm = (e) => this._hass?.states?.[e]?.attributes?.friendly_name || e;
+    const parts = (ps) => (ps || []).map((p) => typeof p === "string" ? esc(p) : `<span class="chip pri">${esc(nm(p.e))}</span>`).join("");
+    const said = Object.entries(blocks).map(([l, bs]) => `<div class="hint"><b>${esc(this.t("proposals.polyglot_says"))}</b> <span class="lang">${esc(l)}</span> ${bs.map((b) => b.t === "satz" ? parts(b.p) : esc(this.t("aed.cond"))).join(" ")}</div>`).join("");
+    return `${ev.ai_said ? `<div class="hint"><b>${esc(this.t("proposals.ai_said"))}</b> ${esc(this._q(ev.ai_said))}</div>` : ""}${said}
+      ${(ev.said || []).length ? `<div class="hint">${esc(this.t("proposals.asked", { examples: ev.said.slice(0, 3).map((x) => this._q(x)).join(" · ") }))}</div>` : ""}
+      <div class="hint" style="color:var(--success-color)">✓ ${esc(this.t("proposals.reads_only"))}</div>
+      <button class="b" data-act="pedit" data-pid="${esc(item.id)}" style="margin-top:6px">${esc(this.t("proposals.edit"))}</button>`;
+  }
+
   // what a NEW command would switch — shown before anyone accepts it
   _actionLine(action) {
     const steps = Array.isArray(action) ? action : action ? [action] : [];
@@ -723,6 +753,13 @@ class PolyglotAssistPanel extends HTMLElement {
 
   // the answer editor keeps its own DOM (caret, typed text) — it is moved, never re-created
   _mountAnswerEditor() {
+    const pslot = this.shadowRoot.getElementById("aedp-slot");
+    const item = pslot && (this.s.proposals || []).find((i) => i.id === this.s.propEdit);
+    if (pslot && item) {
+      if (!this._aedP) { this._aedP = document.createElement("polyglot-answer-editor"); this._aedP.panel = this; }
+      pslot.appendChild(this._aedP);
+      if (this._aedPFor !== item.id) { this._aedPFor = item.id; this._aedP.loadProposal(item, this.s.overview?.languages || []); }
+    }
     const slot = this.shadowRoot.getElementById("aed-slot");
     const name = this.s.view === "commands" ? this.s.selected : null;
     if (!slot || !name) return;
@@ -778,6 +815,28 @@ class PolyglotAssistPanel extends HTMLElement {
       </div></section>`;
   }
 
+  _proposalEditCard() {
+    const t = (k, v) => esc(this.t(k, v));
+    const item = (this.s.proposals || []).find((i) => i.id === this.s.propEdit);
+    if (!item) return "";
+    const sents = (item.payload.intent.sentences || {});
+    const lang = Object.keys(sents)[0] || "";
+    return `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${t("proposals.edit_title", { name: item.payload.name })}</h2><button class="b" data-act="pclose">${t("buttons.close")}</button></div>
+      <p class="hint">${t("proposals.edit_hint")}</p>
+      <label class="hint">${t("editor.sentences")} <span class="lang">${esc(lang)}</span></label>
+      <textarea id="psents" data-l="${esc(lang)}" aria-label="${t("editor.sentences")}">${esc((sents[lang] || []).join("\n"))}</textarea>
+      <div id="aedp-slot"></div>${this._msg("pedit")}</div>`;
+  }
+
+  async _saveProposalEdit(id, blocks) {
+    const ta = this.shadowRoot.getElementById("psents");
+    const sentences = ta ? { [ta.dataset.l]: ta.value.split("\n").map((x) => x.trim()).filter(Boolean) } : undefined;
+    const r = await this.ws("proposals/update", { proposal_id: id, ...(sentences ? { sentences } : {}), answer_blocks: blocks });
+    this.s.propEdit = r.proposal_id; this._aedPFor = null;
+    await this._reload(["proposals"]);
+    this._setMsg("pedit", this.t("proposals.edited", { status: this.t({ ok: "proposals.status_ok", warn: "proposals.status_warn", error: "proposals.status_error" }[r.check?.status] || "proposals.status_ok") }), r.check?.status === "error" ? "err" : "ok");
+  }
+
   _v_proposals() {
     const t = (k, v) => esc(this.t(k, v));
     const items = (this.s.proposals || []).filter((i) => (!this.s.propFilter || i.origin?.source === this.s.propFilter) && (!this.s.kindFilter || OP_KIND[i.op] === this.s.kindFilter));
@@ -792,9 +851,9 @@ class PolyglotAssistPanel extends HTMLElement {
         <div><span class="chip ${kind === "new" ? "ok" : kind === "remove" ? "warn" : "pri"}">${t("kinds." + kind)}</span> <b>${esc(i.title || i.op)}</b> <span class="chip ${st === "ok" ? "ok" : st === "warn" ? "warn" : "err"}">${stLabel}</span>
         <div class="hint"><b>${t("proposals.origin_label")}</b> ${esc(i.origin?.detail || this._origin(i.origin?.source))}</div>
         ${(i.check?.notes || []).length ? `<div class="hint">${esc(i.check.notes.join("; "))}</div>` : ""}
-        ${ex ? `<div class="ex">${esc(ex)}</div>` : ""}${this._actionLine(p.intent?.action)}${i.origin?.wanted ? `<div class="hint"><b>${t("proposals.wanted_label")}</b> ${esc(i.origin.wanted)}</div>` : ""}</div><span class="chip pri">${esc(this._origin(i.origin?.source))}</span></div>`;
+        ${ex ? `<div class="ex">${esc(ex)}</div>` : ""}${this._actionLine(p.intent?.action)}${this._answerLines(i)}${i.origin?.wanted ? `<div class="hint"><b>${t("proposals.wanted_label")}</b> ${esc(i.origin.wanted)}</div>` : ""}</div><span class="chip pri">${esc(this._origin(i.origin?.source))}</span></div>`;
     }).join("");
-    return `<section class="grid"><div class="card">
+    return `<section class="grid">${this.s.propEdit ? this._proposalEditCard() : ""}<div class="card">
       <div class="row" style="justify-content:space-between"><h2 style="margin:0">${t("proposals.title")}${this._tip("proposals")}</h2>
         <div class="row"><button class="b" data-act="pall">${t("buttons.select_checked")}</button><button class="b p" data-act="paccept" ${readonly ? "disabled" : ""}>${t("buttons.accept_selected")}</button><button class="b" data-act="preject">${t("buttons.reject")}</button></div></div>
       ${readonly ? `<div class="banner warn" style="margin-top:10px">${t("proposals.readonly")}</div>` : ""}
@@ -1214,6 +1273,8 @@ class PolyglotAssistPanel extends HTMLElement {
     try {
       if (a === "menu") this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
       else if ((a === "tab" || a === "open" || a === "close") && this.s.selected && this._answerGuard()) { return; }
+      else if (a === "pedit") { this.s.propEdit = el.dataset.pid; this._aedPFor = null; this._render(); this.shadowRoot.querySelector("main").scrollIntoView(); }
+      else if (a === "pclose") { this.s.propEdit = null; this._render(); }
       else if (a === "tab") { this.s.view = el.dataset.v; history.replaceState(null, "", "#" + el.dataset.v); if (el.dataset.v === "monitor" || el.dataset.v === "start") await this._reload(["monitor", "overview"]); else this._render(); }
       else if (a === "pall") this.shadowRoot.querySelectorAll("[data-pid]").forEach((c) => { const it = this.s.proposals.find((i) => i.id === c.dataset.pid); c.checked = !c.disabled && it?.check?.status === "ok"; });
       else if (a === "paccept" || a === "preject") {

@@ -65,7 +65,8 @@
     "monitor": "Monitoring",
     "translation": "Translation",
     "manual": "Manual",
-    "correction": "From a correction"
+    "correction": "From a correction",
+    "ai_answer": "From AI answers"
   },
   "safety": {
     "normal": "normal",
@@ -151,7 +152,15 @@
     "empty": "No suggestions. Start with “{starter}” or “{new_devices}”.",
     "wanted_label": "Wanted:",
     "action_label": "Switches:",
-    "no_target": "no device"
+    "no_target": "no device",
+    "ai_said": "The AI said:",
+    "polyglot_says": "Polyglot would say:",
+    "asked": "Asked, e.g. {examples}",
+    "reads_only": "Only answers – switches nothing",
+    "edit": "Edit",
+    "edit_title": "Edit suggestion: {name}",
+    "edit_hint": "Change sentences and answer – the suggestion is checked again afterwards. It is only applied with “Accept” in the list.",
+    "edited": "Suggestion changed and checked again: {status}"
   },
   "groups": {
     "several_rooms": "Several rooms",

@@ -65,7 +65,8 @@
     "monitor": "Überwachung",
     "translation": "Übersetzung",
     "manual": "Von Hand",
-    "correction": "Aus einer Korrektur"
+    "correction": "Aus einer Korrektur",
+    "ai_answer": "Aus KI-Antworten"
   },
   "safety": {
     "normal": "normal",
@@ -151,7 +152,15 @@
     "empty": "Keine Vorschläge. Starte mit „{starter}“ oder „{new_devices}“.",
     "wanted_label": "Gewünscht:",
     "action_label": "Schaltet:",
-    "no_target": "kein Gerät"
+    "no_target": "kein Gerät",
+    "ai_said": "Die KI sagte:",
+    "polyglot_says": "Polyglot würde sagen:",
+    "asked": "Gefragt, z. B. {examples}",
+    "reads_only": "Nur Auskunft – schaltet nichts",
+    "edit": "Bearbeiten",
+    "edit_title": "Vorschlag bearbeiten: {name}",
+    "edit_hint": "Sätze und Antwort ändern – danach wird der Vorschlag neu geprüft. Übernommen wird er erst mit „Übernehmen“ in der Liste.",
+    "edited": "Vorschlag geändert und neu geprüft: {status}"
   },
   "groups": {
     "several_rooms": "Mehrere Räume",

@@ -412,7 +412,7 @@ OPS = (
     "add_names", "remove_names", "set_list_value", "remove_list_value",
 )
 SETTABLE_FIELDS = ("category", "kind", "safety", "response_mode", "description", "llm_equivalent")
-ORIGINS = ("new_devices", "starter", "monitor", "correction", "translation", "manual")
+ORIGINS = ("new_devices", "starter", "monitor", "correction", "ai_answer", "translation", "manual")
 
 
 class QueueError(Exception):

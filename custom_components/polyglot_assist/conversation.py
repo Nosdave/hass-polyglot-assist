@@ -229,6 +229,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             ]
             speech = result.response.speech.get("plain", {}).get("speech", "")
             switched = _tool_result_entities(chat_log.content[before:])
+            read = _read_candidates(self.hass, calls)
             monitor.async_record(
                 text=user_input.text,
                 lang=guess_language(user_input.text, matcher.languages) or (user_input.language or "").split("-")[0],
@@ -238,7 +239,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                           "target": {k: c["args"][k] for k in ("name", "entity_id", "domain", "area", "floor")
                                      if isinstance(c["args"], dict) and isinstance(c["args"].get(k), (str, list))}}
                          for c in calls[:5]],
-                speech=speech[:200], switched=switched,
+                speech=speech[:200], switched=switched, read=read,
                 ms=round((time.perf_counter() - t0) * 1000.0, 1),
                 error=result.response.response_type == intent.IntentResponseType.ERROR,
                 device=user_input.device_id, satellite=user_input.satellite_id,
@@ -545,7 +546,9 @@ def _tool_result_entities(contents) -> list[str]:
 
     for content in contents:
         if getattr(content, "role", None) == "tool_result":
-            walk(getattr(content, "tool_result", None))
+            result = getattr(content, "result", None)
+            # HA ≥ 2026.10: ToolResult.data (content.tool_result is deprecated, breaks in 2027.11)
+            walk(result.data if hasattr(result, "data") else getattr(content, "tool_result", None))
     return found[:MAX_SWITCHED]
 
 
@@ -560,3 +563,40 @@ def _catalog_entities(intent_cfg) -> list[str]:
             if "{" not in entity and entity not in out:
                 out.append(entity)
     return out[:MAX_SWITCHED]
+
+
+def _read_candidates(hass, calls: list[dict]) -> list[dict]:
+    """Which exposed entities a state-reading tool call looked at (with their value right now).
+
+    GetLiveContext returns names, not entity ids — so its filter (name / area /
+    domain) is replayed with HA's own matcher on the exposed states. An
+    unfiltered call (everything) or more than 5 matches count as "unknown".
+    """
+    from homeassistant.components.homeassistant.exposed_entities import async_should_expose  # noqa: PLC0415
+
+    out: list[dict] = []
+    for call in calls:
+        tool = str(call.get("tool") or "")
+        args = call.get("args") if isinstance(call.get("args"), dict) else {}
+        if not (tool.endswith("GetLiveContext") or tool.endswith("HassGetState")):
+            continue
+        name, area = args.get("name"), args.get("area")
+        domain = args.get("domain")
+        domains = [domain] if isinstance(domain, str) else [d for d in (domain or []) if isinstance(d, str)]
+        if not (name or area or domains):
+            return []  # everything was read — no way to tell which value answered
+        states = [s for s in hass.states.async_all() if async_should_expose(hass, "conversation", s.entity_id)]
+        try:
+            match = intent.async_match_targets(
+                hass, intent.MatchTargetsConstraints(
+                    name=name if isinstance(name, str) else None, area_name=area if isinstance(area, str) else None,
+                    domains=[d.strip().lower() for d in domains] or None, allow_duplicate_names=True),
+                states=states)
+        except Exception:  # noqa: BLE001 — recording must never break the answer
+            return []
+        if not match.is_match or len(match.states) > 5:
+            return []
+        for st in match.states:
+            if not any(r["e"] == st.entity_id for r in out):
+                out.append({"e": st.entity_id, "s": st.state[:40]})
+    return out[:5]

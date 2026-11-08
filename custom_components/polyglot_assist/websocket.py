@@ -73,7 +73,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_ui_texts_get, ws_ui_texts_languages, ws_ui_texts_set, ws_ui_texts_translate, ws_ui_texts_export,
         ws_tone_preview, ws_tone_upload, ws_tone_delete, ws_tone_play,
         ws_answer_preview, ws_answer_entities, ws_answer_source, ws_answer_takeover, ws_answer_release, ws_answer_save,
-        ws_answer_translate,
+        ws_answer_translate, ws_proposals_update,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -1641,3 +1641,76 @@ async def ws_answer_translate(hass: HomeAssistant, connection, msg) -> None:
         connection.send_error(msg["id"], "failed", str(err)[:200])
     except TimeoutError:
         connection.send_error(msg["id"], "timeout", "the AI took too long")
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/proposals/update", vol.Optional("entry_id"): str,
+     vol.Required("proposal_id"): str,
+     vol.Optional("sentences"): {vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$"): [vol.All(str, vol.Length(min=1, max=250))]},
+     vol.Optional("answer_blocks"): {vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$"): list}}
+)
+@websocket_api.async_response
+async def ws_proposals_update(hass: HomeAssistant, connection, msg) -> None:
+    """Edit a NEW-command proposal before accepting it: sentences and answer blocks only.
+
+    The edited proposal is checked afresh (static check, every sentence against the
+    corpus and the other commands) and replaces the old one — with a new id, its
+    origin kept and marked "edited". A stale "ok" can never survive an edit.
+    """
+    from .proposals import QueueError, check_item, check_proposal, clean_alternatives  # noqa: PLC0415
+
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    queue = _queue(hass, runtime)
+    items = await queue.async_items()
+    old = next((i for i in items if i["id"] == msg["proposal_id"]), None)
+    if old is None or old.get("op") != "add_intent":
+        connection.send_error(msg["id"], "not_editable", "only new-command proposals can be edited")
+        return
+    new = copy.deepcopy(old)
+    intent_cfg = new["payload"]["intent"]
+    if "sentences" in msg:
+        intent_cfg["sentences"] = {lang: [clean_alternatives(s) for s in ss] for lang, ss in msg["sentences"].items() if ss}
+    if "answer_blocks" in msg:
+        intent_cfg["answer_blocks"] = msg["answer_blocks"]
+    if "answer_blocks" in msg:
+        intent_cfg.pop("speech", None)  # the answer is compiled from the blocks at acceptance
+    reason = check_item(new)
+    if reason:
+        connection.send_error(msg["id"], "invalid", reason)
+        return
+    matcher = runtime["matcher"]
+    slot_lists = {**matcher.static_slot_lists(), **runtime["lists"].async_get()}
+    from .corpus import string_rules  # noqa: PLC0415
+
+    def _check():
+        notes, worst = [], "ok"
+        for lang, ss in intent_cfg.get("sentences", {}).items():
+            for s in ss:
+                r = check_proposal(new["payload"]["name"], s, [], lambda x, lang=lang: matcher.match_all(x, lang, slot_lists),
+                                   slot_lists, string_rules(matcher.config), lang)
+                if r["status"] == "error":
+                    worst = "error"
+                elif r["status"] == "warn" and worst == "ok":
+                    worst = "warn"
+                notes += [f"{lang}: {n}" for n in (r.get("notes") or [])[:1]]
+        return worst, notes
+
+    status, notes = await hass.async_add_executor_job(_check)
+    new["check"] = {"status": "warn" if status == "ok" and old.get("origin", {}).get("source") == "correction" else status,
+                    "notes": ["edited by hand", *notes[:5]]}
+    new["edited"] = True
+    new.pop("id", None)
+    try:
+        await queue.async_remove([old["id"]])
+        added = await queue.async_add([new])
+        if not added:  # identical to an existing or rejected proposal: keep the old one
+            await queue.async_add([{k: v for k, v in old.items() if k != "id"}])
+            connection.send_error(msg["id"], "unchanged", "this is the same as an existing or rejected suggestion")
+            return
+    except QueueError as err:
+        connection.send_error(msg["id"], "failed", str(err))
+        return
+    connection.send_result(msg["id"], {"proposal_id": added[0], "check": new["check"]})

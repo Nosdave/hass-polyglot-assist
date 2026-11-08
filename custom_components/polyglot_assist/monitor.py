@@ -160,7 +160,8 @@ class Monitor:
             "assistant_ms_p50": _p50([e.get("ms") for e in llm]),
         }
 
-    async def async_evaluate(self, runtime: dict[str, Any], propose, review=None, commands=None, *, add=None) -> dict[str, Any]:
+    async def async_evaluate(self, runtime: dict[str, Any], propose, review=None, commands=None, *, add=None,
+                             learn=None) -> dict[str, Any]:
         """Evaluate the last 24 h.
 
         Order (one shared time budget — whatever finished is kept, even on a timeout):
@@ -193,6 +194,12 @@ class Monitor:
                 except Exception as err:  # noqa: BLE001 — the summary still counts
                     errors.append(str(err)[:200])
                     _LOGGER.warning("Polyglot Assist: monitoring proposals failed: %s", err)
+            if learn is not None and add is not None:
+                try:  # questions the AI answered by reading a device → local commands (no AI call)
+                    added += await learn(entries, add)
+                except Exception as err:  # noqa: BLE001
+                    errors.append(f"ai answers: {str(err)[:150]}")
+                    _LOGGER.warning("Polyglot Assist: learning from AI answers failed: %s", err)
             if commands is not None and insights and add is not None:
                 try:
                     added += await commands(insights, add)

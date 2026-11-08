@@ -65,7 +65,8 @@
     "monitor": "Surveillance",
     "translation": "Traduction",
     "manual": "À la main",
-    "correction": "D'une correction"
+    "correction": "D'une correction",
+    "ai_answer": "Des réponses de l'IA"
   },
   "safety": {
     "normal": "normal",
@@ -151,7 +152,15 @@
     "empty": "Aucune suggestion. Commence par « {starter} » ou « {new_devices} ».",
     "wanted_label": "Souhaité :",
     "action_label": "Commande :",
-    "no_target": "aucun appareil"
+    "no_target": "aucun appareil",
+    "ai_said": "L'IA a dit :",
+    "polyglot_says": "Polyglot dirait :",
+    "asked": "Demandé, p. ex. {examples}",
+    "reads_only": "Réponse seulement – ne commande rien",
+    "edit": "Modifier",
+    "edit_title": "Modifier la suggestion : {name}",
+    "edit_hint": "Modifie les phrases et la réponse – la suggestion est ensuite revérifiée. Elle n'est appliquée qu'avec « Accepter » dans la liste.",
+    "edited": "Suggestion modifiée et revérifiée : {status}"
   },
   "groups": {
     "several_rooms": "Plusieurs pièces",
