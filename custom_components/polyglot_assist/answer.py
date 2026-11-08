@@ -254,3 +254,39 @@ def blocks_entities(intent_cfg: dict[str, Any]) -> list[str]:
             if e not in found:
                 found.append(e)
     return found
+
+
+def text_pieces(blocks: list[dict[str, Any]]) -> list[str]:
+    """Every literal text piece, in order (what a translation changes)."""
+    out: list[str] = []
+
+    def parts(ps):
+        out.extend(p for p in ps if isinstance(p, str))
+
+    for b in blocks:
+        if b["t"] == "satz":
+            parts(b["p"])
+        else:
+            for c in b["cases"]:
+                parts(c["p"])
+            parts(b["other"])
+    return out
+
+
+def with_text_pieces(blocks: list[dict[str, Any]], texts: list[str]) -> list[dict[str, Any]]:
+    """The same blocks with the text pieces replaced in order (values untouched)."""
+    if len(texts) != len(text_pieces(blocks)):
+        raise AnswerError("the translation does not fit the answer")
+    it = iter(texts)
+
+    def parts(ps):
+        return [_check_text(next(it)) if isinstance(p, str) else dict(p) for p in ps]
+
+    out = []
+    for b in blocks:
+        if b["t"] == "satz":
+            out.append({"t": "satz", "p": parts(b["p"])})
+        else:
+            out.append({"t": "cond", "e": b["e"], "cases": [{**c, "p": parts(c["p"])} for c in b["cases"]],
+                        "other": parts(b["other"])})
+    return validate(out)

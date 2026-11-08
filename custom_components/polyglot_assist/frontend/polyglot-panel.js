@@ -135,6 +135,420 @@ const TONE_LABELS = {
 };
 const TONE_ERRORS = { "tone_type": "tone.err_type", "tone_empty": "tone.err_empty", "tone_too_big": "tone.err_too_big", "tone_format": "tone.err_format", "tone_convert": "tone.err_convert", "tone_silent": "tone.err_silent", "tone_no_satellite": "tone.err_no_satellite", "tone_no_announce": "tone.err_no_announce", "tone_tts_unavailable": "tone.err_tts_unavailable", "no_custom_tone": "tone.err_no_custom_tone" };
 
+// ── answer editor (own element: keeps its DOM and caret while the panel re-renders) ──
+const AED_FORMATS = { unit: "aed.fmt_unit", value: "aed.fmt_value", state: "aed.fmt_state", name: "aed.fmt_name" };
+const AED_OPS = { ">": "aed.op_gt", "<": "aed.op_lt", "=": "aed.op_eq" };
+const AED_CSS = `
+:host{display:block}
+*{box-sizing:border-box}
+.banner{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--divider-color,#e0e0e0);border-radius:10px;padding:10px 12px;margin:8px 0}
+@media (max-width:600px){.banner{grid-template-columns:1fr}}
+.chip{display:inline-flex;border-radius:999px;padding:2px 8px;font-size:12px;font-weight:500;white-space:nowrap}
+.yaml{background:var(--warning-color,#ffa600);color:#000}.pg{background:var(--success-color,#43a047);color:#fff}
+.hint{font-size:12.5px;color:var(--secondary-text-color)}
+code{font-family:var(--code-font-family,monospace);font-size:12px;overflow-wrap:anywhere}
+button{font:inherit;font-weight:500;border-radius:8px;border:1px solid var(--divider-color,#ccc);background:var(--card-background-color,#fff);color:var(--primary-color);padding:8px 12px;cursor:pointer;min-height:40px}
+button.p{background:var(--primary-color);color:var(--text-primary-color,#fff);border-color:var(--primary-color)}
+button.g{border-color:transparent;background:transparent}
+button[disabled]{opacity:.5;cursor:not-allowed}
+button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible,.satz:focus-visible{outline:2px solid var(--primary-color);outline-offset:2px}
+select,input,textarea{font:inherit;color:var(--primary-text-color);background:var(--secondary-background-color,#f5f5f5);border:1px solid var(--divider-color,#ccc);border-radius:8px;padding:8px 10px;min-height:40px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--divider-color,#ccc);border-radius:8px;overflow:hidden}
+.seg button{border:0;border-radius:0;color:var(--primary-text-color)}
+.seg button[aria-pressed="true"]{background:var(--primary-color);color:var(--text-primary-color,#fff)}
+.ltab{position:relative}.ltab[aria-pressed="true"]{border-color:var(--primary-color);background:var(--secondary-background-color)}
+.dot{position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:var(--warning-color,#ffa600)}
+.blocks{display:grid;gap:10px;margin-top:10px}
+.blk{border:1px solid var(--divider-color,#e0e0e0);border-radius:10px;padding:8px 8px 8px 12px;background:var(--secondary-background-color,#fafafa)}
+.blk.cond{border-color:var(--accent-color,#00796b)}
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--secondary-text-color);display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap}
+.satz{min-height:40px;padding:8px 10px;border-radius:8px;background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#ccc);line-height:2.1;cursor:text;overflow-wrap:anywhere;white-space:pre-wrap;color:var(--primary-text-color)}
+.satz[contenteditable="false"]{cursor:default;opacity:.9}
+.satz:empty::before{content:attr(data-ph);color:var(--secondary-text-color)}
+.val{display:inline-flex;align-items:center;gap:6px;border-radius:8px;padding:0 8px;margin:0 2px;font-size:13px;cursor:pointer;line-height:1.8;user-select:none;white-space:nowrap;background:color-mix(in srgb,var(--primary-color) 14%,transparent);color:var(--primary-text-color);border:1px solid color-mix(in srgb,var(--primary-color) 40%,transparent)}
+.val small{font-family:var(--code-font-family,monospace);font-size:11px;opacity:.85}
+.case{display:grid;grid-template-columns:minmax(0,14em) minmax(0,1fr) auto;gap:6px;align-items:center;margin-top:6px}
+.case input{width:6.5em}
+.case.on .satz{border-color:var(--accent-color,#00796b);box-shadow:0 0 0 1px var(--accent-color,#00796b)}
+@media (max-width:600px){.case{grid-template-columns:1fr}}
+.preview{border:1px solid var(--divider-color,#e0e0e0);border-radius:10px;padding:12px;margin-top:12px}
+.preview p{margin:4px 0 8px;font-size:15px}
+.meter{height:6px;border-radius:999px;background:var(--divider-color,#e0e0e0);overflow:hidden}.meter i{display:block;height:100%;background:var(--success-color,#43a047)}.meter.warn i{background:var(--warning-color,#ffa600)}
+.err{color:var(--error-color,#db4437)}
+textarea{width:100%;min-height:200px;font-family:var(--code-font-family,monospace);font-size:12.5px}
+.savebar{position:sticky;bottom:0;z-index:3;margin-top:12px;background:var(--card-background-color,#fff);border-top:1px solid var(--divider-color,#e0e0e0);padding:10px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.savebar .m{margin-right:auto;font-size:13px}
+.sheet{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.35);display:grid;place-items:center;padding:16px}
+.panel{background:var(--card-background-color,#fff);color:var(--primary-text-color);border-radius:14px;width:min(520px,100%);max-height:min(660px,90vh);display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;overflow:hidden}
+.panel.dlg{grid-template-rows:auto;padding:18px;gap:12px;display:grid}
+.panel header{padding:14px 16px 6px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.panel h3{margin:0;font-size:16px;font-weight:500}
+.panel .s{padding:0 16px 8px}.panel .s input{width:100%}
+.res{overflow:auto;padding:0 8px}
+.grp{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--secondary-text-color);padding:10px 8px 4px}
+.opt{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0 10px;padding:8px;border-radius:8px;cursor:pointer;min-height:44px}
+.opt[aria-selected="true"],.opt:hover{background:var(--secondary-background-color,#eee)}
+.opt .v{font-family:var(--code-font-family,monospace);font-size:12px;color:var(--secondary-text-color)}
+.opt .i{grid-column:1/3;font-family:var(--code-font-family,monospace);font-size:11px;color:var(--secondary-text-color)}
+.opts{border-top:1px solid var(--divider-color,#e0e0e0);padding:12px 16px;display:grid;gap:10px}
+.opts label{font-size:12px;color:var(--secondary-text-color);display:grid;gap:4px}
+@media (max-width:600px){.sheet{place-items:end stretch;padding:0}.panel{width:100%;border-radius:14px 14px 0 0;max-height:88vh}}
+`;
+
+class PolyglotAnswerEditor extends HTMLElement {
+  constructor() { super(); this.attachShadow({ mode: "open" }); this.st = null; }
+  t(k, v) { return this.panel ? this.panel.t(k, v) : k; }
+  ws(type, data) { return this.panel.ws(type, data); }
+  get dirty() { return !!(this.st && this.st.dirty.size); }
+
+  async load(name, langs) {
+    this.st = { name, langs, lang: langs[0], src: null, model: {}, mode: {}, dirty: new Set(), busy: false, msg: "", err: "", prev: {}, dialog: null, pick: null, draft: {} };
+    this._paint();
+    try {
+      const src = await this.ws("answer/source", { name });
+      this.st.src = src;
+      for (const l of langs) {
+        const a = src.answers[l] || null;
+        if (a && a.blocks) { this.st.model[l] = JSON.parse(JSON.stringify(a.blocks)); this.st.mode[l] = "blocks"; }
+        else if (a && a.template) { this.st.model[l] = a.template; this.st.mode[l] = "template"; }
+        else if (src.answers["*"]) { this.st.model[l] = src.answers["*"].template; this.st.mode[l] = "shared"; }
+        else { this.st.model[l] = []; this.st.mode[l] = "blocks"; }
+      }
+    } catch (e) { this.st.err = e.message || e.code || String(e); }
+    this._paint(); this._preview();
+  }
+
+  get editable() { const s = this.st && this.st.src; return !!s && s.answered_by !== "yaml"; }
+
+  // ── rendering ─────────────────────────────────────────────────────────────
+  _paint() {
+    const t = (k, v) => esc(this.t(k, v));
+    const s = this.st;
+    if (!s) { this.shadowRoot.innerHTML = ""; return; }
+    if (!s.src) { this.shadowRoot.innerHTML = `<style>${AED_CSS}</style><p class="hint">${s.err ? `<span class="err">${esc(s.err)}</span>` : t("aed.loading")}</p>`; return; }
+    const src = s.src, l = s.lang, mode = s.mode[l];
+    const banner = src.answered_by === "yaml"
+      ? `<div class="banner"><span class="chip yaml">YAML</span><div><b>${t("aed.yaml_title")}</b><div class="hint">${t("aed.yaml_hint")}${(src.yaml?.unknown_variables || []).length ? " " + t("aed.yaml_vars", { vars: src.yaml.unknown_variables.join(", ") }) : ""}${src.yaml?.has_card || src.yaml?.has_reprompt ? " " + t("aed.yaml_card") : ""}</div></div><button class="p" data-a="takeover">${t("aed.takeover")}</button></div>`
+      : src.owned ? `<div class="banner"><span class="chip pg">Polyglot</span><div><b>${t("aed.owned_title")}</b>${src.yaml ? `<div class="hint">${t("aed.owned_hint")}</div>` : ""}${src.yaml_changed ? `<div class="hint err">${t("aed.yaml_changed")}</div>` : ""}</div>${src.yaml ? `<button data-a="release">${t("aed.release")}</button>` : "<span></span>"}</div>` : "";
+    const tabs = s.langs.map((x) => `<button class="ltab" data-a="lang" data-l="${esc(x)}" aria-pressed="${x === l}">${esc(this.panel._ln(x))}${s.dirty.has(x) ? `<span class="dot" title="${t("aed.unsaved_one")}"></span>` : ""}</button>`).join("");
+    const ro = !this.editable;
+    let body;
+    if (mode === "blocks") {
+      const blocks = s.model[l];
+      body = `<div class="blocks">${blocks.length ? blocks.map((b, i) => this._blockHtml(b, i, ro)).join("") : `<div class="blk"><div class="hint">${t("aed.empty")}</div></div>`}</div>
+        <div class="row" style="margin-top:10px"><button data-a="insval" ${ro ? "disabled" : ""}>${t("aed.ins_value")}</button><button data-a="addsatz" ${ro ? "disabled" : ""}>${t("aed.add_sentence")}</button><button data-a="addcond" ${ro ? "disabled" : ""}>${t("aed.add_cond")}</button>
+        ${blocks.length ? `<button class="g" data-a="shorter" ${ro || s.busy ? "disabled" : ""}>✨ ${t("aed.shorter")}</button>` : ""}</div>
+        <p class="hint">${t("aed.tip")}</p>`;
+    } else {
+      body = `<p class="hint">${mode === "shared" ? t("aed.shared_hint") : t("aed.template_hint")}</p><textarea data-a="tpl" aria-label="${t("aed.template")}" ${ro ? "readonly" : ""}>${esc(s.model[l] || "")}</textarea>
+        ${!ro ? `<div class="row"><button class="g" data-a="toblocks">${t("aed.to_blocks")}</button></div>` : ""}`;
+    }
+    const missing = s.langs.filter((x) => x !== l && s.mode[x] === "blocks" && !(s.model[x] || []).length);
+    const p = s.prev[l] || {};
+    const n = p.chars || 0;
+    this.shadowRoot.innerHTML = `<style>${AED_CSS}</style>${banner}
+      <div class="row" style="justify-content:space-between"><div class="row" role="group" aria-label="${t("aed.languages")}">${tabs}</div>
+        ${mode !== "shared" ? `<span class="seg" role="group" aria-label="${t("aed.view")}"><button data-a="mode" data-m="blocks" aria-pressed="${mode === "blocks"}" ${ro ? "disabled" : ""}>${t("aed.blocks")}</button><button data-a="mode" data-m="template" aria-pressed="${mode === "template"}" ${ro ? "disabled" : ""}>${t("aed.template")}</button></span>` : ""}</div>
+      ${s.draft[l] ? `<div class="banner"><span class="chip yaml">✨</span><div><b>${t("aed.draft_title")}</b><div class="hint">${t("aed.draft_hint")}</div></div><span></span></div>` : ""}
+      ${body}
+      ${mode === "blocks" && !ro && missing.length && (s.model[l] || []).length ? `<div class="row" style="margin-top:6px">${missing.map((x) => `<button class="g" data-a="translate" data-to="${esc(x)}" ${s.busy ? "disabled" : ""}>✨ ${t("aed.translate_to", { language: this.panel._ln(x) })}</button>`).join("")}</div>` : ""}
+      <div class="preview"><div class="lbl"><span>${t("aed.preview")}</span><span>${t("aed.preview_note")}</span></div>
+        <p>${p.error ? `<span class="err">${esc(p.error)}</span>` : esc(p.text || "–")}</p>
+        <div class="meter ${n > 250 ? "warn" : ""}" role="meter" aria-label="${t("aed.length")}" aria-valuemin="0" aria-valuemax="300" aria-valuenow="${n}"><i style="width:${Math.min(100, n / 3)}%"></i></div>
+        <div class="row" style="justify-content:space-between;margin-top:6px" aria-live="polite"><span class="hint">${t("aed.chars", { count: n })}${n > 250 ? " · " + t("aed.too_long") : ""}</span><span class="hint">${t("aed.seconds", { seconds: Math.max(1, Math.round(n / 15)) })}</span></div>
+      </div>
+      ${s.err ? `<p class="err">${esc(s.err)}</p>` : ""}${s.msg ? `<p class="hint" role="status">${esc(s.msg)}</p>` : ""}
+      ${s.dirty.size ? `<div class="savebar"><span class="m">${t("aed.unsaved", { languages: [...s.dirty].map((x) => this.panel._ln(x)).join(", ") })}</span><button data-a="discard">${t("aed.discard")}</button><button class="p" data-a="save" ${s.busy ? "disabled" : ""}>${t("aed.save")}</button></div>` : ""}
+      ${s.dialog ? this._dialogHtml() : ""}${s.pick ? this._pickerHtml() : ""}`;
+    this._wireSatz();
+    if (s.pick && s.pick.focus) { const q = this.shadowRoot.querySelector("#pq"); if (q) { q.focus(); s.pick.focus = false; } }
+  }
+
+  _valHtml(v, path, j, ro) {
+    const e = (this.st.ents || {})[v.e];
+    const name = e ? e.name : v.e;
+    return `<span class="val" contenteditable="false" role="button" tabindex="${ro ? -1 : 0}" data-path="${esc(path)}" data-j="${j}" aria-label="${esc(this.t("aed.value_label", { name, format: this.t(AED_FORMATS[v.f] || "aed.fmt_unit") }))}">${esc(name)} <small>${esc(this.t(AED_FORMATS[v.f] || "aed.fmt_unit"))}${v.r ? " · " + v.r : ""}</small></span>`;
+  }
+
+  _satzHtml(parts, path, ro, label) {
+    return `<div class="satz" contenteditable="${ro ? "false" : "true"}" role="textbox" aria-multiline="false" aria-label="${esc(label)}" data-path="${esc(path)}" data-ph="${esc(this.t("aed.placeholder"))}" spellcheck="true">${parts.map((p, j) => typeof p === "string" ? esc(p) : this._valHtml(p, path, j, ro)).join("")}</div>`;
+  }
+
+  _blockHtml(b, i, ro) {
+    const t = (k, v) => esc(this.t(k, v));
+    const tools = ro ? "" : `<span class="row"><button class="g" data-a="up" data-i="${i}" aria-label="${t("aed.up")}">↑</button><button class="g" data-a="down" data-i="${i}" aria-label="${t("aed.down")}">↓</button><button class="g" data-a="dup" data-i="${i}" aria-label="${t("aed.duplicate")}">⧉</button><button class="g" data-a="del" data-i="${i}" aria-label="${t("aed.delete_block")}">✕</button></span>`;
+    if (b.t === "satz") return `<div class="blk"><div class="lbl"><span>${t("aed.sentence_n", { n: i + 1 })}</span>${tools}</div>${this._satzHtml(b.p, String(i), ro, this.t("aed.sentence_n", { n: i + 1 }))}</div>`;
+    const active = (this.st.prev[this.st.lang] || {}).active;
+    const e = (this.st.ents || {})[b.e];
+    return `<div class="blk cond"><div class="lbl"><span>${t("aed.cond")}</span>${tools}</div>
+      <div class="row"><span class="hint">${t("aed.depending_on")}</span><button data-a="condent" data-i="${i}" ${ro ? "disabled" : ""}>${esc(e ? e.name : b.e)} ▾</button></div>
+      ${b.cases.map((c, k) => `<div class="case ${active === k ? "on" : ""}"><span class="row"><select data-a="op" data-i="${i}" data-k="${k}" aria-label="${t("aed.condition_n", { n: k + 1 })}" ${ro ? "disabled" : ""}>${Object.entries(AED_OPS).map(([o, key]) => `<option value="${esc(o)}" ${c.op === o ? "selected" : ""}>${t(key)}</option>`).join("")}</select><input data-a="x" data-i="${i}" data-k="${k}" value="${esc(c.x)}" aria-label="${t("aed.threshold_n", { n: k + 1 })}" ${ro ? "disabled" : ""}></span>${this._satzHtml(c.p, `${i}.${k}`, ro, this.t("aed.case_n", { n: k + 1 }))}${ro ? "<span></span>" : `<button class="g" data-a="delcase" data-i="${i}" data-k="${k}" aria-label="${t("aed.delete_case")}">✕</button>`}</div>`).join("")}
+      <div class="case ${active === -1 ? "on" : ""}"><b class="hint">${t("aed.otherwise")}</b>${this._satzHtml(b.other, `${i}.x`, ro, this.t("aed.otherwise"))}<span></span></div>
+      ${ro ? "" : `<button class="g" data-a="addcase" data-i="${i}">${t("aed.add_case")}</button>`}</div>`;
+  }
+
+  _dialogHtml() {
+    const t = (k, v) => esc(this.t(k, v));
+    const d = this.st.dialog;
+    const take = d === "takeover";
+    return `<div class="sheet"><div class="panel dlg" role="alertdialog" aria-modal="true" aria-labelledby="dh"><h3 id="dh">${take ? t("aed.takeover_q") : t("aed.release_q")}</h3>
+      <div class="hint">${take ? t("aed.takeover_text") : t("aed.release_text")}</div>
+      <div class="row" style="justify-content:flex-end"><button data-a="dno">${t("aed.cancel")}</button><button class="p" data-a="dyes">${take ? t("aed.takeover") : t("aed.release")}</button></div></div></div>`;
+  }
+
+  _pickerHtml() {
+    const t = (k, v) => esc(this.t(k, v));
+    const p = this.st.pick;
+    const groups = {};
+    (p.results || []).forEach((e) => (groups[e.area || this.t("aed.no_area")] ||= []).push(e));
+    const res = Object.entries(groups).map(([a, xs]) => `<div class="grp">${esc(a)}</div>` + xs.map((e) => `<div class="opt" role="option" tabindex="-1" data-a="pickent" data-e="${esc(e.entity_id)}" aria-selected="${e.entity_id === p.v.e}"><span>${esc(e.name)}</span><span class="v">${esc(e.spoken)}</span><span class="i">${esc(e.entity_id)}</span></div>`).join("")).join("") || `<p class="hint" style="padding:8px">${p.loading ? t("aed.loading") : t("aed.nothing_found")}</p>`;
+    return `<div class="sheet" data-a="pickbg"><div class="panel" role="dialog" aria-modal="true" aria-labelledby="pth">
+      <header><h3 id="pth">${p.cond ? t("aed.pick_cond") : p.path != null && p.j != null ? t("aed.change_value") : t("aed.insert_value")}</h3><button class="g" data-a="pickclose" aria-label="${t("aed.cancel")}">✕</button></header>
+      <div class="s"><input id="pq" type="search" value="${esc(p.q || "")}" placeholder="${t("aed.search")}" aria-label="${t("aed.search")}" role="combobox" aria-expanded="true" aria-controls="pres"></div>
+      <div class="res" id="pres" role="listbox">${res}</div>
+      ${p.cond ? `<div class="opts"><div class="row" style="justify-content:flex-end"><button class="p" data-a="pickok" ${p.v.e ? "" : "disabled"}>${t("aed.choose")}</button></div></div>` : `<div class="opts">
+        <label>${t("aed.show_as")}<span class="seg">${Object.entries(AED_FORMATS).map(([f, key]) => `<button data-a="pickf" data-f="${f}" aria-pressed="${p.v.f === f}">${t(key)}</button>`).join("")}</span></label>
+        ${p.v.f === "unit" || p.v.f === "value" ? `<label>${t("aed.precision")}<span class="seg">${[0, 1, 2].map((r) => `<button data-a="pickr" data-r="${r}" aria-pressed="${(p.v.r || 0) === r}">${esc((12.4).toLocaleString(this.panel._uiLang || "en", { minimumFractionDigits: r, maximumFractionDigits: r }))}</button>`).join("")}</span></label>` : ""}
+        <label>${t("aed.unavailable_say")}<input data-a="pickna" value="${esc(p.v.na || "")}" placeholder="${t("aed.unavailable_ph")}"></label>
+        <div class="row" style="justify-content:flex-end"><button class="p" data-a="pickok" ${p.v.e ? "" : "disabled"}>${p.j != null ? t("aed.apply") : t("aed.insert")}</button></div></div>`}
+    </div></div>`;
+  }
+
+  // ── model ↔ DOM ───────────────────────────────────────────────────────────
+  _parts(path, model) {
+    const m = model || this.st.model[this.st.lang];
+    const [i, k] = String(path).split(".");
+    const b = m[+i];
+    if (k === undefined) return b.p;
+    if (k === "x") return b.other;
+    return b.cases[+k].p;
+  }
+
+  _setParts(path, parts) {
+    const m = this.st.model[this.st.lang];
+    const [i, k] = String(path).split(".");
+    const b = m[+i];
+    if (k === undefined) b.p = parts; else if (k === "x") b.other = parts; else b.cases[+k].p = parts;
+  }
+
+  _readSatz(el) {
+    const old = this._parts(el.dataset.path);
+    const parts = [];
+    const push = (txt) => { if (!txt) return; if (parts.length && typeof parts[parts.length - 1] === "string") parts[parts.length - 1] += txt; else parts.push(txt); };
+    el.childNodes.forEach((n) => {
+      if (n.nodeType === 3) push(n.textContent);
+      else if (n.dataset && n.dataset.j != null && n.dataset.j !== "new") parts.push(old[+n.dataset.j]);
+      else if (n.dataset && n.dataset.j === "new") parts.push({ __new: true });
+      else if (n.nodeName === "BR") push("");
+      else push(n.textContent || "");
+    });
+    return parts;
+  }
+
+  _wireSatz() {
+    this.shadowRoot.querySelectorAll(".satz[contenteditable=true]").forEach((el) => {
+      el.addEventListener("input", () => { this._setParts(el.dataset.path, this._readSatz(el).filter((p) => !p.__new)); this._touch(false); this._preview(); });
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") e.preventDefault();
+        if (e.key === "@") { e.preventDefault(); this._openPicker({ path: el.dataset.path, marker: true }); }
+      });
+      el.addEventListener("paste", (e) => { e.preventDefault(); document.execCommand("insertText", false, (e.clipboardData || window.clipboardData).getData("text/plain").replace(/\s+/g, " ")); });
+      el.addEventListener("focus", () => { this._lastSatz = el.dataset.path; });
+    });
+  }
+
+  _touch(repaint = true) { this.st.dirty.add(this.st.lang); delete this.st.draft[this.st.lang]; if (repaint) this._paint(); else this._paintBar(); }
+
+  _paintBar() { // only the save bar/dots — never the sentence the user types in
+    const keep = this.shadowRoot.activeElement;
+    if (!this.shadowRoot.querySelector(".savebar") || !keep) { const sel = this._caret(); this._paint(); this._restore(sel); }
+  }
+
+  _caret() {
+    const root = this.shadowRoot, el = root.activeElement;
+    if (!el || !el.classList || !el.classList.contains("satz")) return null;
+    const sel = (root.getSelection ? root.getSelection() : document.getSelection());
+    if (!sel || !sel.rangeCount) return { path: el.dataset.path, off: null };
+    const r = sel.getRangeAt(0).cloneRange(); r.selectNodeContents(el); r.setEnd(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
+    return { path: el.dataset.path, off: r.toString().length };
+  }
+
+  _restore(c) {
+    if (!c) return;
+    const el = this.shadowRoot.querySelector(`.satz[data-path="${CSS_ESC(c.path)}"]`);
+    if (!el) return;
+    el.focus();
+    if (c.off == null) return;
+    let left = c.off; const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let node; while ((node = walker.nextNode())) { if (left <= node.textContent.length) { const r = document.createRange(); r.setStart(node, left); r.collapse(true); const s = (this.shadowRoot.getSelection ? this.shadowRoot.getSelection() : document.getSelection()); s.removeAllRanges(); s.addRange(r); return; } left -= node.textContent.length; }
+  }
+
+  // ── preview (debounced, server renders; nothing runs) ─────────────────────
+  _preview() {
+    clearTimeout(this._pt);
+    this._pt = setTimeout(async () => {
+      const s = this.st; if (!s || !s.src) return;
+      const l = s.lang, mode = s.mode[l];
+      const body = mode === "blocks" ? { blocks: this._clean(s.model[l]) } : { template: s.model[l] || "" };
+      if (mode === "blocks" && !body.blocks.length) { s.prev[l] = {}; this._paintPreview(); return; }
+      try {
+        const r = await this.ws("answer/preview", { lang: l, ...body });
+        s.prev[l] = { text: r.text, chars: r.chars, active: this._activeCase(r) };
+      } catch (e) {
+        if (e.code === "too_fast") { this._preview(); return; }
+        s.prev[l] = { error: this.t("aed.preview_error", { error: e.message || e.code }) };
+      }
+      this._paintPreview();
+    }, 400);
+  }
+
+  _activeCase() { return undefined; }
+
+  _paintPreview() { const c = this._caret(); this._paint(); this._restore(c); }
+
+  _clean(blocks) { // the shape the server accepts (drop helper flags, keep text as typed)
+    const parts = (ps) => (ps || []).filter((p) => typeof p === "string" ? p.length : p && p.e).map((p) => typeof p === "string" ? p : { e: p.e, f: p.f || "unit", r: p.r || 0, ...(p.na ? { na: p.na } : {}) });
+    return (blocks || []).map((b) => b.t === "satz" ? { t: "satz", p: parts(b.p) } : { t: "cond", e: b.e, cases: b.cases.map((c) => ({ op: c.op, x: c.op === "=" && isNaN(Number(c.x)) ? String(c.x) : Number(c.x), p: parts(c.p) })), other: parts(b.other) });
+  }
+
+  // ── picker ────────────────────────────────────────────────────────────────
+  async _openPicker(opts) {
+    // a marker keeps the caret position while the dialog has the focus
+    if (opts.marker && !opts.cond) document.execCommand("insertHTML", false, '<span data-j="new" contenteditable="false"></span>');
+    const cur = opts.j != null ? this._parts(opts.path)[opts.j] : opts.cond ? { e: this.st.model[this.st.lang][opts.i].e } : null;
+    this.st.pick = { ...opts, q: "", results: [], loading: true, focus: true, v: cur ? { ...cur } : { e: null, f: "unit", r: 0 } };
+    if (opts.marker && !opts.cond) { const el = this.shadowRoot.querySelector(`.satz[data-path="${CSS_ESC(opts.path)}"]`); if (el) this._setParts(opts.path, this._readSatz(el)); }
+    this._paint(); this._search("");
+  }
+
+  async _search(q) {
+    const p = this.st.pick; if (!p) return;
+    p.q = q; p.loading = true;
+    try { const r = await this.ws("answer/entities", { query: q, lang: this.st.lang }); if (this.st.pick !== p) return; p.results = r.entities || []; this.st.ents = { ...(this.st.ents || {}), ...Object.fromEntries(p.results.map((e) => [e.entity_id, e])) }; }
+    catch (e) { p.results = []; }
+    p.loading = false;
+    const c = this.shadowRoot.querySelector("#pq"), pos = c ? c.selectionStart : null;
+    this._paint();
+    const n = this.shadowRoot.querySelector("#pq"); if (n) { n.focus(); if (pos != null) n.setSelectionRange(pos, pos); }
+  }
+
+  _closePicker(apply) {
+    const p = this.st.pick; if (!p) return;
+    this.st.pick = null;
+    const m = this.st.model[this.st.lang];
+    if (p.cond) { if (apply && p.v.e) { m[p.i].e = p.v.e; this._touch(false); } }
+    else if (p.j != null) { if (apply && p.v.e) { Object.assign(this._parts(p.path)[p.j], p.v); this._touch(false); } }
+    else {
+      const path = p.path != null ? p.path : (m.length && m[m.length - 1].t === "satz" ? String(m.length - 1) : null);
+      if (path == null && apply && p.v.e) { m.push({ t: "satz", p: [{ ...p.v }] }); this._touch(false); }
+      else if (path != null) {
+        let parts = this._parts(path);
+        const at = parts.findIndex((x) => x && x.__new);
+        if (apply && p.v.e) { const v = { e: p.v.e, f: p.v.f, r: p.v.r || 0, ...(p.v.na ? { na: p.v.na } : {}) }; if (at >= 0) parts.splice(at, 1, v); else parts.push(" ", v); this._touch(false); }
+        else if (at >= 0) parts.splice(at, 1);
+        this._setParts(path, parts.filter((x) => !(x && x.__new)));
+      }
+    }
+    this._paint(); this._preview();
+    const back = this.shadowRoot.querySelector(`.satz[data-path="${CSS_ESC(p.path || this._lastSatz || "0")}"]`) || this.shadowRoot.querySelector("[data-a=insval]");
+    if (back) back.focus();
+  }
+
+  // ── events ────────────────────────────────────────────────────────────────
+  connectedCallback() {
+    if (this._wired) return; this._wired = true;
+    this.shadowRoot.addEventListener("mousedown", (e) => { const b = e.target.closest("[data-a=insval]"); if (b && this._focusedSatz()) e.preventDefault(); });
+    this.shadowRoot.addEventListener("click", (e) => this._click(e));
+    this.shadowRoot.addEventListener("change", (e) => this._change(e));
+    this.shadowRoot.addEventListener("input", (e) => { if (e.target.id === "pq") { clearTimeout(this._qt); const q = e.target.value; this._qt = setTimeout(() => this._search(q), 250); } if (e.target.dataset.a === "tpl") { this.st.model[this.st.lang] = e.target.value; this.st.dirty.add(this.st.lang); this._preview(); } if (e.target.dataset.a === "pickna" && this.st.pick) this.st.pick.v.na = e.target.value; });
+    this.shadowRoot.addEventListener("keydown", (e) => this._key(e));
+  }
+
+  _focusedSatz() { const a = this.shadowRoot.activeElement; return a && a.classList && a.classList.contains("satz") ? a : null; }
+
+  _key(e) {
+    const p = this.st && this.st.pick;
+    if (this.st && this.st.dialog && e.key === "Escape") { this.st.dialog = null; this._paint(); return; }
+    if (!p) { if ((e.key === "Enter" || e.key === " ") && e.target.classList && e.target.classList.contains("val")) { e.preventDefault(); e.target.click(); } return; }
+    if (e.key === "Escape") { e.preventDefault(); this._closePicker(false); return; }
+    const opts = [...this.shadowRoot.querySelectorAll(".opt")];
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && opts.length) {
+      e.preventDefault();
+      const i = opts.findIndex((o) => o.getAttribute("aria-selected") === "true");
+      const n = opts[(i + (e.key === "ArrowDown" ? 1 : -1) + opts.length) % opts.length];
+      p.v.e = n.dataset.e; opts.forEach((o) => o.setAttribute("aria-selected", o === n)); n.scrollIntoView({ block: "nearest" });
+      const ok = this.shadowRoot.querySelector("[data-a=pickok]"); if (ok) ok.disabled = false;
+    }
+    if (e.key === "Enter" && e.target.id === "pq" && p.v.e) { e.preventDefault(); this._closePicker(true); }
+  }
+
+  _change(e) {
+    const a = e.target.dataset.a, m = this.st.model[this.st.lang];
+    if (a === "op") { m[+e.target.dataset.i].cases[+e.target.dataset.k].op = e.target.value; this._touch(); this._preview(); }
+    if (a === "x") { m[+e.target.dataset.i].cases[+e.target.dataset.k].x = e.target.value; this._touch(); this._preview(); }
+  }
+
+  async _click(e) {
+    const el = e.target.closest("[data-a]");
+    const val = e.target.closest(".val[data-j]");
+    if (val && !el && this.editable) { this._openPicker({ path: val.dataset.path, j: +val.dataset.j }); return; }
+    if (!el) return;
+    const a = el.dataset.a, s = this.st, m = s.model[s.lang], t = (k, v) => this.t(k, v);
+    const i = el.dataset.i != null ? +el.dataset.i : null;
+    if (a === "lang") { s.lang = el.dataset.l; s.err = ""; s.msg = ""; this._paint(); this._preview(); }
+    else if (a === "mode") {
+      if (el.dataset.m === s.mode[s.lang]) return;
+      if (el.dataset.m === "template") { const r = (s.prev[s.lang] || {}); try { const x = await this.ws("answer/preview", { lang: s.lang, blocks: this._clean(m) }); s.model[s.lang] = x.template; } catch (err) { s.model[s.lang] = r.text || ""; } s.mode[s.lang] = "template"; this._touch(); }
+      else { s.err = t("aed.blocks_lost"); this._paint(); }
+    }
+    else if (a === "toblocks") { s.model[s.lang] = []; s.mode[s.lang] = "blocks"; this._touch(); this._preview(); }
+    else if (a === "insval") { const f = this._focusedSatz(); this._openPicker(f ? { path: f.dataset.path, marker: true } : { path: this._lastSatz != null ? this._lastSatz : null }); }
+    else if (a === "addsatz") { m.push({ t: "satz", p: [] }); this._touch(); const els = this.shadowRoot.querySelectorAll(".satz"); if (els.length) els[els.length - 1].focus(); }
+    else if (a === "addcond") { m.push({ t: "cond", e: "", cases: [{ op: ">", x: 0, p: [] }], other: [] }); this._touch(); this._openPicker({ cond: true, i: m.length - 1 }); }
+    else if (a === "up" && i > 0) { [m[i - 1], m[i]] = [m[i], m[i - 1]]; this._touch(); this._preview(); }
+    else if (a === "down" && i < m.length - 1) { [m[i + 1], m[i]] = [m[i], m[i + 1]]; this._touch(); this._preview(); }
+    else if (a === "dup") { m.splice(i + 1, 0, JSON.parse(JSON.stringify(m[i]))); this._touch(); this._preview(); }
+    else if (a === "del") { s.undo = { lang: s.lang, i, b: m[i] }; m.splice(i, 1); this._touch(); this._preview(); }
+    else if (a === "condent") this._openPicker({ cond: true, i });
+    else if (a === "addcase") { m[i].cases.push({ op: ">", x: 0, p: [] }); this._touch(); }
+    else if (a === "delcase") { m[i].cases.splice(+el.dataset.k, 1); if (!m[i].cases.length) m.splice(i, 1); this._touch(); this._preview(); }
+    else if (a === "pickent") { s.pick.v.e = el.dataset.e; this._paint(); }
+    else if (a === "pickf") { s.pick.v.f = el.dataset.f; this._paint(); }
+    else if (a === "pickr") { s.pick.v.r = +el.dataset.r; this._paint(); }
+    else if (a === "pickok") this._closePicker(true);
+    else if (a === "pickclose" || (a === "pickbg" && e.target === el)) this._closePicker(false);
+    else if (a === "takeover" || a === "release") { s.dialog = a; this._paint(); const y = this.shadowRoot.querySelector("[data-a=dyes]"); if (y) y.focus(); }
+    else if (a === "dno") { s.dialog = null; this._paint(); }
+    else if (a === "dyes") {
+      const what = s.dialog; s.dialog = null; s.busy = true; this._paint();
+      try { const r = await this.ws(what === "takeover" ? "answer/takeover" : "answer/release", { name: s.name, base_rev: this.panel.s.data?.rev });
+        if (r && r.saved === false) throw new Error(r.message || r.code);
+        await this.panel._reload(["overview", "data"]); s.msg = what === "takeover" ? t("aed.taken_over") : t("aed.released"); await this.load(s.name, s.langs); }
+      catch (err) { s.busy = false; s.err = err.message || err.code; this._paint(); }
+    }
+    else if (a === "save") {
+      s.busy = true; s.err = ""; this._paint();
+      const answers = {};
+      for (const l of s.dirty) answers[l] = s.mode[l] === "blocks" ? ((s.model[l] || []).length ? { blocks: this._clean(s.model[l]) } : null) : { template: s.model[l] || "" };
+      try { const r = await this.ws("answer/save", { name: s.name, answers, base_rev: this.panel.s.data?.rev });
+        if (r && r.saved === false) throw new Error(this.panel._notSaved(r, this.panel._regressions(r)));
+        s.dirty.clear(); s.draft = {}; s.busy = false; s.msg = t("aed.saved", { cases: r.corpus_cases || 0 }); await this.panel._reload(["overview", "data"]); this._paint(); }
+      catch (err) { s.busy = false; s.err = err.message || err.code; this._paint(); }
+    }
+    else if (a === "discard") { const name = s.name, langs = s.langs; await this.load(name, langs); this.st.msg = t("aed.discarded"); this._paint(); }
+    else if (a === "translate" || a === "shorter") {
+      const to = a === "shorter" ? s.lang : el.dataset.to;
+      s.busy = true; s.err = ""; this._paint();
+      try { const r = await this.ws("answer/translate", { blocks: this._clean(m), source: s.lang, target: to, shorter: a === "shorter" });
+        s.model[to] = r.blocks; s.mode[to] = "blocks"; s.dirty.add(to); s.draft[to] = true; s.busy = false; s.lang = to; this._paint(); this._preview(); }
+      catch (err) { s.busy = false; s.err = err.code === "no_ai_task" ? t("aed.no_ai") : (err.message || err.code); this._paint(); }
+    }
+  }
+}
+if (!customElements.get("polyglot-answer-editor")) customElements.define("polyglot-answer-editor", PolyglotAnswerEditor);
+
+
 class PolyglotAssistPanel extends HTMLElement {
   constructor() {
     super();
@@ -300,10 +714,28 @@ class PolyglotAssistPanel extends HTMLElement {
   _render() {
     const focus = this._focusKey();
     this._renderInner();
+    this._mountAnswerEditor();
     if (focus) {
       const el = this.shadowRoot.querySelector(focus.sel);
       if (el) { el.focus(); try { if (focus.start != null) el.setSelectionRange(focus.start, focus.end); } catch (e) { /* not a text field */ } }
     }
+  }
+
+  // the answer editor keeps its own DOM (caret, typed text) — it is moved, never re-created
+  _mountAnswerEditor() {
+    const slot = this.shadowRoot.getElementById("aed-slot");
+    const name = this.s.view === "commands" ? this.s.selected : null;
+    if (!slot || !name) return;
+    if (!this._aed) { this._aed = document.createElement("polyglot-answer-editor"); this._aed.panel = this; }
+    slot.appendChild(this._aed);
+    const langs = (this.s.overview?.languages || []).filter(Boolean);
+    if (this._aedFor !== name + "|" + (this.s.entryId || "")) { this._aedFor = name + "|" + (this.s.entryId || ""); this._aed.load(name, langs.length ? langs : ["en"]); }
+  }
+
+  /** True when leaving would lose unsaved answers: the first try only warns. */
+  _answerGuard() {
+    if (this._aed && this._aed.dirty && !this.s.leaveOk) { this.s.leaveOk = true; this._setMsg("edit", this.t("aed.leave_warning"), "err"); return true; }
+    this.s.leaveOk = false; return false;
   }
 
   _renderInner() {
@@ -452,6 +884,7 @@ class PolyglotAssistPanel extends HTMLElement {
         ${missing.length ? `<button class="b" data-act="etrans" data-name="${esc(name)}" data-langs="${esc(missing.join(","))}">${t("buttons.translate_to", { languages: missing.map((l) => this._ln(l)).join(", ") })}</button>` : `<button class="b" data-act="etrans" data-name="${esc(name)}" data-langs="${esc(langs.filter((l) => l !== lang).join(","))}">${t("buttons.more_variants")}</button>`}
         <button class="b" data-act="edel" data-name="${esc(name)}" ${ro ? "disabled" : ""}>${t("buttons.delete")}</button>
         ${ro ? `<span class="hint">${t("editor.readonly")}</span>` : ""}</div>
+      <h2 style="margin:18px 0 6px">${t("aed.title")}${this._tip("answered")}</h2><div id="aed-slot"></div>
       ${this.s.confirmDelete === name ? `<div class="banner err" style="margin-top:10px">${t("editor.confirm_delete", { name })} <button class="b" data-act="edelyes" data-name="${esc(name)}">${t("buttons.yes_delete")}</button> <button class="b" data-act="edelno">${t("buttons.cancel")}</button></div>` : ""}
       ${this._msg("edit")}</div>`;
   }
@@ -780,6 +1213,7 @@ class PolyglotAssistPanel extends HTMLElement {
     if (el.tagName === "A") e.preventDefault();
     try {
       if (a === "menu") this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
+      else if ((a === "tab" || a === "open" || a === "close") && this.s.selected && this._answerGuard()) { return; }
       else if (a === "tab") { this.s.view = el.dataset.v; history.replaceState(null, "", "#" + el.dataset.v); if (el.dataset.v === "monitor" || el.dataset.v === "start") await this._reload(["monitor", "overview"]); else this._render(); }
       else if (a === "pall") this.shadowRoot.querySelectorAll("[data-pid]").forEach((c) => { const it = this.s.proposals.find((i) => i.id === c.dataset.pid); c.checked = !c.disabled && it?.check?.status === "ok"; });
       else if (a === "paccept" || a === "preject") {

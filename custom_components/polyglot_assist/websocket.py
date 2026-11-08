@@ -73,6 +73,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_ui_texts_get, ws_ui_texts_languages, ws_ui_texts_set, ws_ui_texts_translate, ws_ui_texts_export,
         ws_tone_preview, ws_tone_upload, ws_tone_delete, ws_tone_play,
         ws_answer_preview, ws_answer_entities, ws_answer_source, ws_answer_takeover, ws_answer_release, ws_answer_save,
+        ws_answer_translate,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -1411,6 +1412,7 @@ def _yaml_answer(handler) -> dict[str, Any]:
         "speech": text, "action": action if action_ok else None, "action_ok": action_ok,
         "entities": sorted(getattr(script, "referenced_entities", set()) or set()) if script is not None else [],
         "async_action": bool(cfg.get("async_action")),
+        "mode": cfg.get("mode") if isinstance(cfg.get("mode"), str) else (getattr(script, "script_mode", None) if script is not None else None),
         "has_card": bool(cfg.get("card")), "has_reprompt": bool(cfg.get("reprompt")),
         "variables": variables,
         "unknown_variables": [v for v in variables if v not in KNOWN_ANSWER_VARIABLES and not v.startswith("_")],
@@ -1485,6 +1487,10 @@ async def ws_answer_takeover(hass: HomeAssistant, connection, msg) -> None:
     if yaml["async_action"]:
         connection.send_error(msg["id"], "async_action", "this command answers before its action finishes — keep it in YAML")
         return
+    if "targets" in yaml["variables"] or "targets" in json.dumps(yaml["action"] or [], default=str):
+        # HA's intent_script resolves name/area into `targets` before running — Polyglot's handler does not
+        connection.send_error(msg["id"], "uses_targets", "this command uses the resolved targets of HA's handler — keep it in YAML")
+        return
 
     def _mutate(data: dict) -> None:
         cfg = (data.get("intents") or {}).get(name)
@@ -1496,6 +1502,12 @@ async def ws_answer_takeover(hass: HomeAssistant, connection, msg) -> None:
             cfg["speech"] = {"*": yaml["speech"]}  # one template for all languages (branches on `lang`)
         if yaml["action"]:
             cfg["action"] = yaml["action"]
+        else:
+            cfg.pop("action", None)  # the YAML has none (any more): an old catalog action must not run
+        if yaml.get("mode"):
+            cfg["mode"] = yaml["mode"]
+        else:
+            cfg.pop("mode", None)
         cfg.setdefault("llm_equivalent", {"tool": f"intent_script__{name.lower()}", "args": {}})
 
     await _guarded(hass, connection, msg, runtime, _mutate, actor="takeover")
@@ -1519,7 +1531,7 @@ async def ws_answer_release(hass: HomeAssistant, connection, msg) -> None:
         cfg = (data.get("intents") or {}).get(name)
         if not isinstance(cfg, dict) or not cfg.get("owned"):
             raise GuardError("not_owned", "this command is not taken over")
-        for key in ("owned", "source_hash", "speech", "answer_blocks", "action"):
+        for key in ("owned", "source_hash", "speech", "answer_blocks", "action", "mode"):
             cfg.pop(key, None)
 
     await _guarded(hass, connection, msg, runtime, _mutate, actor="release")
@@ -1563,10 +1575,14 @@ async def ws_answer_save(hass: HomeAssistant, connection, msg) -> None:
         connection.send_error(msg["id"], "answer_invalid", str(err))
         return
 
+    no_yaml = _script_handler(hass, name) is None
+
     def _mutate(data: dict) -> None:
         cfg = (data.get("intents") or {}).get(name)
         if not isinstance(cfg, dict):
             raise GuardError("not_found", "unknown command")
+        if no_yaml:
+            cfg["owned"] = True  # nobody else answers it: Polyglot's own handler does (also without an action)
         speech = dict(cfg.get("speech") or {})
         blocks_all = dict(cfg.get("answer_blocks") or {})
         for lang, (template, blocks) in compiled.items():
@@ -1588,3 +1604,40 @@ async def ws_answer_save(hass: HomeAssistant, connection, msg) -> None:
             cfg.pop("answer_blocks", None)
 
     await _guarded(hass, connection, msg, runtime, _mutate, actor="answer")
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "polyglot_assist/answer/translate", vol.Optional("entry_id"): str,
+     vol.Required("blocks"): list,
+     vol.Required("source"): vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$"),
+     vol.Required("target"): vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$"),
+     vol.Optional("shorter", default=False): bool}
+)
+@websocket_api.async_response
+async def ws_answer_translate(hass: HomeAssistant, connection, msg) -> None:
+    """Translate (or shorten) ONLY the text pieces of an answer — values stay exactly as they are.
+
+    A draft for the editor: nothing is saved. The AI task must have no tools.
+    """
+    from .answer import AnswerError, text_pieces, validate, with_text_pieces  # noqa: PLC0415
+    from .translate import ProposalError, async_translate_texts  # noqa: PLC0415
+
+    _, runtime = _runtime(hass, connection, msg)
+    if runtime is None:
+        return
+    ai_task = runtime["entry"].options.get(CONF_TRANSLATION_AI_TASK)
+    if not ai_task:
+        connection.send_error(msg["id"], "no_ai_task", "choose an AI task without tools in the settings first")
+        return
+    try:
+        blocks = validate(msg["blocks"])
+        pieces = text_pieces(blocks)
+        async with asyncio.timeout(TOTAL_BUDGET):
+            out = await async_translate_texts(hass, ai_task_entity=ai_task, texts=pieces, source=msg["source"],
+                                              target=msg["target"], shorter=msg["shorter"])
+        connection.send_result(msg["id"], {"blocks": with_text_pieces(blocks, out), "draft": True})
+    except (AnswerError, ProposalError, ValueError) as err:
+        connection.send_error(msg["id"], "failed", str(err)[:200])
+    except TimeoutError:
+        connection.send_error(msg["id"], "timeout", "the AI took too long")

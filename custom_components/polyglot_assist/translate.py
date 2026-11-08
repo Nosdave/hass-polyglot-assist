@@ -107,7 +107,7 @@ def _remaining(deadline: float | None) -> float:
 async def _generate(
     hass: HomeAssistant, entity_id: str, instructions: str, field: str, description: str,
     context: Context | None, deadline: float | None = None, max_chars: int = MAX_SENTENCE_CHARS,
-    split_lines: bool = False,
+    split_lines: bool = False, max_items: int = 12,
 ) -> list[str]:
     budget = _remaining(deadline)
     if budget <= 1:
@@ -140,7 +140,7 @@ async def _generate(
     if split_lines:  # some models put every answer line into ONE string
         raw = [line for x in raw for line in x.splitlines()]
     cleaned = [" ".join(x.split()) for x in raw]
-    return list(dict.fromkeys(x for x in cleaned if x and len(x) <= max_chars))[:12]
+    return list(dict.fromkeys(x for x in cleaned if x and len(x) <= max_chars))[:max_items]
 
 
 def _list_examples(config: dict[str, Any], names: set[str], slot_lists: dict) -> str:
@@ -536,3 +536,45 @@ async def async_propose_correction_command(
         max_chars=2000,
         split_lines=True,
     )
+
+
+async def async_translate_texts(
+    hass: HomeAssistant, *, ai_task_entity: str, texts: list[str], source: str, target: str,
+    shorter: bool = False, context: Context | None = None,
+) -> list[str]:
+    """The text pieces of an answer, translated (or shortened) — same count, same order."""
+    if ai_task_has_tools(hass, ai_task_entity):
+        raise ProposalError("this AI task has tools (LLM API) — pick one without tools")
+    if not texts:
+        return []
+    task = (f"Make this spoken answer shorter in {LANG_NAMES.get(target, target)} (keep the meaning)"
+            if shorter else f"Translate these pieces of a spoken answer from {LANG_NAMES.get(source, source)} "
+            f"into {LANG_NAMES.get(target, target)}")
+    out = await _generate(
+        hass, ai_task_entity,
+        "\n".join([
+            f"{task}. The pieces are joined with live values between them (shown as ⟨value⟩), so keep "
+            "leading/trailing spaces and punctuation that belong next to a value. Answer with EXACTLY one "
+            f"line per piece, {len(texts)} lines, in the same order, each starting with its number and a colon "
+            "(\"3: …\"); an empty piece stays empty (write ∅).",
+            _FENCE, "<data>",
+            *[f"{i + 1}: {t if t else '∅'}" for i, t in enumerate(texts)],
+            "</data>",
+        ]),
+        "pieces", f"exactly {len(texts)} lines '<number>: <text>'", context, None, max_chars=600,
+        split_lines=True, max_items=len(texts) + 4,
+    )
+    import re as _re  # noqa: PLC0415
+
+    by_number: dict[int, str] = {}
+    for line in out:
+        m = _re.match(r"^\s*(\d{1,3})\s*[:.)]\s?(.*)$", line)
+        if m:
+            text = m.group(2)
+            by_number[int(m.group(1))] = "" if text.strip() == "∅" else text
+    cleaned = [by_number.get(i + 1) for i in range(len(texts))]
+    if any(c is None for c in cleaned):
+        raise ProposalError("the AI answered with a different number of pieces — try again")
+    # keep the spacing next to values exactly as it was
+    return [(" " if t.startswith(" ") else "") + c.strip() + (" " if t.endswith(" ") and c.strip() else "")
+            for t, c in zip(texts, cleaned)]
