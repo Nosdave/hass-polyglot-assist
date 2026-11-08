@@ -557,6 +557,10 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
 
     def _bind_one(config, registered, enabled, slot_lists, existing_fps, command_lines, area_of, allowed, area_words, areas):
         async def one(insight: dict):
+            def skip(reason: str, detail: str = ""):
+                insight["outcome"] = {"result": reason, **({"detail": detail[:160]} if detail else {})}
+                return None
+
             episode = state["episodes"][insight["episode"]]
             touched = {e for t in episode for e in (t.get("switched") or [])}
             area_ids = {a for a in (area_of(e) for e in touched) if a}
@@ -569,7 +573,7 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
             # exactly what the AI is shown is what it may use (touched devices first)
             offered = (touched_ok + in_rooms)[:MAX_OFFERED]
             if not offered:
-                return None
+                return skip("no_devices")
             members = {e: _members(e) for e in offered}
 
             def _inside(group: str) -> list[str]:
@@ -590,18 +594,20 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
                 devices=devices, commands=command_lines, deadline=deadline)
             # some models split the line into several items — try it whole, then joined
             parsed = (parse_command(answer[0]) or parse_command(" | ".join(answer))) if answer else None
-            if parsed is None or parsed["name"] in registered:
-                return None
+            if parsed is None:
+                return skip("ai_none", " | ".join(answer or [])[:160])
+            if parsed["name"] in registered:
+                return skip("name_exists", parsed["name"])
             lang = parsed["lang"]
             if lang not in enabled or (insight.get("lang") and lang != insight["lang"]):
-                return None
+                return skip("wrong_language", lang)
             if any("{" in t or "<" in t for t in parsed["sentences"]):
-                return None  # fixed devices → no placeholders (also none hidden in <rules>)
-            if check_action_safe(parsed["action"]):
-                return None
+                return skip("placeholders")  # fixed devices → no placeholders (also none hidden in <rules>)
+            if reason := check_action_safe(parsed["action"]):
+                return skip("unsafe_action", reason)
             used = [e for step in parsed["action"] for e in (iter_step_entities(step) or [])]
             if not used or any(e not in offered for e in used):
-                return None  # only devices we offered — never anything the AI made up
+                return skip("unknown_devices", ", ".join(e for e in used if e not in offered)[:160])  # only offered devices
             # a group in the command switches devices that are NOT in it → say so loudly
             group_notes = []
             for g in dict.fromkeys(used):
@@ -610,9 +616,9 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
                     group_notes.append(f"{g} is a group and also switches {', '.join(along[:6])}")
             fp = action_fingerprint(parsed["action"], lang)
             if fp in existing_fps:
-                return None  # a command doing exactly this already exists
+                return skip("exists")  # a command doing exactly this already exists
             if _left() < LOCAL_RESERVE_S:
-                return None
+                return skip("no_time")
 
             def _check(sentences=parsed["sentences"], name=parsed["name"]):
                 out = []
@@ -629,15 +635,17 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
                                                       parse_rules(string_rules(config)), lang)
                         except Exception:  # noqa: BLE001
                             samples = None
-                        if samples is None or any(builtin_match(x, lang, True) for x in samples):
-                            r = {**r, "status": "error"}
+                        hit = None if samples is None else next(
+                            (f"{h} ← „{x}“" for x in samples if (h := builtin_match(x, lang, True))), None)
+                        if samples is None or hit:
+                            r = {**r, "status": "error", "notes": [f"HA already handles it: {hit}" if hit else "not parsable"]}
                     out.append(r)
                 return out
 
             checked = await hass.async_add_executor_job(_check)
             good = [r["sentence"] for r in checked if r["status"] != "error"]
             if not good:
-                return None
+                return skip("sentences_rejected", "; ".join(n for r in checked for n in (r.get("notes") or [])[:1]))
             item = {
                 "op": "add_intent",
                 "payload": {"name": parsed["name"], "intent": {
@@ -653,7 +661,10 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
                     *[n for r in checked for n in r.get("notes", [])[:1]][:3]]},
                 "fp": fp,
             }
-            return item if check_item(item) is None else None
+            if reason := check_item(item):
+                return skip("invalid", reason)
+            insight["outcome"] = {"result": "proposed", "detail": parsed["name"]}
+            return item
 
         return one
 
@@ -703,18 +714,30 @@ def _correction_review(hass: HomeAssistant, data: dict, ai_task: str, deadline: 
         one = _bind_one(config, registered, set(matcher.languages), slot_lists, existing_fps, command_lines,
                         area_of, allowed, area_words, areas)
         added = 0
-        for insight in [i for i in insights if i["kind"] in COMMAND_KINDS][:MAX_COMMAND_PROPOSALS]:
+        candidates = [i for i in insights if i["kind"] in COMMAND_KINDS]
+        for insight in insights:  # every insight says why there is (no) proposal
+            if insight not in candidates:
+                insight["outcome"] = {"result": "insight_only"}
+        for insight in candidates[MAX_COMMAND_PROPOSALS:]:
+            insight["outcome"] = {"result": "limit"}
+        for insight in candidates[:MAX_COMMAND_PROPOSALS]:
             if _left() < LOCAL_RESERVE_S * 2:
-                break
+                insight["outcome"] = {"result": "no_time"}
+                continue
             try:
                 item = await one(insight)
             except TimeoutError:
-                break
+                insight["outcome"] = {"result": "no_time"}
+                continue
             except Exception as err:  # noqa: BLE001 — one failing correction must not lose the others
                 _LOGGER.warning("Polyglot Assist: proposal from a correction failed: %s", err)
+                insight["outcome"] = {"result": "failed", "detail": str(err)[:160]}
                 continue
             if item is not None:
-                added += await add([item])
+                if not await add([item]):
+                    insight["outcome"] = {"result": "already_known", "detail": item["payload"]["name"]}
+                else:
+                    added += 1
                 registered.add(item["payload"]["name"])
         return added
 

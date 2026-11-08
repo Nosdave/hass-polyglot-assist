@@ -121,6 +121,9 @@ dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;margin:10p
 // insight kinds (from the AI review of corrections) → label keys
 const INSIGHT_KINDS = { wrong_device: "monitor.kind_wrong_device", missing_command: "monitor.kind_missing_command", misheard: "monitor.kind_misheard", wrong_value: "monitor.kind_wrong_value", answer: "monitor.kind_answer", other: "monitor.kind_other" };
 
+// why an insight did (not) become a proposal → label keys
+const OUTCOMES = { proposed: "monitor.outcome_proposed", already_known: "monitor.outcome_already_known", insight_only: "monitor.outcome_insight_only", limit: "monitor.outcome_limit", no_time: "monitor.outcome_no_time", no_devices: "monitor.outcome_no_devices", ai_none: "monitor.outcome_ai_none", name_exists: "monitor.outcome_name_exists", wrong_language: "monitor.outcome_wrong_language", placeholders: "monitor.outcome_placeholders", unsafe_action: "monitor.outcome_unsafe_action", unknown_devices: "monitor.outcome_unknown_devices", exists: "monitor.outcome_exists", sentences_rejected: "monitor.outcome_sentences_rejected", invalid: "monitor.outcome_invalid", failed: "monitor.outcome_failed" };
+
 // every label key spelled out (the i18n test checks literal keys)
 const TONE_LABELS = {
   source: { "classic": "tone.v_source_classic", "preset": "tone.v_source_preset", "custom": "tone.v_source_custom" },
@@ -501,7 +504,7 @@ class PolyglotAssistPanel extends HTMLElement {
       <button class="switch" role="switch" data-act="opt" data-k="monitor_review" aria-checked="${opts.monitor_review ? "true" : "false"}" aria-label="${t("monitor.review")}" ${opts.translation_ai_task ? "" : "disabled"}></button></div>`;
     const s = m.summary || {};
     const log = (m.log || []).slice(0, 40).map((e) => `<tr><td class="hint">${esc(this._date(e.ts))}</td><td>${esc(e.text)}</td><td><span class="chip ${e.error ? "err" : e.result === "hit" ? "ok" : "pri"}">${e.error ? t("monitor.result_error") : e.result === "hit" ? (e.builtin ? t("monitor.result_builtin") : t("monitor.result_hit")) : t("monitor.result_ai")}</span></td><td class="hint">${e.ms != null ? esc(this._sec(e.ms)) : ""}</td></tr>`).join("");
-    const ins = (s.insights || []).map((x) => `<li><b>${esc(x.went_wrong)}</b>${x.wanted ? ` – ${t("monitor.wanted", { wanted: x.wanted })}` : ""} <span class="chip pri">${t(INSIGHT_KINDS[x.kind] || "monitor.kind_other")}</span>${(x.said || []).length ? `<div class="hint">${esc(x.said.map((z) => this._q(z)).join(" → "))}</div>` : ""}</li>`).join("");
+    const ins = (s.insights || []).map((x) => `<li><b>${esc(x.went_wrong)}</b>${x.wanted ? ` – ${t("monitor.wanted", { wanted: x.wanted })}` : ""} <span class="chip pri">${t(INSIGHT_KINDS[x.kind] || "monitor.kind_other")}</span>${x.outcome ? `<div class="hint">${t(OUTCOMES[x.outcome.result] || "monitor.outcome_other")}${x.outcome.detail ? ": " + esc(x.outcome.detail) : ""}</div>` : ""}${(x.said || []).length ? `<div class="hint">${esc(x.said.map((z) => this._q(z)).join(" → "))}</div>` : ""}</li>`).join("");
     return `<section class="grid two"><div class="card">${sw}${rv}
       <h2 style="margin-top:12px">${t("monitor.last_run")}</h2>
       ${s.when ? `<p class="hint">${t("monitor.summary", { when: this._date(s.when), total: s.total, hits: s.hits, assistant: s.assistant, proposals: s.proposals })}</p>
@@ -1078,4 +1081,7 @@ class PolyglotAssistPanel extends HTMLElement {
   }
 }
 
-customElements.define("polyglot-assist-panel", PolyglotAssistPanel);
+// a newer version loaded into a page that still has the old one registered: keep the page working
+// (the old element stays until the page is reloaded — the panel says so instead of throwing)
+if (!customElements.get("polyglot-assist-panel")) customElements.define("polyglot-assist-panel", PolyglotAssistPanel);
+else console.warn("Polyglot Assist: a newer panel version was loaded — reload the page to use it");
