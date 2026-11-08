@@ -17,3 +17,4 @@ htmlcov/
 .vscode/
 .DS_Store
 Thumbs.db
+tests/panel/node_modules/

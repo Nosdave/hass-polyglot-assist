@@ -1,0 +1,25 @@
+name: Panel (headless)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  panel:
+    name: Panel tests (de/en/fr)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install happy-dom
+        working-directory: tests/panel
+        run: npm install --no-audit --no-fund
+      - name: Run
+        working-directory: tests/panel
+        run: |
+          rc=0
+          for t in test_*.mjs; do for l in de en fr; do node "$t" "$l" || rc=1; done; done
+          exit $rc
