@@ -1231,7 +1231,7 @@ async def ws_tone_play(hass: HomeAssistant, connection, msg) -> None:
 
 # ── answer editor: preview and entity picker ─────────────────────────────────
 _PREVIEW_GAP_S = 0.3
-_last_preview: dict[int, float] = {}
+_last_preview: dict[Any, float] = {}
 
 
 def _units(hass: HomeAssistant, entities: list[str]) -> dict[str, str]:
@@ -1248,8 +1248,7 @@ def _units(hass: HomeAssistant, entities: list[str]) -> dict[str, str]:
 @websocket_api.websocket_command(
     {vol.Required("type"): "polyglot_assist/answer/preview", vol.Optional("entry_id"): str,
      vol.Required("lang"): vol.Match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$"),
-     vol.Exclusive("blocks", "src"): list, vol.Exclusive("template", "src"): vol.All(str, vol.Length(max=6000)),
-     vol.Optional("overrides"): {vol.Match(r"^[a-z0-9_]+\.[a-z0-9_]+$"): vol.Any(str, int, float)}}
+     vol.Exclusive("blocks", "src"): list, vol.Exclusive("template", "src"): vol.All(str, vol.Length(max=6000))}
 )
 @websocket_api.async_response
 async def ws_answer_preview(hass: HomeAssistant, connection, msg) -> None:
@@ -1433,8 +1432,6 @@ KNOWN_ANSWER_VARIABLES = {"lang", "utterance", "action_response", "states", "sta
 @callback
 def ws_answer_source(hass: HomeAssistant, connection, msg) -> None:
     """Who answers this command (Polyglot / YAML / nobody) and what the answer is."""
-    from .answer import is_block_answer  # noqa: PLC0415
-
     _, runtime = _runtime(hass, connection, msg)
     if runtime is None:
         return
@@ -1447,11 +1444,10 @@ def ws_answer_source(hass: HomeAssistant, connection, msg) -> None:
     yaml = _yaml_answer(handler) if handler is not None else None
     owned = bool(cfg.get("owned"))
     blocks = cfg.get("answer_blocks") or {}
-    units = _units(hass, sorted({p["e"] for bl in blocks.values() if isinstance(bl, list) for b in bl if isinstance(b, dict)
-                                 for p in [*(b.get("p") or []), *(b.get("other") or []), *[q for c in (b.get("cases") or []) for q in (c.get("p") or [])]]
-                                 if isinstance(p, dict) and isinstance(p.get("e"), str)}))
     speech = cfg.get("speech") or {}
-    per_lang = {lang: {"template": text, "blocks": blocks.get(lang) if is_block_answer(text, blocks.get(lang), lang, units) else None}
+    # stored blocks are the truth for a language (its speech is recompiled from them when loading),
+    # a language without blocks is a template written in the expert view or taken over from YAML
+    per_lang = {lang: {"template": text, "blocks": blocks.get(lang) if isinstance(blocks.get(lang), list) else None}
                 for lang, text in speech.items() if isinstance(text, str)}
     connection.send_result(msg["id"], {
         "name": name, "kind": cfg.get("kind"),
@@ -1482,7 +1478,11 @@ async def ws_answer_takeover(hass: HomeAssistant, connection, msg) -> None:
         return
     yaml = _yaml_answer(handler)
     if not yaml["action_ok"]:
-        connection.send_error(msg["id"], "action_not_copyable", "the action cannot be stored as data — keep it in YAML")
+        connection.send_error(msg["id"], "action_not_copyable",
+                              "the action contains values that cannot be stored as data (e.g. delay or for:) — keep it in YAML")
+        return
+    if yaml["has_card"] or yaml["has_reprompt"]:
+        connection.send_error(msg["id"], "card_or_reprompt", "this command uses a card or a reprompt — keep it in YAML")
         return
     if yaml["async_action"]:
         connection.send_error(msg["id"], "async_action", "this command answers before its action finishes — keep it in YAML")
@@ -1508,7 +1508,9 @@ async def ws_answer_takeover(hass: HomeAssistant, connection, msg) -> None:
             cfg["mode"] = yaml["mode"]
         else:
             cfg.pop("mode", None)
-        cfg.setdefault("llm_equivalent", {"tool": f"intent_script__{name.lower()}", "args": {}})
+        cfg.pop("answer_blocks", None)  # the YAML answer replaces any earlier block answer
+        # HA names the LLM tool intent_script__<intent type, case kept> (catalog names are [A-Za-z0-9_])
+        cfg.setdefault("llm_equivalent", {"tool": f"intent_script__{name}", "args": {}})
 
     await _guarded(hass, connection, msg, runtime, _mutate, actor="takeover")
 
@@ -1533,6 +1535,8 @@ async def ws_answer_release(hass: HomeAssistant, connection, msg) -> None:
             raise GuardError("not_owned", "this command is not taken over")
         for key in ("owned", "source_hash", "speech", "answer_blocks", "action", "mode"):
             cfg.pop(key, None)
+        if str((cfg.get("llm_equivalent") or {}).get("tool", "")).startswith("intent_script__"):
+            cfg.pop("llm_equivalent", None)
 
     await _guarded(hass, connection, msg, runtime, _mutate, actor="release")
 
@@ -1583,14 +1587,25 @@ async def ws_answer_save(hass: HomeAssistant, connection, msg) -> None:
         connection.send_error(msg["id"], "answer_invalid", str(err))
         return
 
-    no_yaml = _script_handler(hass, name) is None
+    # what an answer reads must be readable by Assist and never a protected device (as for proposals)
+    from homeassistant.components.homeassistant.exposed_entities import async_should_expose  # noqa: PLC0415
+
+    from .safety import protected_reason, sensitive_entities  # noqa: PLC0415
+
+    sens, extra = sensitive_entities(runtime["matcher"].config), names_table(runtime["matcher"].config)
+    for lang, (template, blocks) in compiled.items():
+        for entity in (read_entities(blocks) if blocks else []):
+            if not async_should_expose(hass, "conversation", entity):
+                connection.send_error(msg["id"], "not_exposed", f"{entity} is not exposed to Assist")
+                return
+            if protected_reason(hass, entity, sensitive_entities=sens, extra_names=extra):
+                connection.send_error(msg["id"], "protected", f"{entity} is a protected device")
+                return
 
     def _mutate(data: dict) -> None:
         cfg = (data.get("intents") or {}).get(name)
         if not isinstance(cfg, dict):
             raise GuardError("not_found", "unknown command")
-        if no_yaml:
-            cfg["owned"] = True  # nobody else answers it: Polyglot's own handler does (also without an action)
         speech = dict(cfg.get("speech") or {})
         blocks_all = dict(cfg.get("answer_blocks") or {})
         for lang, (template, blocks) in compiled.items():
@@ -1638,6 +1653,11 @@ async def ws_answer_translate(hass: HomeAssistant, connection, msg) -> None:
     if not ai_task:
         connection.send_error(msg["id"], "no_ai_task", "choose an AI task without tools in the settings first")
         return
+    key = ("translate", id(connection))
+    if time.monotonic() - _last_preview.get(key, 0) < 3:  # one AI request at a time per panel
+        connection.send_error(msg["id"], "too_fast", "one translation at a time")
+        return
+    _last_preview[key] = time.monotonic()
     try:
         blocks = validate(msg["blocks"])
         pieces = text_pieces(blocks)
@@ -1691,7 +1711,7 @@ async def ws_proposals_update(hass: HomeAssistant, connection, msg) -> None:
         intent_cfg["answer_blocks"] = msg["answer_blocks"]
     if "answer_blocks" in msg:
         intent_cfg.pop("speech", None)  # the answer is compiled from the blocks at acceptance
-    reason = check_item(new)
+    reason = check_item(new) or (None if any(intent_cfg.get("sentences", {}).values()) else "a command needs at least one sentence")
     if reason:
         connection.send_error(msg["id"], "invalid", reason)
         return
@@ -1732,13 +1752,13 @@ async def ws_proposals_update(hass: HomeAssistant, connection, msg) -> None:
                     "notes": ["edited by hand", *notes[:5]]}
     new["edited"] = True
     new.pop("id", None)
+    new.pop("fp", None)  # an edited proposal is judged by its new content
     try:
-        await queue.async_remove([old["id"]])
-        added = await queue.async_add([new])
-        if not added:  # identical to an existing or rejected proposal: keep the old one
-            await queue.async_add([{k: v for k, v in old.items() if k != "id"}])
+        added = await queue.async_add([new])  # add first: the old one is only removed once the new one is there
+        if not added:
             connection.send_error(msg["id"], "unchanged", "this is the same as an existing or rejected suggestion")
             return
+        await queue.async_remove([old["id"]])
     except QueueError as err:
         connection.send_error(msg["id"], "failed", str(err))
         return

@@ -67,3 +67,11 @@ def test_value_comes_from_the_turn_whose_answer_is_kept():
     last = _e("How warm is it outside?", "It is 13 degrees.", [{"e": "sensor.outdoor", "s": "13"}], conv="c2")
     out = L.find_ai_answers([first, last])
     assert out == [] or out[0]["value"] == "13"  # each answer carries its own value; never mixes 12 with "13 degrees"
+
+
+def test_times_and_dates_never_become_the_value():
+    b = L.answer_blocks_from("Um 14:30 waren es 14,2 Grad.", "sensor.t", "14.2", ["Grad"])
+    assert b[0]["p"] == ["Um 14:30 waren es ", {"e": "sensor.t", "f": "unit", "r": 1}, "."]
+    assert L.answer_blocks_from("Am 08.11. waren es 8 Grad", "sensor.t", "8", ["Grad"])[0]["p"][1]["r"] == 0
+    assert L.answer_blocks_from("Es ist 12 Uhr und 12 Grad", "sensor.t", "12", ["Grad"])[0]["p"][0] == "Es ist 12 Uhr und "
+    assert L.answer_blocks_from("12 und 12", "sensor.t", "12", ["Grad"]) is None  # two equal candidates: no guess

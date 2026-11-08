@@ -21,7 +21,8 @@ from typing import Any
 MIN_ASKED = 2
 MAX_PROPOSALS = 3
 STATE_TOOLS = ("GetLiveContext", "HassGetState")
-NUM_RE = re.compile(r"(?<![\w.,])-?\d+(?:[.,]\d+)?(?![\w])")
+# a number that is a VALUE: not part of a time (14:30), a date (08.11.) or a word
+NUM_RE = re.compile(r"(?<![\w.,:/])-?\d+(?:[.,]\d+)?(?![\w:/])(?!\.\d)")
 
 
 def _norm(text: str) -> str:
@@ -42,7 +43,8 @@ def find_ai_answers(entries: list[dict[str, Any]], min_asked: int = MIN_ASKED) -
     """Questions answered by the AI from ONE readable device, asked ≥ min_asked times."""
     groups: dict[str, list[dict[str, Any]]] = {}
     for e in entries:
-        if e.get("result") == "assistant" and not e.get("error") and only_reads(e) and e.get("read") and e.get("speech"):
+        if (e.get("result") == "assistant" and not e.get("error") and not e.get("speech_cut") and only_reads(e)
+                and e.get("read") and e.get("speech")):
             key = _norm(e.get("text", ""))
             if key:
                 groups.setdefault(key, []).append(e)
@@ -98,30 +100,44 @@ def pick_entity(items: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _value_tokens(said: str, value: Any, unit_words: list[str]) -> list[tuple[int, int, str, bool]]:
+    """(start, end, token, followed-by-unit) of every number in ``said`` that can be ``value``."""
+    variants = set(_variants(value))
+    out = []
+    for m in NUM_RE.finditer(said or ""):
+        if m.group(0) not in variants:
+            continue
+        rest = said[m.end():]
+        unit = next((w for w in sorted((w for w in unit_words if w), key=len, reverse=True)
+                     if re.match(r"\s*" + re.escape(w) + r"(?![\w])", rest, re.I)), None)
+        out.append((m.start(), m.end(), m.group(0), unit is not None))
+    return out
+
+
 def answer_blocks_from(said: str, entity: str, value: Any, unit_words: list[str]) -> list[dict[str, Any]] | None:
     """The AI's answer with the value (and the unit word right after it) as a live value block.
 
     "Draußen sind es gerade 12,4 Grad." + 12.44 → ["Draußen sind es gerade ", {e, unit, r=1}, "."]
+    Exactly one number must be that value — preferring one followed by the unit;
+    two equally good candidates (or none) → nothing is proposed.
     """
-    variants = _variants(value)
-    if not variants:
+    tokens = _value_tokens(said, value, unit_words)
+    with_unit = [t for t in tokens if t[3]]
+    pool = with_unit or tokens
+    if len(pool) != 1:
         return None
-    for m in NUM_RE.finditer(said or ""):
-        token = m.group(0)
-        if token not in variants:
-            continue
-        decimals = len(token.split(",")[-1].split(".")[-1]) if ("," in token or "." in token) else 0
-        start, end = m.span()
+    start, end, token, has_unit = pool[0]
+    decimals = len(re.split(r"[.,]", token)[-1]) if re.search(r"[.,]", token) else 0
+    fmt = "value"
+    if has_unit:
         rest = said[end:]
-        fmt = "value"
         for word in sorted((w for w in unit_words if w), key=len, reverse=True):
             mm = re.match(r"\s*" + re.escape(word) + r"(?![\w])", rest, re.I)
             if mm:
                 end += mm.end()
                 fmt = "unit"
                 break
-        return [{"t": "satz", "p": [p for p in (said[:start], {"e": entity, "f": fmt, "r": min(decimals, 2)}, said[end:]) if p != ""]}]
-    return None
+    return [{"t": "satz", "p": [p for p in (said[:start], {"e": entity, "f": fmt, "r": min(decimals, 2)}, said[end:]) if p != ""]}]
 
 
 def command_name(entity_name: str) -> str:

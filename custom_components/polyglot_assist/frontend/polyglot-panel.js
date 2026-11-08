@@ -268,7 +268,7 @@ class PolyglotAnswerEditor extends HTMLElement {
       ${this._barHtml() || '<div id="bar"></div>'}
       ${s.dialog ? this._dialogHtml() : ""}${s.pick ? this._pickerHtml() : ""}`;
     this._wireSatz();
-    if (s.pick && s.pick.focus) { const q = this.shadowRoot.querySelector("#pq"); if (q) { q.focus(); s.pick.focus = false; } }
+    if (s.pick) { const q = this.shadowRoot.querySelector("#pq"); if (q && (s.pick.focus || !this.shadowRoot.activeElement || this.shadowRoot.activeElement === this)) { q.focus(); s.pick.focus = false; } }
   }
 
   _previewHtml() {
@@ -323,10 +323,10 @@ class PolyglotAnswerEditor extends HTMLElement {
     const p = this.st.pick;
     const groups = {};
     (p.results || []).forEach((e) => (groups[e.area || this.t("aed.no_area")] ||= []).push(e));
-    const res = Object.entries(groups).map(([a, xs]) => `<div class="grp">${esc(a)}</div>` + xs.map((e) => `<div class="opt" role="option" tabindex="-1" data-a="pickent" data-e="${esc(e.entity_id)}" aria-selected="${e.entity_id === p.v.e}"><span>${esc(e.name)}</span><span class="v">${esc(e.spoken)}</span><span class="i">${esc(e.entity_id)}</span></div>`).join("")).join("") || `<p class="hint" style="padding:8px">${p.loading ? t("aed.loading") : t("aed.nothing_found")}</p>`;
+    const res = Object.entries(groups).map(([a, xs]) => `<div class="grp">${esc(a)}</div>` + xs.map((e) => `<div class="opt" role="option" tabindex="-1" id="o-${esc(e.entity_id.replace(/\./g, "-"))}" data-a="pickent" data-e="${esc(e.entity_id)}" aria-selected="${e.entity_id === p.v.e}"><span>${esc(e.name)}</span><span class="v">${esc(e.spoken)}</span><span class="i">${esc(e.entity_id)}</span></div>`).join("")).join("") || `<p class="hint" style="padding:8px">${p.loading ? t("aed.loading") : t("aed.nothing_found")}</p>`;
     return `<div class="sheet" data-a="pickbg"><div class="panel" role="dialog" aria-modal="true" aria-labelledby="pth">
       <header><h3 id="pth">${p.cond ? t("aed.pick_cond") : p.path != null && p.j != null ? t("aed.change_value") : t("aed.insert_value")}</h3><button class="g" data-a="pickclose" aria-label="${t("aed.cancel")}">✕</button></header>
-      <div class="s"><input id="pq" type="search" value="${esc(p.q || "")}" placeholder="${t("aed.search")}" aria-label="${t("aed.search")}" role="combobox" aria-expanded="true" aria-controls="pres"></div>
+      <div class="s"><input id="pq" type="search" value="${esc(p.q || "")}" placeholder="${t("aed.search")}" aria-label="${t("aed.search")}" role="combobox" aria-expanded="true" aria-controls="pres" ${p.v.e ? `aria-activedescendant="o-${esc(p.v.e.replace(/\./g, "-"))}"` : ""}></div>
       <div class="res" id="pres" role="listbox">${res}</div>
       ${p.cond ? `<div class="opts"><div class="row" style="justify-content:flex-end"><button class="p" data-a="pickok" ${p.v.e ? "" : "disabled"}>${t("aed.choose")}</button></div></div>` : `<div class="opts">
         <label>${t("aed.show_as")}<span class="seg">${Object.entries(AED_FORMATS).map(([f, key]) => `<button data-a="pickf" data-f="${f}" aria-pressed="${p.v.f === f}">${t(key)}</button>`).join("")}</span></label>
@@ -367,6 +367,27 @@ class PolyglotAnswerEditor extends HTMLElement {
     return parts;
   }
 
+  /** Where the caret is, in MODEL terms: {path, k: part index, off: offset in that text part}. */
+  _caretPart(el) {
+    const root = this.shadowRoot;
+    const sel = root.getSelection ? root.getSelection() : document.getSelection();
+    if (!sel || !sel.rangeCount || !el.contains(sel.anchorNode)) return null;
+    const node = sel.anchorNode, offset = sel.anchorOffset;
+    let k = -1, inText = false, len = 0;
+    const kids = [...el.childNodes];
+    for (let i = 0; i < kids.length; i++) {
+      const n = kids[i];
+      if (node === el && i === offset) return { path: el.dataset.path, k: inText ? k : k + 1, off: inText ? len : 0, between: !inText };
+      if (n.nodeType === 3) {
+        if (!inText) { k += 1; inText = true; len = 0; }
+        if (n === node) return { path: el.dataset.path, k, off: len + offset };
+        len += n.textContent.length;
+      } else if (n.dataset && n.dataset.j != null) { k += 1; inText = false; len = 0; }
+      else if (n.contains && n.contains(node)) return { path: el.dataset.path, k: k + 1, off: 0, between: true };
+    }
+    return { path: el.dataset.path, k: inText ? k : k + 1, off: inText ? len : 0, between: !inText };
+  }
+
   _reindex(el) {
     // the k-th value chip in the DOM is the k-th value in the parts — whatever text merged around it
     const parts = this._parts(el.dataset.path);
@@ -384,7 +405,12 @@ class PolyglotAnswerEditor extends HTMLElement {
       });
       el.addEventListener("keydown", (e) => {
         if (e.key === "Enter") e.preventDefault();
-        if (e.key === "@") { e.preventDefault(); this._openPicker({ path: el.dataset.path, marker: true }); }
+        if (e.key === "@") {
+          // at the start or after a space "@" opens the value picker; inside a word it is just "@"
+          const c = this._caretPart(el), parts = this._parts(el.dataset.path);
+          const before = c && !c.between && typeof parts[c.k] === "string" ? parts[c.k].slice(0, c.off) : "";
+          if (!before || /\s$/.test(before)) { e.preventDefault(); this._openPicker({ path: el.dataset.path, at: c }); }
+        }
       });
       el.addEventListener("paste", (e) => { e.preventDefault(); document.execCommand("insertText", false, (e.clipboardData || window.clipboardData).getData("text/plain").replace(/\s+/g, " ")); });
       el.addEventListener("focus", () => { this._lastSatz = el.dataset.path; });
@@ -394,7 +420,7 @@ class PolyglotAnswerEditor extends HTMLElement {
   /** Something outside the editor (the proposal's sentences) changed: show the save bar. */
   markDirty() { if (!this.st) return; this.st.dirty.add(this.st.lang); this._partial(); }
 
-  _touch(repaint = true) { this.st.dirty.add(this.st.lang); delete this.st.draft[this.st.lang]; if (repaint) this._paint(); else this._paintBar(); }
+  _touch(repaint = true) { if (this.panel) this.panel.s.leaveOk = false; this.st.dirty.add(this.st.lang); delete this.st.draft[this.st.lang]; if (repaint) this._paint(); else this._paintBar(); }
 
   _paintBar() { this._partial(); }  // only the save bar/dots — never the sentence the user types in
 
@@ -453,16 +479,13 @@ class PolyglotAnswerEditor extends HTMLElement {
 
   _clean(blocks) { // the shape the server accepts (drop helper flags, keep text as typed)
     const parts = (ps) => (ps || []).filter((p) => typeof p === "string" ? p.length : p && p.e).map((p) => typeof p === "string" ? p : { e: p.e, f: p.f || "unit", r: p.r || 0, ...(p.na ? { na: p.na } : {}) });
-    return (blocks || []).map((b) => b.t === "satz" ? { t: "satz", p: parts(b.p) } : { t: "cond", e: b.e, cases: b.cases.map((c) => ({ op: c.op, x: c.op === "=" && isNaN(Number(c.x)) ? String(c.x) : Number(c.x), p: parts(c.p) })), other: parts(b.other) });
+    return (blocks || []).map((b) => b.t === "satz" ? { t: "satz", p: parts(b.p) } : { t: "cond", e: b.e, cases: b.cases.map((c) => ({ op: c.op, x: c.op === "=" && isNaN(Number(String(c.x).replace(",", "."))) ? String(c.x) : Number(String(c.x).replace(",", ".")), p: parts(c.p) })), other: parts(b.other) });
   }
 
   // ── picker ────────────────────────────────────────────────────────────────
   async _openPicker(opts) {
-    // a marker keeps the caret position while the dialog has the focus
-    if (opts.marker && !opts.cond) document.execCommand("insertHTML", false, '<span data-j="new" contenteditable="false"></span>');
     const cur = opts.j != null ? this._parts(opts.path)[opts.j] : opts.cond ? { e: this.st.model[this.st.lang][opts.i].e } : null;
     this.st.pick = { ...opts, q: "", results: [], loading: true, focus: true, v: cur ? { ...cur } : { e: null, f: "unit", r: 0 } };
-    if (opts.marker && !opts.cond) { const el = this.shadowRoot.querySelector(`.satz[data-path="${CSS_ESC(opts.path)}"]`); if (el) this._setParts(opts.path, this._readSatz(el)); }
     this._paint(); this._search("");
   }
 
@@ -481,18 +504,25 @@ class PolyglotAnswerEditor extends HTMLElement {
     const p = this.st.pick; if (!p) return;
     this.st.pick = null;
     const m = this.st.model[this.st.lang];
-    if (p.cond) { if (apply && p.v.e) { m[p.i].e = p.v.e; this._touch(false); } }
+    if (p.cond) {
+      if (apply && p.v.e) { m[p.i].e = p.v.e; this._touch(false); }
+      else if (m[p.i] && !m[p.i].e) m.splice(p.i, 1);  // a new "depending on" without a value is dropped
+    }
     else if (p.j != null) { if (apply && p.v.e) { Object.assign(this._parts(p.path)[p.j], p.v); this._touch(false); } }
     else {
       const valid = (x) => { try { return x != null && Array.isArray(this._parts(x)); } catch (e) { return false; } };
       const path = valid(p.path) ? p.path : (m.length && m[m.length - 1].t === "satz" ? String(m.length - 1) : null);
       if (path == null && apply && p.v.e) { m.push({ t: "satz", p: [{ ...p.v }] }); this._touch(false); }
       else if (path != null) {
-        let parts = this._parts(path);
-        const at = parts.findIndex((x) => x && x.__new);
-        if (apply && p.v.e) { const v = { e: p.v.e, f: p.v.f, r: p.v.r || 0, ...(p.v.na ? { na: p.v.na } : {}) }; if (at >= 0) parts.splice(at, 1, v); else parts.push(" ", v); this._touch(false); }
-        else if (at >= 0) parts.splice(at, 1);
-        this._setParts(path, parts.filter((x) => !(x && x.__new)));
+        const parts = [...this._parts(path)];
+        if (apply && p.v.e) {
+          const v = { e: p.v.e, f: p.v.f, r: p.v.r || 0, ...(p.v.na ? { na: p.v.na } : {}) };
+          const at = p.at && p.at.path === path ? p.at : null;
+          if (!at) parts.push(...(parts.length && typeof parts[parts.length - 1] === "string" && !/\s$/.test(parts[parts.length - 1]) ? [" "] : []), v);
+          else if (at.between || typeof parts[at.k] !== "string") parts.splice(Math.min(at.k, parts.length), 0, v);
+          else { const txt = parts[at.k]; parts.splice(at.k, 1, ...[txt.slice(0, at.off), v, txt.slice(at.off)].filter((x) => x !== "")); }
+          this._setParts(path, parts); this._touch(false);
+        }
       }
     }
     this._paint(); this._preview();
@@ -505,6 +535,7 @@ class PolyglotAnswerEditor extends HTMLElement {
     if (this._wired) return; this._wired = true;
     this.shadowRoot.addEventListener("mousedown", (e) => { const b = e.target.closest("[data-a=insval]"); if (b && this._focusedSatz()) e.preventDefault(); });
     this.shadowRoot.addEventListener("click", (e) => this._click(e));
+    window.addEventListener("beforeunload", (e) => { if ((this._aed && this._aed.dirty) || (this._aedP && this._aedP.dirty)) { e.preventDefault(); e.returnValue = ""; } });
     this.shadowRoot.addEventListener("change", (e) => this._change(e));
     this.shadowRoot.addEventListener("input", (e) => { if (e.target.id === "pq") { clearTimeout(this._qt); const q = e.target.value; this._qt = setTimeout(() => this._search(q), 250); } if (e.target.dataset.a === "tpl") { this.st.model[this.st.lang] = e.target.value; this.st.dirty.add(this.st.lang); this._partial(); this._preview(); } if (e.target.dataset.a === "pickna" && this.st.pick) this.st.pick.v.na = e.target.value; });
     this.shadowRoot.addEventListener("keydown", (e) => this._key(e));
@@ -556,7 +587,7 @@ class PolyglotAnswerEditor extends HTMLElement {
       else { s.err = t("aed.blocks_lost"); this._paint(); }
     }
     else if (a === "toblocks") { s.model[s.lang] = []; s.mode[s.lang] = "blocks"; this._touch(); this._preview(); }
-    else if (a === "insval") { const f = this._focusedSatz(); const last = this._lastSatz != null && this.shadowRoot.querySelector(`.satz[data-path="${CSS_ESC(this._lastSatz)}"]`) ? this._lastSatz : null; this._openPicker(f ? { path: f.dataset.path, marker: true } : { path: last }); }
+    else if (a === "insval") { const f = this._focusedSatz(); const last = this._lastSatz != null && this.shadowRoot.querySelector(`.satz[data-path="${CSS_ESC(this._lastSatz)}"]`) ? this._lastSatz : null; this._openPicker(f ? { path: f.dataset.path, at: this._caretPart(f) } : { path: last }); }
     else if (a === "addsatz") { m.push({ t: "satz", p: [] }); this._touch(); const els = this.shadowRoot.querySelectorAll(".satz"); if (els.length) els[els.length - 1].focus(); }
     else if (a === "addcond") { m.push({ t: "cond", e: "", cases: [{ op: ">", x: 0, p: [] }], other: [] }); this._touch(); this._openPicker({ cond: true, i: m.length - 1 }); }
     else if (a === "up" && i > 0) { [m[i - 1], m[i]] = [m[i], m[i - 1]]; this._touch(); this._preview(); }
@@ -566,9 +597,9 @@ class PolyglotAnswerEditor extends HTMLElement {
     else if (a === "condent") this._openPicker({ cond: true, i });
     else if (a === "addcase") { m[i].cases.push({ op: ">", x: 0, p: [] }); this._touch(); }
     else if (a === "delcase") { m[i].cases.splice(+el.dataset.k, 1); if (!m[i].cases.length) m.splice(i, 1); this._touch(); this._preview(); }
-    else if (a === "pickent") { s.pick.v.e = el.dataset.e; this._paint(); }
-    else if (a === "pickf") { s.pick.v.f = el.dataset.f; this._paint(); }
-    else if (a === "pickr") { s.pick.v.r = +el.dataset.r; this._paint(); }
+    else if (a === "pickent") { s.pick.v.e = el.dataset.e; s.pick.focus = true; this._paint(); }
+    else if (a === "pickf") { s.pick.v.f = el.dataset.f; s.pick.focus = true; this._paint(); }
+    else if (a === "pickr") { s.pick.v.r = +el.dataset.r; s.pick.focus = true; this._paint(); }
     else if (a === "pickok") this._closePicker(true);
     else if (a === "pickclose" || (a === "pickbg" && e.target === el)) this._closePicker(false);
     else if (a === "takeover" || a === "release") { s.dialog = a; this._paint(); const y = this.shadowRoot.querySelector("[data-a=dyes]"); if (y) y.focus(); }
@@ -595,7 +626,11 @@ class PolyglotAnswerEditor extends HTMLElement {
         s.dirty.clear(); s.draft = {}; s.busy = false; s.msg = t("aed.saved", { cases: r.corpus_cases || 0 }); await this.panel._reload(["overview", "data"]); this._paint(); }
       catch (err) { s.busy = false; s.err = err.message || err.code; this._paint(); }
     }
-    else if (a === "discard") { const name = s.name, langs = s.langs; await this.load(name, langs); this.st.msg = t("aed.discarded"); this._paint(); }
+    else if (a === "discard") {
+      if (s.src.proposal) { const item = (this.panel.s.proposals || []).find((x) => x.id === s.src.proposal); if (item) this.loadProposal(item, s.langs); }
+      else await this.load(s.name, s.langs);
+      this.st.msg = t("aed.discarded"); this._paint();
+    }
     else if (a === "translate" || a === "shorter") {
       const to = a === "shorter" ? s.lang : el.dataset.to;
       s.busy = true; s.err = ""; this._paint();
@@ -814,7 +849,8 @@ class PolyglotAssistPanel extends HTMLElement {
 
   /** True when leaving would lose unsaved answers: the first try only warns. */
   _answerGuard() {
-    if (this._aed && this._aed.dirty && !this.s.leaveOk) { this.s.leaveOk = true; this._setMsg("edit", this.t("aed.leave_warning"), "err"); return true; }
+    const dirty = (this._aed && this._aed.dirty) || (this._aedP && this._aedP.dirty);
+    if (dirty && !this.s.leaveOk) { this.s.leaveOk = true; this._setMsg("edit", this.t("aed.leave_warning"), "err"); return true; }
     this.s.leaveOk = false; return false;
   }
 
@@ -1315,7 +1351,7 @@ class PolyglotAssistPanel extends HTMLElement {
     if (el.tagName === "A") e.preventDefault();
     try {
       if (a === "menu") this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
-      else if ((a === "tab" || a === "open" || a === "close") && this.s.selected && this._answerGuard()) { return; }
+      else if (["tab", "open", "close", "edel", "pedit", "pclose"].includes(a) && (this.s.selected || this.s.propEdit) && this._answerGuard()) { return; }
       else if (a === "pedit") { this.s.propEdit = el.dataset.pid; this._aedPFor = null; this._render(); this.shadowRoot.querySelector("main").scrollIntoView(); }
       else if (a === "pclose") { this.s.propEdit = null; this._render(); }
       else if (a === "tab") { this.s.view = el.dataset.v; history.replaceState(null, "", "#" + el.dataset.v); if (el.dataset.v === "monitor" || el.dataset.v === "start") await this._reload(["monitor", "overview"]); else this._render(); }
@@ -1540,6 +1576,7 @@ class PolyglotAssistPanel extends HTMLElement {
       try { if (this._uiPref) localStorage.setItem(LS_UI, this._uiPref); else localStorage.removeItem(LS_UI); } catch (err) { /* per-viewer convenience only */ }
       await this._loadTexts(); this._render(); return;
     }
+    if (el.dataset.act === "entry" && this._answerGuard()) { el.value = this.s.entryId || ""; return; }
     if (el.dataset.act === "entry") {
       // nothing of entry A may leak into entry B (editors, suggestions, results)
       Object.assign(this.s, { entryId: el.value, selected: null, monitor: null, catsOpen: false, catEdit: null,

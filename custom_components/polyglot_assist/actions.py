@@ -68,15 +68,17 @@ class CatalogIntentHandler(intent.IntentHandler):
                 response.async_set_results(success_results=[
                     intent.IntentResponseTarget(type=intent.IntentResponseTargetType.ENTITY, name=e, id=e)
                     for e in self._switched])
-        if self._kind == "question":
-            response.response_type = intent.IntentResponseType.QUERY_ANSWER  # spoken, never a tone
+        if self._kind == "question" or self._script is None:
+            # an answer without an action IS the result: spoken, never replaced by a tone
+            response.response_type = intent.IntentResponseType.QUERY_ANSWER
         template = self._speech.get(lang) or self._speech.get((lang or "").split("-")[0]) or self._speech.get("*")
         try:
             text = template.async_render(variables, parse_result=False) if template else say("done", lang)
         except TemplateError as err:
             # the action (if any) HAS run — say so instead of "failed"
             _LOGGER.warning("Polyglot Assist: answer of %s could not be rendered: %s", self.intent_type, err)
-            text = say("done", lang)
+            # the action (if any) ran → "done"; a pure answer that failed must not pretend success
+            text = say("done", lang) if self._script is not None else say("error", lang)
         response.async_set_speech(" ".join(str(text).split()))
         return response
 
@@ -95,6 +97,25 @@ def _plain_targets(action: Any) -> list[str]:
             return []
         out += [e for e in entities if e not in out]
     return out[:10]
+
+
+def _speech_of(hass: HomeAssistant, cfg: dict[str, Any]) -> dict[str, str]:
+    """The answers to render: block answers recompiled NOW (current units, current compiler)."""
+    speech = dict(cfg.get("speech") or {})
+    if cfg.get("answer_blocks"):
+        from .answer import AnswerError, blocks_entities, materialize  # noqa: PLC0415
+
+        try:
+            units = {}
+            for e in blocks_entities(cfg):
+                st = hass.states.get(e)
+                unit = st.attributes.get("unit_of_measurement") if st else None
+                if isinstance(unit, str):
+                    units[e] = unit
+            speech = materialize(cfg, units)["speech"]
+        except AnswerError as err:
+            _LOGGER.error("Polyglot Assist: answer blocks of a command are invalid: %s", err)
+    return speech
 
 
 async def async_prepare_owned(hass: HomeAssistant, config: dict[str, Any], owner: str) -> dict[str, CatalogIntentHandler]:
@@ -117,7 +138,7 @@ async def async_prepare_owned(hass: HomeAssistant, config: dict[str, Any], owner
             except Exception as err:  # noqa: BLE001
                 _LOGGER.error("Polyglot Assist: action of %s (taken over) is invalid: %s", name, err)
                 continue  # never run half a command — the YAML handler stays in charge
-        out[name] = CatalogIntentHandler(hass, name, script, cfg.get("speech") or {}, owner, cfg.get("kind"), cfg.get("action"))
+        out[name] = CatalogIntentHandler(hass, name, script, _speech_of(hass, cfg), owner, cfg.get("kind"), cfg.get("action"))
     return out
 
 
@@ -149,7 +170,7 @@ async def async_prepare_catalog_actions(
             except Exception as err:  # noqa: BLE001 — one broken action must not break the rest
                 _LOGGER.error("Polyglot Assist: action of %s is invalid: %s", name, err)
                 continue
-        handlers.append(CatalogIntentHandler(hass, name, script, cfg.get("speech") or {}, owner, cfg.get("kind"), cfg.get("action")))
+        handlers.append(CatalogIntentHandler(hass, name, script, _speech_of(hass, cfg), owner, cfg.get("kind"), cfg.get("action")))
     return handlers
 
 
