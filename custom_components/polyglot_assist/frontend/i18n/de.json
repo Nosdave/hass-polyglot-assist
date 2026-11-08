@@ -566,6 +566,7 @@
     "yaml_changed": "Die YAML-Datei wurde seit der Übernahme geändert.",
     "yaml_hint": "Du siehst sie hier und kannst sie testen. Zum Bearbeiten übernimmt Polyglot sie (Antwort und – falls vorhanden – Aktion).",
     "yaml_title": "Diese Antwort steht in einer YAML-Datei (intent_script).",
-    "yaml_vars": "Sie nutzt Werte, die Polyglot nicht kennt: {vars}."
+    "yaml_vars": "Sie nutzt Werte, die Polyglot nicht kennt: {vars}.",
+    "convert_failed": "Umwandeln in eine Vorlage ging gerade nicht – die Bausteine bleiben unverändert. Bitte nochmal versuchen."
   }
 }

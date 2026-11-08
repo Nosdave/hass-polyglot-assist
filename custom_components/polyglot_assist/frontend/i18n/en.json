@@ -566,6 +566,7 @@
     "yaml_changed": "The YAML file changed since it was taken over.",
     "yaml_hint": "You can see and test it here. To edit it, Polyglot takes it over (answer and, if any, action).",
     "yaml_title": "This answer lives in a YAML file (intent_script).",
-    "yaml_vars": "It uses values Polyglot does not know: {vars}."
+    "yaml_vars": "It uses values Polyglot does not know: {vars}.",
+    "convert_failed": "Converting to a template did not work just now – the blocks stay unchanged. Please try again."
   }
 }

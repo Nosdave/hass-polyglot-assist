@@ -1561,6 +1561,14 @@ async def ws_answer_save(hass: HomeAssistant, connection, msg) -> None:
     if _script_handler(hass, name) is not None and not cfg_now.get("owned"):
         connection.send_error(msg["id"], "take_over_first", "the YAML file answers this command — take it over first")
         return
+    from .actions import CatalogIntentHandler  # noqa: PLC0415
+
+    other = next((h for h in intent.async_get(hass) if h.intent_type == name), None)
+    if (other is not None and not isinstance(other, CatalogIntentHandler) and type(other).__name__ != "ScriptIntentHandler"
+            and not cfg_now.get("action") and not cfg_now.get("owned")):
+        # another handler (e.g. a built-in intent) does the work — a reply alone would replace its action
+        connection.send_error(msg["id"], "other_handler", f"{type(other).__name__} handles this command — its answer cannot be edited here")
+        return
     compiled: dict[str, tuple[str | None, list | None]] = {}
     try:
         for lang, ans in msg["answers"].items():

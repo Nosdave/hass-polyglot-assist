@@ -242,7 +242,7 @@ class PolyglotAnswerEditor extends HTMLElement {
       ? `<div class="banner"><span class="chip yaml">YAML</span><div><b>${t("aed.yaml_title")}</b><div class="hint">${t("aed.yaml_hint")}${(src.yaml?.unknown_variables || []).length ? " " + t("aed.yaml_vars", { vars: src.yaml.unknown_variables.join(", ") }) : ""}${src.yaml?.has_card || src.yaml?.has_reprompt ? " " + t("aed.yaml_card") : ""}</div></div><button class="p" data-a="takeover">${t("aed.takeover")}</button></div>`
       : src.owned ? `<div class="banner"><span class="chip pg">Polyglot</span><div><b>${t("aed.owned_title")}</b>${src.yaml ? `<div class="hint">${t("aed.owned_hint")}</div>` : ""}${src.yaml_changed ? `<div class="hint err">${t("aed.yaml_changed")}</div>` : ""}</div>${src.yaml ? `<button data-a="release">${t("aed.release")}</button>` : "<span></span>"}</div>` : "";
     const tabs = s.langs.map((x) => `<button class="ltab" data-a="lang" data-l="${esc(x)}" aria-pressed="${x === l}">${esc(this.panel._ln(x))}${s.dirty.has(x) ? `<span class="dot" title="${t("aed.unsaved_one")}"></span>` : ""}</button>`).join("");
-    const ro = !this.editable;
+    const ro = !this.editable || s.busy;  // nothing can change while a save/AI request is running
     let body;
     if (mode === "blocks") {
       const blocks = s.model[l];
@@ -255,24 +255,33 @@ class PolyglotAnswerEditor extends HTMLElement {
         ${!ro ? `<div class="row"><button class="g" data-a="toblocks">${t("aed.to_blocks")}</button></div>` : ""}`;
     }
     const missing = s.langs.filter((x) => x !== l && s.mode[x] === "blocks" && !(s.model[x] || []).length);
-    const p = s.prev[l] || {};
-    const n = p.chars || 0;
     this.shadowRoot.innerHTML = `<style>${AED_CSS}</style>${banner}
       <div class="row" style="justify-content:space-between"><div class="row" role="group" aria-label="${t("aed.languages")}">${tabs}</div>
         ${mode !== "shared" ? `<span class="seg" role="group" aria-label="${t("aed.view")}"><button data-a="mode" data-m="blocks" aria-pressed="${mode === "blocks"}" ${ro ? "disabled" : ""}>${t("aed.blocks")}</button><button data-a="mode" data-m="template" aria-pressed="${mode === "template"}" ${ro ? "disabled" : ""}>${t("aed.template")}</button></span>` : ""}</div>
       ${s.draft[l] ? `<div class="banner"><span class="chip yaml">✨</span><div><b>${t("aed.draft_title")}</b><div class="hint">${t("aed.draft_hint")}</div></div><span></span></div>` : ""}
       ${body}
       ${mode === "blocks" && !ro && missing.length && (s.model[l] || []).length ? `<div class="row" style="margin-top:6px">${missing.map((x) => `<button class="g" data-a="translate" data-to="${esc(x)}" ${s.busy ? "disabled" : ""}>✨ ${t("aed.translate_to", { language: this.panel._ln(x) })}</button>`).join("")}</div>` : ""}
-      <div class="preview"><div class="lbl"><span>${t("aed.preview")}</span><span>${t("aed.preview_note")}</span></div>
-        <p>${p.error ? `<span class="err">${esc(p.error)}</span>` : esc(p.text || "–")}</p>
-        <div class="meter ${n > 250 ? "warn" : ""}" role="meter" aria-label="${t("aed.length")}" aria-valuemin="0" aria-valuemax="300" aria-valuenow="${n}"><i style="width:${Math.min(100, n / 3)}%"></i></div>
-        <div class="row" style="justify-content:space-between;margin-top:6px" aria-live="polite"><span class="hint">${t("aed.chars", { count: n })}${n > 250 ? " · " + t("aed.too_long") : ""}</span><span class="hint">${t("aed.seconds", { seconds: Math.max(1, Math.round(n / 15)) })}</span></div>
-      </div>
+      ${this._previewHtml()}
       ${s.err ? `<p class="err">${esc(s.err)}</p>` : ""}${s.msg ? `<p class="hint" role="status">${esc(s.msg)}</p>` : ""}
-      ${s.dirty.size ? `<div class="savebar"><span class="m">${t("aed.unsaved", { languages: [...s.dirty].map((x) => this.panel._ln(x)).join(", ") })}</span><button data-a="discard">${t("aed.discard")}</button><button class="p" data-a="save" ${s.busy ? "disabled" : ""}>${t("aed.save")}</button></div>` : ""}
+      ${this._barHtml() || '<div id="bar"></div>'}
       ${s.dialog ? this._dialogHtml() : ""}${s.pick ? this._pickerHtml() : ""}`;
     this._wireSatz();
     if (s.pick && s.pick.focus) { const q = this.shadowRoot.querySelector("#pq"); if (q) { q.focus(); s.pick.focus = false; } }
+  }
+
+  _previewHtml() {
+    const t = (k, v) => esc(this.t(k, v));
+    const p = this.st.prev[this.st.lang] || {}, n = p.chars || 0;
+    return `<div class="preview" id="pv"><div class="lbl"><span>${t("aed.preview")}</span><span>${t("aed.preview_note")}</span></div>
+        <p>${p.error ? `<span class="err">${esc(p.error)}</span>` : esc(p.text || "–")}</p>
+        <div class="meter ${n > 250 ? "warn" : ""}" role="meter" aria-label="${t("aed.length")}" aria-valuemin="0" aria-valuemax="300" aria-valuenow="${n}"><i style="width:${Math.min(100, n / 3)}%"></i></div>
+        <div class="row" style="justify-content:space-between;margin-top:6px" aria-live="polite"><span class="hint">${t("aed.chars", { count: n })}${n > 250 ? " · " + t("aed.too_long") : ""}</span><span class="hint">${t("aed.seconds", { seconds: Math.max(1, Math.round(n / 15)) })}</span></div>
+      </div>`;
+  }
+
+  _barHtml() {
+    const t = (k, v) => esc(this.t(k, v)), s = this.st;
+    return s.dirty.size ? `<div class="savebar" id="bar"><span class="m">${t("aed.unsaved", { languages: [...s.dirty].map((x) => this.panel._ln(x)).join(", ") })}</span><button data-a="discard" ${s.busy ? "disabled" : ""}>${t("aed.discard")}</button><button class="p" data-a="save" ${s.busy ? "disabled" : ""}>${t("aed.save")}</button></div>` : "";
   }
 
   _valHtml(v, path, j, ro) {
@@ -356,9 +365,21 @@ class PolyglotAnswerEditor extends HTMLElement {
     return parts;
   }
 
+  _reindex(el) {
+    // the k-th value chip in the DOM is the k-th value in the parts — whatever text merged around it
+    const parts = this._parts(el.dataset.path);
+    const slots = parts.map((p, i) => (typeof p === "string" ? -1 : i)).filter((i) => i >= 0);
+    let k = 0;
+    el.querySelectorAll(".val[data-j]").forEach((chip) => { if (chip.dataset.j !== "new" && k < slots.length) chip.dataset.j = String(slots[k++]); });
+  }
+
   _wireSatz() {
     this.shadowRoot.querySelectorAll(".satz[contenteditable=true]").forEach((el) => {
-      el.addEventListener("input", () => { this._setParts(el.dataset.path, this._readSatz(el).filter((p) => !p.__new)); this._touch(false); this._preview(); });
+      el.addEventListener("input", () => {
+        this._setParts(el.dataset.path, this._readSatz(el).filter((p) => !p.__new));
+        this._reindex(el);  // chips must point at their NEW place in the parts (text before them may have merged)
+        this._touch(false); this._preview();
+      });
       el.addEventListener("keydown", (e) => {
         if (e.key === "Enter") e.preventDefault();
         if (e.key === "@") { e.preventDefault(); this._openPicker({ path: el.dataset.path, marker: true }); }
@@ -370,10 +391,7 @@ class PolyglotAnswerEditor extends HTMLElement {
 
   _touch(repaint = true) { this.st.dirty.add(this.st.lang); delete this.st.draft[this.st.lang]; if (repaint) this._paint(); else this._paintBar(); }
 
-  _paintBar() { // only the save bar/dots — never the sentence the user types in
-    const keep = this.shadowRoot.activeElement;
-    if (!this.shadowRoot.querySelector(".savebar") || !keep) { const sel = this._caret(); this._paint(); this._restore(sel); }
-  }
+  _paintBar() { this._partial(); }  // only the save bar/dots — never the sentence the user types in
 
   _caret() {
     const root = this.shadowRoot, el = root.activeElement;
@@ -415,7 +433,18 @@ class PolyglotAnswerEditor extends HTMLElement {
 
   _activeCase() { return undefined; }
 
-  _paintPreview() { const c = this._caret(); this._paint(); this._restore(c); }
+  _paintPreview() { this._partial(); }
+
+  /** Update only the preview, the save bar and the language dots — the sentence editors and the
+   *  template field keep their DOM, focus and caret. Falls back to a full paint if the parts are missing. */
+  _partial() {
+    const root = this.shadowRoot, pv = root.getElementById("pv"), bar = root.getElementById("bar");
+    if (!pv || !bar) { const c = this._caret(); this._paint(); this._restore(c); return; }
+    const tmp = document.createElement("div");
+    tmp.innerHTML = this._previewHtml(); pv.replaceWith(tmp.firstElementChild);
+    tmp.innerHTML = this._barHtml() || '<div id="bar"></div>'; bar.replaceWith(tmp.firstElementChild);
+    root.querySelectorAll(".ltab").forEach((b) => { const has = this.st.dirty.has(b.dataset.l), dot = b.querySelector(".dot"); if (has && !dot) b.insertAdjacentHTML("beforeend", `<span class="dot" title="${esc(this.t("aed.unsaved_one"))}"></span>`); if (!has && dot) dot.remove(); });
+  }
 
   _clean(blocks) { // the shape the server accepts (drop helper flags, keep text as typed)
     const parts = (ps) => (ps || []).filter((p) => typeof p === "string" ? p.length : p && p.e).map((p) => typeof p === "string" ? p : { e: p.e, f: p.f || "unit", r: p.r || 0, ...(p.na ? { na: p.na } : {}) });
@@ -471,7 +500,7 @@ class PolyglotAnswerEditor extends HTMLElement {
     this.shadowRoot.addEventListener("mousedown", (e) => { const b = e.target.closest("[data-a=insval]"); if (b && this._focusedSatz()) e.preventDefault(); });
     this.shadowRoot.addEventListener("click", (e) => this._click(e));
     this.shadowRoot.addEventListener("change", (e) => this._change(e));
-    this.shadowRoot.addEventListener("input", (e) => { if (e.target.id === "pq") { clearTimeout(this._qt); const q = e.target.value; this._qt = setTimeout(() => this._search(q), 250); } if (e.target.dataset.a === "tpl") { this.st.model[this.st.lang] = e.target.value; this.st.dirty.add(this.st.lang); this._preview(); } if (e.target.dataset.a === "pickna" && this.st.pick) this.st.pick.v.na = e.target.value; });
+    this.shadowRoot.addEventListener("input", (e) => { if (e.target.id === "pq") { clearTimeout(this._qt); const q = e.target.value; this._qt = setTimeout(() => this._search(q), 250); } if (e.target.dataset.a === "tpl") { this.st.model[this.st.lang] = e.target.value; this.st.dirty.add(this.st.lang); this._partial(); this._preview(); } if (e.target.dataset.a === "pickna" && this.st.pick) this.st.pick.v.na = e.target.value; });
     this.shadowRoot.addEventListener("keydown", (e) => this._key(e));
   }
 
@@ -509,7 +538,15 @@ class PolyglotAnswerEditor extends HTMLElement {
     if (a === "lang") { s.lang = el.dataset.l; s.err = ""; s.msg = ""; this._paint(); this._preview(); }
     else if (a === "mode") {
       if (el.dataset.m === s.mode[s.lang]) return;
-      if (el.dataset.m === "template") { const r = (s.prev[s.lang] || {}); try { const x = await this.ws("answer/preview", { lang: s.lang, blocks: this._clean(m) }); s.model[s.lang] = x.template; } catch (err) { s.model[s.lang] = r.text || ""; } s.mode[s.lang] = "template"; this._touch(); }
+      if (el.dataset.m === "template") {
+        const convert = () => this.ws("answer/preview", { lang: s.lang, blocks: this._clean(m) });
+        let x = null;
+        try { x = await convert(); } catch (err) {
+          if (err.code === "too_fast") { await new Promise((r) => setTimeout(r, 350)); try { x = await convert(); } catch (e2) { x = null; } }
+        }
+        if (!x || typeof x.template !== "string") { s.err = t("aed.convert_failed"); this._paint(); return; }  // blocks stay as they are
+        s.model[s.lang] = x.template; s.mode[s.lang] = "template"; this._touch();
+      }
       else { s.err = t("aed.blocks_lost"); this._paint(); }
     }
     else if (a === "toblocks") { s.model[s.lang] = []; s.mode[s.lang] = "blocks"; this._touch(); this._preview(); }

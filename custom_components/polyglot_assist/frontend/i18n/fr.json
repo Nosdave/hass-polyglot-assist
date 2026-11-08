@@ -566,6 +566,7 @@
     "yaml_changed": "Le fichier YAML a changé depuis la reprise.",
     "yaml_hint": "Tu peux la voir et la tester ici. Pour la modifier, Polyglot la reprend (réponse et, le cas échéant, action).",
     "yaml_title": "Cette réponse se trouve dans un fichier YAML (intent_script).",
-    "yaml_vars": "Elle utilise des valeurs que Polyglot ne connaît pas : {vars}."
+    "yaml_vars": "Elle utilise des valeurs que Polyglot ne connaît pas : {vars}.",
+    "convert_failed": "La conversion en modèle n'a pas fonctionné – les blocs restent inchangés. Réessaie."
   }
 }
