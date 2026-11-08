@@ -579,13 +579,15 @@ class PolyglotAnswerEditor extends HTMLElement {
       if (el.dataset.m === s.mode[s.lang]) return;
       if (el.dataset.m === "template") {
         const L = s.lang;  // the language the conversion was asked for (tabs may change meanwhile)
+        s.busy = true; this._paint();  // no edits while converting — they would be overwritten
         const convert = () => this.ws("answer/preview", { lang: L, blocks: this._clean(m) });
         let x = null;
         try { x = await convert(); } catch (err) {
           if (err.code === "too_fast") { await new Promise((r) => setTimeout(r, 350)); try { x = await convert(); } catch (e2) { x = null; } }
         }
-        if (!x || typeof x.template !== "string") { s.err = t("aed.convert_failed"); this._paint(); return; }  // blocks stay as they are
+        s.busy = false;
         if (this.st !== s) return;
+        if (!x || typeof x.template !== "string") { s.err = t("aed.convert_failed"); this._paint(); return; }  // blocks stay as they are
         s.model[L] = x.template; s.mode[L] = "template"; s.dirty.add(L); this._paint(); this._preview();
       }
       else { s.err = t("aed.blocks_lost"); this._paint(); }
@@ -840,7 +842,7 @@ class PolyglotAssistPanel extends HTMLElement {
     if (pslot && item) {
       if (!this._aedP) { this._aedP = document.createElement("polyglot-answer-editor"); this._aedP.panel = this; }
       pslot.appendChild(this._aedP);
-      if (this._aedPFor !== item.id) { this._aedPFor = item.id; this._aedP.loadProposal(item, this.s.overview?.languages || []); }
+      if (this._aedPFor !== (this.s.entryId || "") + "|" + item.id) { this._aedPFor = (this.s.entryId || "") + "|" + item.id; this._aedP.loadProposal(item, this.s.overview?.languages || []); }
     }
     const slot = this.shadowRoot.getElementById("aed-slot");
     const name = this.s.view === "commands" ? this.s.selected : null;
@@ -1583,7 +1585,7 @@ class PolyglotAssistPanel extends HTMLElement {
     if (el.dataset.act === "entry" && this._answerGuard()) { el.value = this.s.entryId || ""; return; }
     if (el.dataset.act === "entry") {
       // nothing of entry A may leak into entry B (editors, suggestions, results)
-      Object.assign(this.s, { entryId: el.value, selected: null, monitor: null, catsOpen: false, catEdit: null,
+      Object.assign(this.s, { entryId: el.value, selected: null, propEdit: null, psentDraft: null, monitor: null, catsOpen: false, catEdit: null,
         nameSugg: null, langSugg: null, testResult: undefined, corpus: null, confirmDelete: null, lang: null, msg: {},
         setLoaded: false, setRun: (this.s.setRun || 0) + 1, pipes: null, agents: null, langCheck: null, langChosen: null, langOffered: null,
         sttTest: null, sttBusy: false, uiOwn: null, uiBusy: false, uiNew: null, uiFilter: "", uiDraft: {}, fbBusy: false, langApplying: false,

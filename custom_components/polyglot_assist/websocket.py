@@ -1500,6 +1500,8 @@ async def ws_answer_takeover(hass: HomeAssistant, connection, msg) -> None:
         cfg["source_hash"] = yaml["hash"]
         if yaml["speech"] is not None:
             cfg["speech"] = {"*": yaml["speech"]}  # one template for all languages (branches on `lang`)
+        else:
+            cfg.pop("speech", None)  # the YAML has no answer (any more): an old catalog answer must not be spoken
         if yaml["action"]:
             cfg["action"] = yaml["action"]
         else:
