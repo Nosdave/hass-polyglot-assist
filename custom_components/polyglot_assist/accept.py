@@ -58,11 +58,41 @@ def dynamic_reason(hass: HomeAssistant, item: dict, sensitive: set[str], extra_n
         reason = action_entity_reason((p.get("intent") or {}).get("action") or [], _reason)
         if reason:
             return reason
+        # what an ANSWER reads must be readable by Assist too (and never a protected device)
+        from .answer import AnswerError, blocks_entities  # noqa: PLC0415
+
+        try:
+            read = blocks_entities(p.get("intent") or {})
+        except AnswerError as err:
+            return f"answer: {err}"
+        for entity in read:
+            if not async_should_expose(hass, "conversation", entity):
+                return f"the answer reads {entity}, which is not exposed to Assist"
+            reason = protected_reason(hass, entity, sensitive_entities=sensitive, extra_names=extra_names)
+            if reason:
+                return f"the answer reads a protected device ({entity})"
     if op == "set_list_value" and isinstance(p.get("out"), str) and "." in p["out"]:
         return protected_reason(hass, p["out"], sensitive_entities=sensitive, extra_names=extra_names)
     if op in ("add_names", "remove_names") and not str(p.get("target", "")).startswith("area."):
         return protected_reason(hass, p.get("target", ""), sensitive_entities=sensitive, extra_names=extra_names)
     return None
+
+
+def _with_answer(hass: HomeAssistant, item: dict) -> dict:
+    """add_intent with answer blocks → a copy whose speech is compiled from them (else unchanged)."""
+    p = item.get("payload") or {}
+    cfg = p.get("intent") if item.get("op") == "add_intent" else None
+    if not isinstance(cfg, dict) or not cfg.get("answer_blocks"):
+        return item
+    from .answer import AnswerError, blocks_entities, materialize  # noqa: PLC0415
+
+    try:
+        units = {e: (hass.states.get(e).attributes.get("unit_of_measurement") if hass.states.get(e) else None)
+                 for e in blocks_entities(cfg)}
+        compiled = materialize(cfg, {e: u for e, u in units.items() if isinstance(u, str)})
+    except AnswerError:
+        return item  # check_item reports it
+    return {**item, "payload": {**p, "intent": compiled}}
 
 
 async def async_accept(
@@ -95,6 +125,7 @@ async def async_accept(
     trial = copy.deepcopy(config)
     usable = []
     for item in items:
+        item = _with_answer(hass, item)  # blocks → the template, compiled HERE with the real units
         reason = check_item(item) or check_item_against(item, trial) or dynamic_reason(
             hass, item, sensitive, extra_names, registered
         )

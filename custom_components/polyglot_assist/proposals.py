@@ -637,6 +637,25 @@ def check_action_safe(action: Any) -> str | None:
 _LANG = re.compile(r"^[a-z]{2,3}(-[a-z]{2,4})?$")
 
 
+def _answer_module():
+    """answer.py — as a package import, or loaded from its file (stand-alone use, tests)."""
+    try:
+        from . import answer  # noqa: PLC0415
+    except ImportError:
+        import importlib.util  # noqa: PLC0415
+        import sys  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
+
+        key = "_pg_answer"
+        if key not in sys.modules:
+            spec = importlib.util.spec_from_file_location(key, Path(__file__).with_name("answer.py"))
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[key] = module
+            spec.loader.exec_module(module)
+        answer = sys.modules[key]
+    return answer
+
+
 def check_item(item: dict[str, Any]) -> str | None:
     """Static safety check of a queue item before it may be accepted."""
     p = item.get("payload") or {}
@@ -656,9 +675,25 @@ def check_item(item: dict[str, Any]) -> str | None:
                 return reason
         if intent.get("safety") not in (None, "normal", "sensitive", "disabled"):
             return "invalid safety level"
+        # a proposal never carries Jinja: plain text, or answer blocks the server compiles itself
         for text in (intent.get("speech") or {}).values():
-            if not isinstance(text, str) or "{%" in text or len(text) > 200:
-                return "answers must be short plain text"
+            if not isinstance(text, str) or len(text) > 200 or any(ch in text for ch in "{}%#"):
+                return "answers in proposals must be short plain text (values only as answer blocks)"
+        if intent.get("owned"):
+            return "taking a command over from YAML is only done in the panel"
+        if "answer_blocks" in intent:
+            answer_mod = _answer_module()
+            AnswerError, validate_answer = answer_mod.AnswerError, answer_mod.validate
+            blocks = intent["answer_blocks"]
+            if not isinstance(blocks, dict):
+                return "answer_blocks must map languages to blocks"
+            for lang, b in blocks.items():
+                if not isinstance(lang, str) or not _LANG.match(lang):
+                    return "invalid language code"
+                try:
+                    validate_answer(b)
+                except AnswerError as err:
+                    return f"answer: {err}"
         if "llm_equivalent" in intent and _bad_equivalent(intent["llm_equivalent"]):
             return "invalid llm_equivalent"
     if item.get("op") == "set_field" and (item.get("payload") or {}).get("field") == "llm_equivalent":

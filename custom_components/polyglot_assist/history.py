@@ -53,6 +53,9 @@ def loosened(current: dict[str, Any], old: dict[str, Any], hass: HomeAssistant |
                 out.append({"intent": name, "now": now or "normal", "then": then or "normal"})
             elif cfg.get("action") and cfg.get("action") != now_i[name].get("action"):
                 out.append({"intent": name, "now": "action", "then": "other action"})
+            elif cfg.get("owned") and not now_i[name].get("owned"):
+                # restoring a takeover: Polyglot (not the YAML file) would run this command again
+                out.append({"intent": name, "now": "YAML", "then": "Polyglot runs it"})
         elif name not in now_i and then != "disabled":  # a switched-off command coming back stays off
             out.append({"intent": name, "now": "removed", "then": then or "normal"})
     if hass is not None:
