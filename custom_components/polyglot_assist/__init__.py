@@ -777,11 +777,8 @@ def _ai_answer_learner(hass: HomeAssistant, data: dict, builtin_match):
                 continue
             unit = st.attributes.get("unit_of_measurement")
             words = [w for w in (SPOKEN_UNITS.get(lang, {}).get(unit) if isinstance(unit, str) else None, unit) if w]
-            blocks = answer_blocks_from(cand["said"], entity, st.state, words)
-            if blocks is None:
-                # the value in the AI's answer was formatted differently today — use the recorded one
-                rec = next((r.get("s") for e in entries for r in (e.get("read") or []) if r.get("e") == entity), None)
-                blocks = answer_blocks_from(cand["said"], entity, rec, words)
+            # the value recorded with THIS answer (today's state may have changed since)
+            blocks = answer_blocks_from(cand["said"], entity, cand.get("value"), words)
             try:
                 blocks = validate(blocks) if blocks else None
             except AnswerError:

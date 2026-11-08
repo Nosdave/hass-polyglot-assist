@@ -30,7 +30,11 @@ def _norm(text: str) -> str:
 
 def only_reads(entry: dict[str, Any]) -> bool:
     """The AI only READ state in this turn (no switching tool, no web search …)."""
+    if "reads_only" in entry:  # computed from ALL tool calls when the turn was recorded
+        return bool(entry["reads_only"])
     calls = entry.get("targets") or []
+    if len(calls) >= 5:  # only the first 5 calls are kept: the rest is unknown
+        return False
     return bool(calls) and all(any(str(c.get("tool", "")).endswith(t) for t in STATE_TOOLS) for c in calls)
 
 
@@ -49,9 +53,11 @@ def find_ai_answers(entries: list[dict[str, Any]], min_asked: int = MIN_ASKED) -
         entity = pick_entity(items)
         if entity is None:
             continue
+        # the value read in the SAME turn as the answer we keep (it may differ from today's state)
+        value = next((r.get("s") for r in (items[-1].get("read") or []) if r.get("e") == entity), None)
         out.append({
             "key": key, "texts": list(dict.fromkeys(i.get("text", "") for i in items))[:5], "count": len(items),
-            "lang": items[-1].get("lang"), "entity": entity, "said": items[-1].get("speech", ""),
+            "lang": items[-1].get("lang"), "entity": entity, "said": items[-1].get("speech", ""), "value": value,
             "ms": round(sum(i.get("ms") or 0 for i in items) / len(items)),
             "conversations": len({i.get("conversation") for i in items if i.get("conversation")}),
         })

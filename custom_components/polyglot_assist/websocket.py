@@ -1679,8 +1679,14 @@ async def ws_proposals_update(hass: HomeAssistant, connection, msg) -> None:
         return
     new = copy.deepcopy(old)
     intent_cfg = new["payload"]["intent"]
-    if "sentences" in msg:
-        intent_cfg["sentences"] = {lang: [clean_alternatives(s) for s in ss] for lang, ss in msg["sentences"].items() if ss}
+    if "sentences" in msg:  # languages not sent stay as they are
+        merged = dict(intent_cfg.get("sentences") or {})
+        for lang, ss in msg["sentences"].items():
+            if ss:
+                merged[lang] = [clean_alternatives(s) for s in ss]
+            else:
+                merged.pop(lang, None)
+        intent_cfg["sentences"] = merged
     if "answer_blocks" in msg:
         intent_cfg["answer_blocks"] = msg["answer_blocks"]
     if "answer_blocks" in msg:
@@ -1693,12 +1699,27 @@ async def ws_proposals_update(hass: HomeAssistant, connection, msg) -> None:
     slot_lists = {**matcher.static_slot_lists(), **runtime["lists"].async_get()}
     from .corpus import string_rules  # noqa: PLC0415
 
+    builtin_hit = _usable_builtin_matcher(hass, runtime)
+
     def _check():
+        from hassil.parse_expression import parse_sentence  # noqa: PLC0415
+
+        from .proposals import bounded_samples, parse_rules  # noqa: PLC0415
+
         notes, worst = [], "ok"
         for lang, ss in intent_cfg.get("sentences", {}).items():
             for s in ss:
                 r = check_proposal(new["payload"]["name"], s, [], lambda x, lang=lang: matcher.match_all(x, lang, slot_lists),
                                    slot_lists, string_rules(matcher.config), lang)
+                if r["status"] != "error":  # never take over a sentence HA's own commands would run
+                    try:
+                        hit = next((h for x in bounded_samples(parse_sentence(r["sentence"]), slot_lists,
+                                                               parse_rules(string_rules(matcher.config)), lang)
+                                    if (h := builtin_hit(x, lang))), None)
+                    except Exception:  # noqa: BLE001
+                        hit = "unparsable"
+                    if hit:
+                        r = {**r, "status": "error", "notes": [f"HA already handles “{s}” ({hit})"]}
                 if r["status"] == "error":
                     worst = "error"
                 elif r["status"] == "warn" and worst == "ok":
@@ -1722,3 +1743,21 @@ async def ws_proposals_update(hass: HomeAssistant, connection, msg) -> None:
         connection.send_error(msg["id"], "failed", str(err))
         return
     connection.send_result(msg["id"], {"proposal_id": added[0], "check": new["check"]})
+
+
+def _usable_builtin_matcher(hass: HomeAssistant, runtime: dict):
+    """text, lang → name of a HA built-in command Polyglot would RUN for it (or None)."""
+    builtin = runtime.get("builtin")
+    if builtin is None:
+        return lambda text, lang: None
+    lists = runtime["builtin_lists"].async_get() if runtime.get("builtin_lists") is not None else {}
+    from .builtin import is_blocked  # noqa: PLC0415
+
+    def hit(text: str, lang: str):
+        for candidate in [lang, *[x for x in builtin.languages if x != lang]]:
+            res = builtin.recognize(text, candidate, lists)
+            if res and not is_blocked(hass, res[0]):
+                return f"{res[0].intent.name}/{candidate}"
+        return None
+
+    return hit

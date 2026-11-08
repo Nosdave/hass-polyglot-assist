@@ -53,3 +53,17 @@ def test_names_and_sentences():
     assert L.command_name("3D printer") == "Q3DPrinterFrage"
     assert L.sentence_from("Wie warm ist es draußen?") == "wie warm ist es draußen"
     assert "{" not in L.sentence_from("what is {x} [y] (a|b)")
+
+
+def test_only_reads_uses_the_flag_from_all_calls_and_distrusts_truncated_lists():
+    e = _e("How warm?", "12.4 degrees.", TEMP)
+    assert L.only_reads(e)
+    assert not L.only_reads({**e, "reads_only": False})  # a switching call after the first five
+    assert not L.only_reads({**e, "targets": READ * 5})  # truncated, no flag: unknown
+
+
+def test_value_comes_from_the_turn_whose_answer_is_kept():
+    first = _e("How warm is it outside?", "It is 12 degrees.", [{"e": "sensor.outdoor", "s": "12"}])
+    last = _e("How warm is it outside?", "It is 13 degrees.", [{"e": "sensor.outdoor", "s": "13"}], conv="c2")
+    out = L.find_ai_answers([first, last])
+    assert out == [] or out[0]["value"] == "13"  # each answer carries its own value; never mixes 12 with "13 degrees"

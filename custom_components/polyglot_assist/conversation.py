@@ -240,6 +240,8 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                                      if isinstance(c["args"], dict) and isinstance(c["args"].get(k), (str, list))}}
                          for c in calls[:5]],
                 speech=speech[:200], switched=switched, read=read,
+                # from ALL calls (targets keeps only 5): did the AI only read state in this turn?
+                reads_only=bool(calls) and all(str(c["tool"]).endswith(("GetLiveContext", "HassGetState")) for c in calls),
                 ms=round((time.perf_counter() - t0) * 1000.0, 1),
                 error=result.response.response_type == intent.IntentResponseType.ERROR,
                 device=user_input.device_id, satellite=user_input.satellite_id,

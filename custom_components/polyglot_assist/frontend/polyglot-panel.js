@@ -203,6 +203,7 @@ class PolyglotAnswerEditor extends HTMLElement {
   get dirty() { return !!(this.st && this.st.dirty.size); }
 
   async load(name, langs) {
+    this._lastSatz = null;
     this.st = { name, langs, lang: langs[0], src: null, model: {}, mode: {}, dirty: new Set(), busy: false, msg: "", err: "", prev: {}, dialog: null, pick: null, draft: {} };
     this._paint();
     try {
@@ -221,6 +222,7 @@ class PolyglotAnswerEditor extends HTMLElement {
 
   /** Edit the answer of a NEW-command proposal (nothing is saved to the catalog; the panel re-checks it). */
   loadProposal(item, langs) {
+    this._lastSatz = null;
     const blocks = ((item.payload || {}).intent || {}).answer_blocks || {};
     const use = [...new Set([...Object.keys(blocks), ...langs])];
     this.st = { name: item.payload.name, langs: use, lang: Object.keys(blocks)[0] || use[0], model: {}, mode: {}, dirty: new Set(), busy: false, msg: "", err: "", prev: {}, dialog: null, pick: null, draft: {},
@@ -257,7 +259,7 @@ class PolyglotAnswerEditor extends HTMLElement {
     const missing = s.langs.filter((x) => x !== l && s.mode[x] === "blocks" && !(s.model[x] || []).length);
     this.shadowRoot.innerHTML = `<style>${AED_CSS}</style>${banner}
       <div class="row" style="justify-content:space-between"><div class="row" role="group" aria-label="${t("aed.languages")}">${tabs}</div>
-        ${mode !== "shared" ? `<span class="seg" role="group" aria-label="${t("aed.view")}"><button data-a="mode" data-m="blocks" aria-pressed="${mode === "blocks"}" ${ro ? "disabled" : ""}>${t("aed.blocks")}</button><button data-a="mode" data-m="template" aria-pressed="${mode === "template"}" ${ro ? "disabled" : ""}>${t("aed.template")}</button></span>` : ""}</div>
+        ${mode !== "shared" && !src.proposal ? `<span class="seg" role="group" aria-label="${t("aed.view")}"><button data-a="mode" data-m="blocks" aria-pressed="${mode === "blocks"}" ${ro ? "disabled" : ""}>${t("aed.blocks")}</button><button data-a="mode" data-m="template" aria-pressed="${mode === "template"}" ${ro ? "disabled" : ""}>${t("aed.template")}</button></span>` : ""}</div>
       ${s.draft[l] ? `<div class="banner"><span class="chip yaml">✨</span><div><b>${t("aed.draft_title")}</b><div class="hint">${t("aed.draft_hint")}</div></div><span></span></div>` : ""}
       ${body}
       ${mode === "blocks" && !ro && missing.length && (s.model[l] || []).length ? `<div class="row" style="margin-top:6px">${missing.map((x) => `<button class="g" data-a="translate" data-to="${esc(x)}" ${s.busy ? "disabled" : ""}>✨ ${t("aed.translate_to", { language: this.panel._ln(x) })}</button>`).join("")}</div>` : ""}
@@ -389,6 +391,9 @@ class PolyglotAnswerEditor extends HTMLElement {
     });
   }
 
+  /** Something outside the editor (the proposal's sentences) changed: show the save bar. */
+  markDirty() { if (!this.st) return; this.st.dirty.add(this.st.lang); this._partial(); }
+
   _touch(repaint = true) { this.st.dirty.add(this.st.lang); delete this.st.draft[this.st.lang]; if (repaint) this._paint(); else this._paintBar(); }
 
   _paintBar() { this._partial(); }  // only the save bar/dots — never the sentence the user types in
@@ -479,7 +484,8 @@ class PolyglotAnswerEditor extends HTMLElement {
     if (p.cond) { if (apply && p.v.e) { m[p.i].e = p.v.e; this._touch(false); } }
     else if (p.j != null) { if (apply && p.v.e) { Object.assign(this._parts(p.path)[p.j], p.v); this._touch(false); } }
     else {
-      const path = p.path != null ? p.path : (m.length && m[m.length - 1].t === "satz" ? String(m.length - 1) : null);
+      const valid = (x) => { try { return x != null && Array.isArray(this._parts(x)); } catch (e) { return false; } };
+      const path = valid(p.path) ? p.path : (m.length && m[m.length - 1].t === "satz" ? String(m.length - 1) : null);
       if (path == null && apply && p.v.e) { m.push({ t: "satz", p: [{ ...p.v }] }); this._touch(false); }
       else if (path != null) {
         let parts = this._parts(path);
@@ -550,7 +556,7 @@ class PolyglotAnswerEditor extends HTMLElement {
       else { s.err = t("aed.blocks_lost"); this._paint(); }
     }
     else if (a === "toblocks") { s.model[s.lang] = []; s.mode[s.lang] = "blocks"; this._touch(); this._preview(); }
-    else if (a === "insval") { const f = this._focusedSatz(); this._openPicker(f ? { path: f.dataset.path, marker: true } : { path: this._lastSatz != null ? this._lastSatz : null }); }
+    else if (a === "insval") { const f = this._focusedSatz(); const last = this._lastSatz != null && this.shadowRoot.querySelector(`.satz[data-path="${CSS_ESC(this._lastSatz)}"]`) ? this._lastSatz : null; this._openPicker(f ? { path: f.dataset.path, marker: true } : { path: last }); }
     else if (a === "addsatz") { m.push({ t: "satz", p: [] }); this._touch(); const els = this.shadowRoot.querySelectorAll(".satz"); if (els.length) els[els.length - 1].focus(); }
     else if (a === "addcond") { m.push({ t: "cond", e: "", cases: [{ op: ">", x: 0, p: [] }], other: [] }); this._touch(); this._openPicker({ cond: true, i: m.length - 1 }); }
     else if (a === "up" && i > 0) { [m[i - 1], m[i]] = [m[i], m[i - 1]]; this._touch(); this._preview(); }
@@ -1563,6 +1569,7 @@ class PolyglotAssistPanel extends HTMLElement {
   }
 
   _input(e) {
+    if (e.target.id === "psents" && this._aedP) { this._aedP.markDirty(); return; }
     if (e.target.dataset.tonevol !== undefined) { this._toneDraft().volume = Number(e.target.value); return; }
     if (e.target.dataset.uikey) { // keep what is typed: a re-render while another row saves must not lose it
       this.s.uiDraft = { ...(this.s.uiDraft || {}), [e.target.dataset.l + "|" + e.target.dataset.uikey]: e.target.value };
