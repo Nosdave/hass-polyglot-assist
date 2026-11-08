@@ -1400,7 +1400,18 @@ def _yaml_answer(handler) -> dict[str, Any]:
     variables: list[str] = []
     if isinstance(text, str):
         try:
-            variables = sorted(meta.find_undeclared_variables(jinja2.Environment().parse(text)))
+            ast = jinja2.Environment().parse(text)
+            # names the template sets itself ({% set x %}, loop variables) are not "unknown" —
+            # meta counts them when only some branches set them
+            from jinja2 import nodes  # noqa: PLC0415
+
+            own: set[str] = set()
+            for node in ast.find_all((nodes.Assign, nodes.For, nodes.AssignBlock)):
+                for n in [node.target, *node.target.find_all(nodes.Name)]:
+                    if isinstance(n, nodes.Name):
+                        own.add(n.name)
+            # `lang` is set from itself ({% set lang = lang | default('de') %}) — it stays an input
+            variables = sorted((set(meta.find_undeclared_variables(ast)) - own) | ({"lang"} & set(meta.find_undeclared_variables(ast))))
         except jinja2.TemplateSyntaxError:
             variables = []
     from .source import json_roundtrip_equal  # noqa: PLC0415
