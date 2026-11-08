@@ -206,8 +206,10 @@ class PolyglotAnswerEditor extends HTMLElement {
     this._lastSatz = null;
     this.st = { name, langs, lang: langs[0], src: null, model: {}, mode: {}, dirty: new Set(), busy: false, msg: "", err: "", prev: {}, dialog: null, pick: null, draft: {} };
     this._paint();
+    const mine = this.st;  // a later load() replaces this.st — its answer must not land here
     try {
       const src = await this.ws("answer/source", { name });
+      if (this.st !== mine) return;
       this.st.src = src;
       for (const l of langs) {
         const a = src.answers[l] || null;
@@ -216,7 +218,7 @@ class PolyglotAnswerEditor extends HTMLElement {
         else if (src.answers["*"]) { this.st.model[l] = src.answers["*"].template; this.st.mode[l] = "shared"; }
         else { this.st.model[l] = []; this.st.mode[l] = "blocks"; }
       }
-    } catch (e) { this.st.err = e.message || e.code || String(e); }
+    } catch (e) { if (this.st !== mine) return; this.st.err = e.message || e.code || String(e); }
     this._paint(); this._preview();
   }
 
@@ -535,7 +537,7 @@ class PolyglotAnswerEditor extends HTMLElement {
     if (this._wired) return; this._wired = true;
     this.shadowRoot.addEventListener("mousedown", (e) => { const b = e.target.closest("[data-a=insval]"); if (b && this._focusedSatz()) e.preventDefault(); });
     this.shadowRoot.addEventListener("click", (e) => this._click(e));
-    window.addEventListener("beforeunload", (e) => { if ((this._aed && this._aed.dirty) || (this._aedP && this._aedP.dirty)) { e.preventDefault(); e.returnValue = ""; } });
+    window.addEventListener("beforeunload", (e) => { if (this.dirty) { e.preventDefault(); e.returnValue = ""; } });
     this.shadowRoot.addEventListener("change", (e) => this._change(e));
     this.shadowRoot.addEventListener("input", (e) => { if (e.target.id === "pq") { clearTimeout(this._qt); const q = e.target.value; this._qt = setTimeout(() => this._search(q), 250); } if (e.target.dataset.a === "tpl") { this.st.model[this.st.lang] = e.target.value; this.st.dirty.add(this.st.lang); this._partial(); this._preview(); } if (e.target.dataset.a === "pickna" && this.st.pick) this.st.pick.v.na = e.target.value; });
     this.shadowRoot.addEventListener("keydown", (e) => this._key(e));
@@ -576,13 +578,15 @@ class PolyglotAnswerEditor extends HTMLElement {
     else if (a === "mode") {
       if (el.dataset.m === s.mode[s.lang]) return;
       if (el.dataset.m === "template") {
-        const convert = () => this.ws("answer/preview", { lang: s.lang, blocks: this._clean(m) });
+        const L = s.lang;  // the language the conversion was asked for (tabs may change meanwhile)
+        const convert = () => this.ws("answer/preview", { lang: L, blocks: this._clean(m) });
         let x = null;
         try { x = await convert(); } catch (err) {
           if (err.code === "too_fast") { await new Promise((r) => setTimeout(r, 350)); try { x = await convert(); } catch (e2) { x = null; } }
         }
         if (!x || typeof x.template !== "string") { s.err = t("aed.convert_failed"); this._paint(); return; }  // blocks stay as they are
-        s.model[s.lang] = x.template; s.mode[s.lang] = "template"; this._touch();
+        if (this.st !== s) return;
+        s.model[L] = x.template; s.mode[L] = "template"; s.dirty.add(L); this._paint(); this._preview();
       }
       else { s.err = t("aed.blocks_lost"); this._paint(); }
     }
@@ -627,7 +631,7 @@ class PolyglotAnswerEditor extends HTMLElement {
       catch (err) { s.busy = false; s.err = err.message || err.code; this._paint(); }
     }
     else if (a === "discard") {
-      if (s.src.proposal) { const item = (this.panel.s.proposals || []).find((x) => x.id === s.src.proposal); if (item) this.loadProposal(item, s.langs); }
+      if (s.src.proposal) { this.panel.s.psentDraft = null; const item = (this.panel.s.proposals || []).find((x) => x.id === s.src.proposal); if (item) this.loadProposal(item, s.langs); this.panel._render(); }
       else await this.load(s.name, s.langs);
       this.st.msg = t("aed.discarded"); this._paint();
     }
@@ -903,7 +907,7 @@ class PolyglotAssistPanel extends HTMLElement {
     return `<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">${t("proposals.edit_title", { name: item.payload.name })}</h2><button class="b" data-act="pclose">${t("buttons.close")}</button></div>
       <p class="hint">${t("proposals.edit_hint")}</p>
       <label class="hint">${t("editor.sentences")} <span class="lang">${esc(lang)}</span></label>
-      <textarea id="psents" data-l="${esc(lang)}" aria-label="${t("editor.sentences")}">${esc((sents[lang] || []).join("\n"))}</textarea>
+      <textarea id="psents" data-l="${esc(lang)}" aria-label="${t("editor.sentences")}">${esc(this.s.psentDraft && this.s.psentDraft.id === item.id ? this.s.psentDraft.text : (sents[lang] || []).join("\n"))}</textarea>
       <div id="aedp-slot"></div>${this._msg("pedit")}</div>`;
   }
 
@@ -911,7 +915,7 @@ class PolyglotAssistPanel extends HTMLElement {
     const ta = this.shadowRoot.getElementById("psents");
     const sentences = ta ? { [ta.dataset.l]: ta.value.split("\n").map((x) => x.trim()).filter(Boolean) } : undefined;
     const r = await this.ws("proposals/update", { proposal_id: id, ...(sentences ? { sentences } : {}), answer_blocks: blocks });
-    this.s.propEdit = r.proposal_id; this._aedPFor = null;
+    this.s.propEdit = r.proposal_id; this._aedPFor = null; this.s.psentDraft = null;
     await this._reload(["proposals"]);
     this._setMsg("pedit", this.t("proposals.edited", { status: this.t({ ok: "proposals.status_ok", warn: "proposals.status_warn", error: "proposals.status_error" }[r.check?.status] || "proposals.status_ok") }), r.check?.status === "error" ? "err" : "ok");
   }
@@ -1352,8 +1356,8 @@ class PolyglotAssistPanel extends HTMLElement {
     try {
       if (a === "menu") this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
       else if (["tab", "open", "close", "edel", "pedit", "pclose"].includes(a) && (this.s.selected || this.s.propEdit) && this._answerGuard()) { return; }
-      else if (a === "pedit") { this.s.propEdit = el.dataset.pid; this._aedPFor = null; this._render(); this.shadowRoot.querySelector("main").scrollIntoView(); }
-      else if (a === "pclose") { this.s.propEdit = null; this._render(); }
+      else if (a === "pedit") { this.s.propEdit = el.dataset.pid; this._aedPFor = null; this.s.psentDraft = null; this._render(); this.shadowRoot.querySelector("main").scrollIntoView(); }
+      else if (a === "pclose") { this.s.propEdit = null; this.s.psentDraft = null; this._render(); }
       else if (a === "tab") { this.s.view = el.dataset.v; history.replaceState(null, "", "#" + el.dataset.v); if (el.dataset.v === "monitor" || el.dataset.v === "start") await this._reload(["monitor", "overview"]); else this._render(); }
       else if (a === "pall") this.shadowRoot.querySelectorAll("[data-pid]").forEach((c) => { const it = this.s.proposals.find((i) => i.id === c.dataset.pid); c.checked = !c.disabled && it?.check?.status === "ok"; });
       else if (a === "paccept" || a === "preject") {
@@ -1606,7 +1610,7 @@ class PolyglotAssistPanel extends HTMLElement {
   }
 
   _input(e) {
-    if (e.target.id === "psents" && this._aedP) { this._aedP.markDirty(); return; }
+    if (e.target.id === "psents") { this.s.psentDraft = { id: this.s.propEdit, text: e.target.value }; if (this._aedP) this._aedP.markDirty(); return; }
     if (e.target.dataset.tonevol !== undefined) { this._toneDraft().volume = Number(e.target.value); return; }
     if (e.target.dataset.uikey) { // keep what is typed: a re-render while another row saves must not lose it
       this.s.uiDraft = { ...(this.s.uiDraft || {}), [e.target.dataset.l + "|" + e.target.dataset.uikey]: e.target.value };
