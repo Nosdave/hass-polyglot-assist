@@ -128,7 +128,8 @@ async def async_accept(
         # the proposal as it came (plain text, blocks only) is checked BEFORE the server compiles
         # its blocks into the template — the compiled speech is server-made, not proposal text
         reason = check_item(item)
-        item = _with_answer(hass, item)  # blocks → the template, compiled HERE with the real units
+        if not reason:  # compile only what passed the static check (malformed blocks never get here)
+            item = _with_answer(hass, item)  # blocks → the template, compiled HERE with the real units
         reason = reason or check_item_against(item, trial) or dynamic_reason(
             hass, item, sensitive, extra_names, registered
         )
