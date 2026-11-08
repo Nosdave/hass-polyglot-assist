@@ -11,8 +11,8 @@ A value is ``{"e": entity_id, "f": "unit"|"value"|"state"|"name", "r": 0..2,
 "na": "text if unavailable"}``.
 
 The Jinja template that Home Assistant renders is ALWAYS generated here, never
-written by an AI or a proposal: literal text is wrapped in ``{% raw %}`` (a
-"{{" typed by someone stays text), values use a fixed set of expressions,
+written by an AI or a proposal: literal text is a quoted string expression (a
+"{{" or "{% endraw %}" typed by someone stays text), values use a fixed set of expressions,
 units are spoken words per language ("W" → "Watt"), numbers use the decimal
 comma where the language does.
 """
@@ -157,10 +157,10 @@ def read_entities(blocks: list[dict[str, Any]]) -> list[str]:
 
 # ── compiling to the Jinja template HA renders ──────────────────────────────
 def _raw(text: str) -> str:
+    """Literal text as a quoted Jinja string expression — no text can ever end it or become code."""
     if not text:
         return ""
-    # "{% endraw %}" inside a text piece would end the raw block — split it
-    return "{% raw %}" + text.replace("{% endraw %}", "{% endraw %}{{ '{% endraw %}' }}{% raw %}") + "{% endraw %}"
+    return "{{ " + _lit(text) + " }}"
 
 
 def _lit(text: str) -> str:
@@ -208,8 +208,10 @@ def compile_answer(blocks: list[dict[str, Any]], lang: str, unit_of: dict[str, s
         branches = []
         for i, c in enumerate(b["cases"]):
             kw = "if" if i == 0 else "elif"
-            if c["op"] == "=":
-                cond = f"states({e}) == {_lit(str(c['x']))}"
+            if c["op"] == "=" and isinstance(c["x"], str):
+                cond = f"states({e}) == {_lit(c['x'])}"
+            elif c["op"] == "=":  # numbers compare as numbers ("20" == "20.0")
+                cond = f"_c is not none and _c == {c['x']!r}"
             else:
                 cond = f"_c is not none and _c {c['op']} {c['x']!r}"
             branches.append(f"{{% {kw} {cond} %}}{_parts(c['p'], lang, unit_of)}")

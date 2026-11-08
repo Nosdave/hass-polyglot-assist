@@ -49,9 +49,9 @@ def test_formats_state_name_and_unavailable():
 
 
 def test_text_is_never_template_code():
-    blocks = [{"t": "satz", "p": ["{{ states('lock.door') }} {% for x in range(9) %}x{% endfor %} {% endraw %} {# c #}"]}]
-    out = render(A.compile_answer(blocks, "de"))
-    assert out == "{{ states('lock.door') }} {% for x in range(9) %}x{% endfor %} {% endraw %} {# c #}"
+    evil = "{{ states('lock.door') }} {% for x in range(9) %}x{% endfor %} {% endraw %}{% endraw%}{%- endraw -%}{{ 7*7 }} {# c #} \" ' \\ }}"
+    out = render(A.compile_answer([{"t": "satz", "p": [evil]}], "de"))
+    assert out == evil
     assert render(A.compile_answer([{"t": "satz", "p": [V("sensor.text", "state")]}], "de")) == "{{ 7*7 }}"  # state text stays text
 
 
@@ -67,6 +67,8 @@ def test_conditions_pick_the_right_case():
     STATES["sensor.grid"] = "735"
     eq = {"t": "cond", "e": "light.couch", "cases": [{"op": "=", "x": "on", "p": ["Licht an."]}], "other": ["Licht aus."]}
     assert render(A.compile_answer([eq], "de")) == "Licht an."
+    num = {"t": "cond", "e": "sensor.soc", "cases": [{"op": "=", "x": 8.0, "p": ["acht"]}], "other": ["anders"]}
+    assert render(A.compile_answer([num], "de")) == "acht"  # "8" == 8.0
 
 
 @pytest.mark.parametrize("bad", [

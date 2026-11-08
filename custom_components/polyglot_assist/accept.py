@@ -125,8 +125,11 @@ async def async_accept(
     trial = copy.deepcopy(config)
     usable = []
     for item in items:
+        # the proposal as it came (plain text, blocks only) is checked BEFORE the server compiles
+        # its blocks into the template — the compiled speech is server-made, not proposal text
+        reason = check_item(item)
         item = _with_answer(hass, item)  # blocks → the template, compiled HERE with the real units
-        reason = check_item(item) or check_item_against(item, trial) or dynamic_reason(
+        reason = reason or check_item_against(item, trial) or dynamic_reason(
             hass, item, sensitive, extra_names, registered
         )
         if not reason and item.get("check", {}).get("status") == "error":
