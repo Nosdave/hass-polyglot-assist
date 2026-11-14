@@ -106,9 +106,13 @@ class PolyglotToneTTS(TextToSpeechEntity):
 
         self._unbind()
         if self._inner_id:
-            self._unsub_state = async_track_state_change_event(
-                self.hass, [self._inner_id], lambda _event: self.async_write_ha_state()
-            )
+            # A plain lambda is run in the executor (not a @callback) -> async_write_ha_state from a
+            # worker thread (HA 2026.x raises "calls async_write_ha_state from a thread"). Keep it in the loop.
+            @callback
+            def _inner_changed(_event) -> None:
+                self.async_write_ha_state()
+
+            self._unsub_state = async_track_state_change_event(self.hass, [self._inner_id], _inner_changed)
 
     @property
     def available(self) -> bool:
