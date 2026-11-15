@@ -47,6 +47,7 @@ from .const import (
     RESPONSE_TEXT,
     CONF_SOURCE,
     CONF_TRANSLATION_AI_TASK,
+    CONF_CHECK_AI_TASK,
     DEFAULT_INTENTS_FILE,
     DOMAIN,
     SOURCE_CATALOG,
@@ -318,36 +319,37 @@ class PolyglotAssistOptionsFlow(OptionsFlow):
     async def async_step_translation(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        """Two separate AI tasks: one writes proposals, one is checked for languages."""
         errors: dict[str, str] = {}
+        keys = (CONF_TRANSLATION_AI_TASK, CONF_CHECK_AI_TASK)
         if user_input is not None:
-            chosen = user_input.get(CONF_TRANSLATION_AI_TASK)
-            if chosen and ai_task_has_tools(self.hass, chosen):
-                errors[CONF_TRANSLATION_AI_TASK] = "ai_task_has_tools"
-            else:
+            for key in keys:
+                chosen = user_input.get(key)
+                if chosen and ai_task_has_tools(self.hass, chosen):
+                    errors[key] = "ai_task_has_tools"
+            if not errors:
                 new_options = {**self._entry.options}
-                if chosen:
-                    new_options[CONF_TRANSLATION_AI_TASK] = chosen
-                else:
-                    new_options.pop(CONF_TRANSLATION_AI_TASK, None)
+                for key in keys:
+                    if user_input.get(key):
+                        new_options[key] = user_input[key]
+                    else:
+                        new_options.pop(key, None)
                 self.hass.config_entries.async_update_entry(self._entry, options=new_options)
                 return self.async_create_entry(title="", data=new_options)
 
-        current = self._entry.options.get(CONF_TRANSLATION_AI_TASK)
-        schema = vol.Schema(
-            {
-                vol.Optional(
-                    CONF_TRANSLATION_AI_TASK,
-                    description={"suggested_value": current} if current else None,
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        filter=selector.EntityFilterSelectorConfig(
-                            domain="ai_task",
-                            supported_features=["ai_task.AITaskEntityFeature.GENERATE_DATA"],
-                        )
-                    )
-                ),
-            }
+        def _field(key: str):
+            current = self._entry.options.get(key)
+            return vol.Optional(key, description={"suggested_value": current} if current else None)
+
+        task_selector = selector.EntitySelector(
+            selector.EntitySelectorConfig(
+                filter=selector.EntityFilterSelectorConfig(
+                    domain="ai_task",
+                    supported_features=["ai_task.AITaskEntityFeature.GENERATE_DATA"],
+                )
+            )
         )
+        schema = vol.Schema({_field(key): task_selector for key in keys})
         return self.async_show_form(step_id="translation", data_schema=schema, errors=errors)
 
     # ─────────────────────────────────────────────────────────────────

@@ -98,6 +98,66 @@ def _covers(supported: list[str] | None, lang: str) -> bool | None:
     return any(_base(s) == lang for s in supported)
 
 
+MODEL_KEYS = ("model", "chat_model", "model_id")
+
+
+def _model_of(data: Any) -> str | None:
+    if isinstance(data, dict):
+        for key in MODEL_KEYS:
+            if isinstance(data.get(key), str) and data[key]:
+                return data[key]
+    return None
+
+
+def answering_agent(hass: HomeAssistant, pipeline_agent: str | None) -> dict[str, Any]:
+    """Who really answers on a pipeline: its agent — or, if that is Polyglot, Polyglot's fallback."""
+    from .const import DOMAIN  # noqa: PLC0415
+
+    out: dict[str, Any] = {"pipeline_agent": pipeline_agent, "agent": pipeline_agent, "via_polyglot": False}
+    if pipeline_agent and is_polyglot_agent(hass, pipeline_agent):
+        ent = er.async_get(hass).async_get(pipeline_agent)
+        runtime = hass.data.get(DOMAIN, {}).get(ent.config_entry_id) if ent else None
+        out.update(agent=(runtime or {}).get("fallback_agent"), via_polyglot=True)
+    return out
+
+
+def default_check_ai_task(hass: HomeAssistant, agent_id: str | None) -> str | None:
+    """The tool-less AI task of the agent's own integration entry, using the agent's model.
+
+    Same entry (and, where the integration has per-subentry models, the same model) means
+    the check talks to the model that answers. Nothing suitable → None (never guess).
+    """
+    if not agent_id:
+        return None
+    reg = er.async_get(hass)
+    agent = reg.async_get(agent_id)
+    if agent is None or agent.config_entry_id is None:
+        return None
+    entry = hass.config_entries.async_get_entry(agent.config_entry_id)
+    subs = getattr(entry, "subentries", None) or {}
+
+    def model(ent: er.RegistryEntry) -> str | None:
+        sub = subs.get(ent.config_subentry_id) if ent.config_subentry_id else None
+        return _model_of(dict(sub.data)) if sub is not None else None
+
+    wanted = model(agent)
+    candidates = sorted(
+        e.entity_id for e in er.async_entries_for_config_entry(reg, agent.config_entry_id)
+        if e.domain == "ai_task" and not e.disabled_by and hass.states.get(e.entity_id) is not None
+        and not ai_task_has_tools(hass, e.entity_id) and (wanted is None or model(e) == wanted)
+    )
+    return candidates[0] if candidates else None
+
+
+def check_ai_task(hass: HomeAssistant, chosen: str | None, pipeline_agent: str | None) -> dict[str, Any]:
+    """Which AI task the language check asks, and why (chosen / derived from the answering agent)."""
+    who = answering_agent(hass, pipeline_agent)
+    if chosen:
+        return {**who, "ai_task": chosen, "ai_task_from": "chosen"}
+    derived = default_check_ai_task(hass, who.get("agent"))
+    return {**who, "ai_task": derived, "ai_task_from": "agent" if derived else None}
+
+
 async def _ai_round_trip(hass: HomeAssistant, ai_task: str, lang: str, context: Context | None) -> dict[str, Any]:
     """Translate a fixed sentence into ``lang`` and back — a hint, not a proof."""
     async def ask(instructions: str) -> str:
@@ -126,12 +186,19 @@ async def _ai_round_trip(hass: HomeAssistant, ai_task: str, lang: str, context: 
 
 async def async_language_check(
     hass: HomeAssistant, *, pipeline_id: str | None, languages: list[str], polyglot: dict[str, Any],
-    ai_task: str | None, context: Context | None = None,
+    ai_task: str | None | bool, context: Context | None = None,
 ) -> dict[str, Any]:
-    """Per language: speech recognition, AI, Polyglot commands, speech output."""
+    """Per language: speech recognition, AI, Polyglot commands, speech output.
+
+    ``ai_task``: the chosen check AI task, None = derive it from the agent that answers on
+    this pipeline, False = do not ask any AI.
+    """
     from homeassistant.components.assist_pipeline.pipeline import async_get_pipeline  # noqa: PLC0415
 
     pipeline = async_get_pipeline(hass, pipeline_id)
+    who = check_ai_task(hass, ai_task, pipeline.conversation_engine) if ai_task is not False else answering_agent(
+        hass, pipeline.conversation_engine)
+    ai_task = who.get("ai_task") if ai_task is not False else None
     stt_langs = _stt_languages(hass, pipeline.stt_engine)
     tts_langs = _tts_languages(hass, pipeline.tts_engine)
     langs = [lang for lang in dict.fromkeys(_base(x) for x in languages) if LANG_RE.match(lang)][:12]
@@ -165,7 +232,10 @@ async def async_language_check(
         "pipeline": {"id": pipeline.id, "name": pipeline.name, "language": pipeline.language,
                      "stt_engine": pipeline.stt_engine, "tts_engine": pipeline.tts_engine},
         "ai_task": ai_task if use_ai else None,
-        "ai_note": None if use_ai else "choose an AI task without tools to check the AI",
+        "ai_task_from": who.get("ai_task_from") if use_ai else None,
+        "answering_agent": who.get("agent"),
+        "via_polyglot": who.get("via_polyglot", False),
+        "ai_note": None if use_ai else "no AI task without tools for the answering assistant — choose one for the language check",
         "languages": rows,
     }
 

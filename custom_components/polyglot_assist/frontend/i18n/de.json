@@ -52,7 +52,8 @@
     "voicelearn": "Du kannst Vorschläge per Sprache besprechen: „Was hast du gelernt?“, „Erzähl mir mehr zum ersten“, „Übernimm ihn“ – Polyglot fragt nach und übernimmt erst nach deinem „Ja“. Per Sprache gehen nur neue Sätze und Namen für harmlose Befehle; alles Sicherheitsrelevante, neue Befehle und Schutzstufen bleiben im Panel. Höchstens 5 pro Stunde, nur auf den gewählten Geräten, und mit „Mach das rückgängig“ innerhalb von 24 Stunden zurücknehmbar.",
     "tonedesign": "So klingt die Quittung nach einem erfolgreichen Befehl. Klassisch ist der bisherige Ton. Gestalten: Anzahl, Verlauf, Art, Tonhöhe, Klang. Oder ein eigener Ton per Datei oder Aufnahme.",
     "monreview": "Sprachunabhängig: Die KI liest Gespräche, in denen du kurz nach einer Aktion nochmal etwas gesagt hast, und erkennt Korrekturen wie „Das stimmt nicht, das Bett ist auch aus“. Vorschläge daraus sind immer markiert und gehen nur im Panel – nie per Sprache.",
-    "answered": "Was gesprochen wird, wenn der Befehl erkannt wurde – je Sprache, aus Text und aktuellen Werten. Kommt die Antwort noch aus einer YAML-Datei, übernimmt Polyglot sie zum Bearbeiten."
+    "answered": "Was gesprochen wird, wenn der Befehl erkannt wurde – je Sprache, aus Text und aktuellen Werten. Kommt die Antwort noch aus einer YAML-Datei, übernimmt Polyglot sie zum Bearbeiten.",
+    "checkaitask": "Die Sprachprüfung fragt diese KI-Aufgabe, ob sie eine Sprache kann. Das soll die KI sein, die im Sprachassistenten antwortet – nicht die KI für Vorschläge. Leer: die KI-Aufgabe ohne Werkzeuge aus derselben Integration (und mit demselben Modell) wie dein KI-Assistent für alles Übrige."
   },
   "kinds": {
     "new": "neu",
@@ -285,7 +286,7 @@
     "ai_languages": "Deine KI nennt: {languages}. Für neue Sprachen schlägt „Übersetzen“ im Befehl Sätze vor.",
     "confirmation": "Bestätigung bei Schaltbefehlen",
     "confirmation_label": "Bestätigung",
-    "ai_task": "KI für Vorschläge",
+    "ai_task": "KI für Vorschläge und Übersetzungen",
     "ai_task_label": "KI-Aufgabe",
     "ai_task_none": "– keine –",
     "builtin": "Grundbefehle von Home Assistant in allen Sprachen",
@@ -297,7 +298,11 @@
     "fallback_hint": "{agent} · ändern in Einstellungen → Geräte & Dienste → Polyglot Assist",
     "backup": "Sicherung",
     "backup_catalog": "Deine Befehle liegen in Home Assistant und werden mit seinen Backups gesichert.",
-    "backup_file": "Deine Befehle liegen in der Datei intents.yaml. Für das Bearbeiten im Panel auf „Katalog“ umstellen (die Datei bleibt als Sicherung) – in Einstellungen → Geräte & Dienste → Polyglot Assist → Konfigurieren → Quelle."
+    "backup_file": "Deine Befehle liegen in der Datei intents.yaml. Für das Bearbeiten im Panel auf „Katalog“ umstellen (die Datei bleibt als Sicherung) – in Einstellungen → Geräte & Dienste → Polyglot Assist → Konfigurieren → Quelle.",
+    "check_ai_task": "KI für die Sprachprüfung (die antwortende KI)",
+    "check_ai_task_auto": "– automatisch: {name} –",
+    "check_ai_task_auto_none": "– automatisch (keine gefunden) –",
+    "check_ai_task_hint_none": "Zu deinem KI-Assistenten für alles Übrige gibt es keine KI-Aufgabe ohne Werkzeuge. Wähle eine, die dasselbe Modell nutzt – sonst prüft die Sprachprüfung die falsche KI."
   },
   "messages": {
     "saved": "Gespeichert.",
@@ -370,7 +375,7 @@
     "stop_waiting": "Nicht mehr warten",
     "stopped": "Nicht mehr gewartet. Die Anfrage an die KI läuft im Hintergrund noch bis zu ihrer Zeitgrenze.",
     "done": "Geprüft. Neue Sprachen sind gestrichelt und noch nicht ausgewählt.",
-    "done_no_ai": "Geprüft – ohne KI-Test (keine KI für Vorschläge gewählt).",
+    "done_no_ai": "Geprüft – ohne KI-Test (keine KI für die Sprachprüfung gefunden).",
     "min_one": "Mindestens eine Sprache auswählen.",
     "applying": "Wird übernommen … Polyglot lädt neu.",
     "applied": "Übernommen. Polyglot hört jetzt auf: {languages}",
@@ -389,7 +394,10 @@
     "yes": "ja",
     "no": "nein",
     "stt_skipped": "Nicht getestet (höchstens 8 Sprachen je Durchlauf): {languages}.",
-    "apply_slow": "Gespeichert. Polyglot lädt noch neu – die Anzeige aktualisiert sich gleich."
+    "apply_slow": "Gespeichert. Polyglot lädt noch neu – die Anzeige aktualisiert sich gleich.",
+    "ai_checked": "KI-Test mit {ai_task} ({from}) · Antwortet auf der Pipeline: {agent}",
+    "ai_from_chosen": "gewählt",
+    "ai_from_agent": "automatisch, gleiches Modell wie der Assistent"
   },
   "uitexts": {
     "title": "Oberflächentexte",

@@ -73,6 +73,12 @@ language needs is the rest of the chain:
 The panel's **language check** shows this per language (STT, AI round trip,
 Polyglot, TTS) and an STT test speaks a sentence and listens to it again.
 
+Two AI tasks can be chosen separately: one for **proposals and translations**
+(a capable model helps), and one for the **language check**, which should be
+the model that actually answers on the pipeline. Left empty, the check uses
+the tool-less AI task of the fallback agent's own integration entry with the
+same model, and says which agent answers and which AI task it asked.
+
 A few small built-in word lists ship for German, English and French today:
 - Polyglot's own short answers; other languages get English.
 - The spoken learning commands ("What have you learned?").
