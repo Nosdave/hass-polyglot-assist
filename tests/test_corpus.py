@@ -413,3 +413,9 @@ def test_codex_findings_pure_parts():
     # all commands switched off is a valid (empty) document
     off = {"intents": {"A": {"safety": "disabled", "sentences": {"de": ["a"]}}}}
     assert corpus.bucket_by_language(off) == {}
+
+
+def test_bucket_by_language_skips_invalid_language_code():
+    """An invalid language key must be skipped (validate() reports it), not crash the matcher."""
+    out = corpus.bucket_by_language({"intents": {"X": {"sentences": {"de": ["mach x"], "Not A Lang": ["y"]}}}})
+    assert list(out) == ["de"]
