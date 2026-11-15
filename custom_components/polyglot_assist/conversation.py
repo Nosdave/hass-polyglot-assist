@@ -221,18 +221,13 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         before = len(chat_log.content)
         # same conversation as ours, so the fallback continues THIS ChatLog
         user_input = dataclasses.replace(original_input, conversation_id=chat_log.conversation_id)
-        # the fallback may claim an action it never did — then ONE second pass with a check note (nudge.py)
-        result, nudged = await _nudge.async_answer(
+        # inside a running conversation the fallback gets a short hint against claimed actions (nudge.py)
+        result, hinted = await _nudge.async_answer(
             chat_log, before, user_input.text,
             lambda model_text: self._proxy_to_fallback(user_input, t_miss_ms, chat_log, matcher.languages,
                                                        model_text=model_text),
             enabled=bool(self._entry.options.get(CONF_TOOL_NUDGE, True)),
-            is_error=lambda r: r.response.response_type == intent.IntentResponseType.ERROR,
-            speech_of=lambda r: _speech(r.response),
         )
-        if nudged is not None:
-            _LOGGER.debug("Polyglot: text-only fallback answer redone with a check note → %s tool call(s)",
-                          nudged["tools"])
         if monitor is not None:
             calls = [
                 {"tool": tc.tool_name, "args": tc.tool_args}
@@ -259,7 +254,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                 error=result.response.response_type == intent.IntentResponseType.ERROR,
                 device=user_input.device_id, satellite=user_input.satellite_id,
                 conversation=chat_log.conversation_id,
-                **({"nudged": True, "nudge_tools": nudged["tools"], "nudge_first": nudged["first"]} if nudged else {}),
+                **({"hinted": True, "hinted_tools": bool(calls)} if hinted else {}),
             )
         return result
 
@@ -461,7 +456,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
     ) -> ConversationResult:
         """Forward the ConversationInput to the configured fallback.
 
-        ``model_text`` replaces the text the fallback gets (the second pass of
+        ``model_text`` replaces the text the fallback gets (the hint of
         nudge.py); the language hint and the events still use what was said.
 
         Unmodified, unless the opt-in language hint is enabled: then a short

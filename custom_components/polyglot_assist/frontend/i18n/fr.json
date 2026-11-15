@@ -53,7 +53,7 @@
     "tonedesign": "Comment une commande réussie est confirmée. Classique est le son utilisé jusqu'ici. Créer : nombre, direction, style, hauteur, timbre. Ou ton propre son, par fichier ou enregistrement.",
     "monreview": "Indépendant de la langue : l'IA lit les conversations où tu as reparlé juste après une action et reconnaît des corrections comme « Ce n'est pas juste, le lit s'est éteint aussi ». Les suggestions qui en résultent sont toujours signalées et ne s'acceptent que dans le panneau – jamais à la voix.",
     "answered": "Ce qui est dit quand la commande est reconnue – par langue, à partir de texte et de valeurs actuelles. Si la réponse vient encore d'un fichier YAML, Polyglot la reprend pour la modifier.",
-    "nudge": "Certains modèles prennent une demande répétée ou corrigée (« j'ai dit blanc ») pour déjà faite et annoncent un succès sans rien actionner. Si l'assistant IA répond sans aucun outil dans une conversation en cours, il reçoit la demande une seconde fois avec une courte note de vérification. Seule sa deuxième réponse compte et reste dans l'historique. Dans ces cas, la réponse prend en général 1 à 3 secondes de plus."
+    "nudge": "Certains modèles prennent une demande répétée ou corrigée (« j'ai dit blanc ») pour déjà faite et annoncent un succès sans rien actionner. Si la conversation contient déjà des phrases, l'assistant IA reçoit avec ta phrase une courte note : les demandes d'action passent toujours par un outil, les questions et la conversation n'en ont pas besoin. L'historique ne garde que ta propre phrase. Coûte environ 40 jetons, sans délai perceptible."
   },
   "kinds": {
     "new": "ajout",
@@ -299,9 +299,9 @@
     "backup": "Sauvegarde",
     "backup_catalog": "Tes commandes sont enregistrées dans Home Assistant et incluses dans ses sauvegardes.",
     "backup_file": "Tes commandes sont dans le fichier intents.yaml. Pour les modifier dans le panneau, passe à « Catalogue » (le fichier est conservé comme sauvegarde) – dans Paramètres → Appareils et services → Polyglot Assist → Configurer → Source.",
-    "nudge": "Vérifier les actions annoncées",
-    "nudge_label": "Vérifier les actions annoncées",
-    "nudge_hint": "Si ton assistant IA ne répond que par des mots dans une conversation en cours, Polyglot redemande une fois."
+    "nudge": "Indication contre les faux succès",
+    "nudge_label": "Indication contre les faux succès",
+    "nudge_hint": "Dans une conversation en cours, Polyglot rappelle à l'IA d'exécuter les demandes d'action avec un outil (sans perte de temps)."
   },
   "messages": {
     "saved": "Enregistré.",

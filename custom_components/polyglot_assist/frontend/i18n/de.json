@@ -53,7 +53,7 @@
     "tonedesign": "So klingt die Quittung nach einem erfolgreichen Befehl. Klassisch ist der bisherige Ton. Gestalten: Anzahl, Verlauf, Art, Tonhöhe, Klang. Oder ein eigener Ton per Datei oder Aufnahme.",
     "monreview": "Sprachunabhängig: Die KI liest Gespräche, in denen du kurz nach einer Aktion nochmal etwas gesagt hast, und erkennt Korrekturen wie „Das stimmt nicht, das Bett ist auch aus“. Vorschläge daraus sind immer markiert und gehen nur im Panel – nie per Sprache.",
     "answered": "Was gesprochen wird, wenn der Befehl erkannt wurde – je Sprache, aus Text und aktuellen Werten. Kommt die Antwort noch aus einer YAML-Datei, übernimmt Polyglot sie zum Bearbeiten.",
-    "nudge": "Manche Modelle halten eine wiederholte oder korrigierte Bitte („ich sagte Weiß“) für schon erledigt und melden Erfolg, ohne etwas zu schalten. Antwortet der KI-Assistent in einem laufenden Gespräch ganz ohne Werkzeug, bekommt er die Bitte einmal mit einem kurzen Prüfhinweis noch einmal. Nur seine zweite Antwort zählt und bleibt im Verlauf. In diesen Fällen dauert die Antwort dadurch meist 1–3 Sekunden länger."
+    "nudge": "Manche Modelle halten eine wiederholte oder korrigierte Bitte („ich sagte Weiß“) für schon erledigt und melden Erfolg, ohne etwas zu schalten. Hat das Gespräch schon frühere Sätze, bekommt der KI-Assistent zu deinem Satz einen kurzen Hinweis: Schaltwünsche immer mit einem Werkzeug ausführen, Fragen und Smalltalk brauchen keins. Im Verlauf bleibt nur dein eigener Satz. Kostet etwa 40 Token, keine spürbare Zeit."
   },
   "kinds": {
     "new": "neu",
@@ -299,9 +299,9 @@
     "backup": "Sicherung",
     "backup_catalog": "Deine Befehle liegen in Home Assistant und werden mit seinen Backups gesichert.",
     "backup_file": "Deine Befehle liegen in der Datei intents.yaml. Für das Bearbeiten im Panel auf „Katalog“ umstellen (die Datei bleibt als Sicherung) – in Einstellungen → Geräte & Dienste → Polyglot Assist → Konfigurieren → Quelle.",
-    "nudge": "Behauptete Aktionen prüfen",
-    "nudge_label": "Behauptete Aktionen prüfen",
-    "nudge_hint": "Antwortet dein KI-Assistent in einem laufenden Gespräch nur mit Worten, fragt Polyglot einmal nach."
+    "nudge": "Hinweis gegen Schein-Erfolge",
+    "nudge_label": "Hinweis gegen Schein-Erfolge",
+    "nudge_hint": "In laufenden Gesprächen erinnert Polyglot die KI, Schaltwünsche mit einem Werkzeug auszuführen (kein Zeitverlust)."
   },
   "messages": {
     "saved": "Gespeichert.",
