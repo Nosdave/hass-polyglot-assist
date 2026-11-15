@@ -663,13 +663,15 @@ async def async_propose_action_command(
             f"- Write templates for every language: {names}. Cover how people really say it (the runs show it), "
             "including the article/preposition before the room as optional or alternative words.",
             "- The templates must not overlap with the existing commands (they are shown with all their sentences).",
-            "- speech: one short confirmation per language, plain text, without the room and without placeholders.",
+            "- speech: per language two short plain texts: \"ok\" = confirmation (without the room), "
+            "\"none\" = honest answer when the room has no such devices, with the word ROOM where the room name goes "
+            "(e.g. \"In ROOM gibt es keine Rollläden.\"). No placeholders, no quotes.",
             "- name: CamelCase, new, describing the command.",
             "If the runs do not really show one repeated room command, or the existing commands already cover it, "
             'answer {"none": "<why>"}.',
             "Answer with ONE JSON object only:",
             '{"name": "...", "list": "<one of the room lists>", "description": "...", '
-            '"sentences": {"<lang>": ["...", "..."]}, "speech": {"<lang>": "..."}}',
+            '"sentences": {"<lang>": ["...", "..."]}, "speech": {"<lang>": {"ok": "...", "none": "... ROOM ..."}}}',
             _FENCE,
             "<data>",
             *(["what the command runs:", *about] if about else []),

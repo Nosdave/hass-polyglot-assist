@@ -679,6 +679,47 @@ def pattern_action(pattern: dict[str, Any]) -> list[dict[str, Any]]:
     raise QueueError("unknown pattern")
 
 
+# answers when the AI gave none for a language (other languages: English)
+PATTERN_DEFAULT_ANSWERS = {
+    "de": {"ok": "Erledigt.", "none": "In ROOM gibt es dafür keine Geräte."},
+    "en": {"ok": "Done.", "none": "There are no such devices in ROOM."},
+    "fr": {"ok": "C'est fait.", "none": "Il n'y a pas d'appareils de ce type dans ROOM."},
+}
+_ANSWER_BAD = set('{}%#<>"\\')
+
+
+def _plain(text: Any) -> bool:
+    return isinstance(text, str) and bool(text.strip()) and len(text) <= 120 and not (set(text) & _ANSWER_BAD)
+
+
+def pattern_speech(pattern: dict[str, Any], languages: list[str]) -> dict[str, str]:
+    """The spoken answer per language, BUILT here (the AI only gave plain texts).
+
+    Room commands with a device map answer honestly: the "none" text when the room said
+    has no such devices (the action does nothing then). The plain texts contain none of
+    {}%#<>"\\, so they cannot change the template they are put into.
+    """
+    answers = pattern.get("answers") or {}
+    if not isinstance(answers, dict):
+        raise QueueError("malformed pattern")
+    slot = pattern["slot"]
+    out: dict[str, str] = {}
+    for lang in languages:
+        given = answers.get(lang) or {}
+        if not isinstance(given, dict):
+            raise QueueError("malformed pattern")
+        default = PATTERN_DEFAULT_ANSWERS.get(lang.split("-")[0], PATTERN_DEFAULT_ANSWERS["en"])
+        ok = given.get("ok") if _plain(given.get("ok")) else default["ok"]
+        if pattern.get("id") not in PATTERN_SERVICES:
+            out[lang] = ok
+            continue
+        none = given.get("none") if _plain(given.get("none")) and given["none"].count("ROOM") == 1 else default["none"]
+        rooms = ", ".join(json.dumps(k, ensure_ascii=False) for k in sorted(pattern["map"]))
+        out[lang] = ("{% if " + slot + " in [" + rooms + "] %}" + ok + "{% else %}"
+                     + none.replace("ROOM", "{{ " + slot + " }}") + "{% endif %}")
+    return out
+
+
 def pattern_entities(pattern: dict[str, Any]) -> list[str]:
     """Every entity a learned room command can switch (for the per-entity checks)."""
     if pattern.get("id") == "script_room":
@@ -701,7 +742,7 @@ def check_pattern(pattern: Any, action: Any) -> str | None:
         domain = PATTERN_SERVICES[kind][1]
         entities = []
         for key, value in pattern["map"].items():
-            if not isinstance(key, str) or not key.strip() or len(key) > 60 or any(ch in key for ch in "{}%#<>"):
+            if not isinstance(key, str) or not key.strip() or len(key) > 60 or set(key) & _ANSWER_BAD:
                 return "invalid room value"
             if not isinstance(value, list) or not value or len(set(value)) != len(value):
                 return "every room needs its devices"
@@ -760,10 +801,16 @@ def check_item(item: dict[str, Any]) -> str | None:
                 return "invalid language code"
     if item.get("op") == "add_intent":
         intent = (item.get("payload") or {}).get("intent") or {}
-        if "pattern" in item:  # learned room command: the action is the one built from the pattern
+        if "pattern" in item:  # learned room command: action AND answer are the ones built from the pattern
             reason = check_pattern(item["pattern"], intent.get("action"))
             if reason:
                 return reason
+            try:
+                built = pattern_speech(item["pattern"], sorted((intent.get("sentences") or {}).keys()))
+            except (QueueError, KeyError, TypeError, AttributeError):
+                return "malformed pattern"
+            if (intent.get("speech") or {}) != built:
+                return "the answer differs from the one built for this pattern"
         elif "action" in intent:
             reason = check_action_safe(intent["action"])
             if reason:
@@ -771,7 +818,8 @@ def check_item(item: dict[str, Any]) -> str | None:
         if intent.get("safety") not in (None, "normal", "sensitive", "disabled"):
             return "invalid safety level"
         # a proposal never carries Jinja: plain text, or answer blocks the server compiles itself
-        for text in (intent.get("speech") or {}).values():
+        # (a learned room command's answer is server-built and was compared above)
+        for text in ([] if "pattern" in item else (intent.get("speech") or {}).values()):
             if not isinstance(text, str) or len(text) > 200 or any(ch in text for ch in "{}%#"):
                 return "answers in proposals must be short plain text (values only as answer blocks)"
         if intent.get("owned"):

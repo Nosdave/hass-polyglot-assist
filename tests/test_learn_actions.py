@@ -104,13 +104,15 @@ def test_reply_parsing_keeps_only_the_chosen_room_list():
         "name": "RolllaedenRaumAuf", "list": "raum", "description": "Rollläden eines Raums öffnen",
         "sentences": {"de": ["(rollladen|rollläden) [im|in der] {raum} (auf|hoch)", "mach {raum} {licht}", "{name} auf"],
                       "en": ["open the shutters in [the] {raum}"], "xx": ["{raum} ouvrir"]},
-        "speech": {"de": "Rollläden fahren hoch", "en": "Opening {raum}"},
+        "speech": {"de": {"ok": "Rollläden fahren hoch", "none": "In ROOM gibt es keine Rollläden."},
+                   "en": "Opening {raum}"},
     }) + "\n```"
     out = A.parse_reply(reply, languages=["de", "en", "fr"], lists=["raum"])
     assert out["name"] == "RolllaedenRaumAuf" and out["list"] == "raum"
     assert out["sentences"] == {"de": ["(rollladen|rollläden) [im|in der] {raum} (auf|hoch)"],
                                 "en": ["open the shutters in [the] {raum}"]}
-    assert out["speech"] == {"de": "Rollläden fahren hoch"}  # a placeholder in the answer is dropped
+    # plain texts only; a placeholder in the answer is dropped (Polyglot builds the template)
+    assert out["speech"] == {"de": {"ok": "Rollläden fahren hoch", "none": "In ROOM gibt es keine Rollläden."}}
     assert A.parse_reply('{"none": "already covered"}', languages=["de"], lists=["raum"]).startswith("ai_none")
     assert A.parse_reply('{"name": "X1x", "list": "other", "sentences": {}}', languages=["de"], lists=["raum"]) == "unknown list"
 
@@ -121,11 +123,12 @@ COVER_PATTERN = {"id": "cover_area_open", "slot": "raum",
                  "map": {"Schlafzimmer": ["cover.sz_ost", "cover.sz_sued"], "Wohnzimmer": ["cover.wz"]}}
 
 
-def _item(pattern, action=None):
+def _item(pattern, action=None, speech=None):
     return {"op": "add_intent", "pattern": pattern,
             "payload": {"name": "RolllaedenRaumAuf", "intent": {
                 "kind": "command", "sentences": {"de": ["rollläden {raum} auf"]},
-                "action": P.pattern_action(pattern) if action is None else action}}}
+                "action": P.pattern_action(pattern) if action is None else action,
+                "speech": P.pattern_speech(pattern, ["de"]) if speech is None else speech}}}
 
 
 def test_pattern_action_shape_and_check():
@@ -161,3 +164,39 @@ def test_script_pattern_passes_only_the_room_and_numbers():
     assert P.check_item(_item(pattern)) is None
     assert P.check_item(_item({**pattern, "constants": {"code": "1234"}})) is not None
     assert "security-relevant" in P.check_item(_item({**pattern, "script": "garagentor_auf"}))
+
+
+def _say(template, **slots):
+    import jinja2  # the same syntax HA renders (HA adds its own globals, not needed here)
+
+    return jinja2.Environment().from_string(template).render(**slots)
+
+
+def test_a_room_without_such_devices_gets_an_honest_answer_and_no_action():
+    pattern = {**COVER_PATTERN, "answers": {"de": {"ok": "Rollläden fahren hoch", "none": "In ROOM gibt es keine Rollläden."},
+                                            "en": {"ok": "Opening the shutters"}}}
+    speech = P.pattern_speech(pattern, ["de", "en", "fr"])
+    assert _say(speech["de"], raum="Schlafzimmer") == "Rollläden fahren hoch"
+    assert _say(speech["de"], raum="Bad") == "In Bad gibt es keine Rollläden."
+    assert _say(speech["en"], raum="Bad") == "There are no such devices in Bad."  # no "none" given → default
+    assert _say(speech["fr"], raum="Wohnzimmer") == "C'est fait."  # nothing given → defaults
+    assert _say(speech["fr"], raum="Bad") == "Il n'y a pas d'appareils de ce type dans Bad."
+    # and the action does nothing for that room: the condition before the step is false
+    action = P.pattern_action(pattern)
+    assert _say(action[1]["value_template"], raum="Bad", polyglot_targets=action[0]["variables"]["polyglot_targets"]) == "False"
+    assert P.check_item(_item(pattern, speech=P.pattern_speech(pattern, ["de"]))) is None
+
+
+def test_the_answer_is_built_not_taken_from_the_proposal():
+    pattern = {**COVER_PATTERN, "answers": {"de": {"ok": "Erledigt", "none": "Kein ROOM"}}}
+    assert "answer differs" in P.check_item(_item(pattern, speech={"de": "{{ states('lock.door') }}"}))
+    sneaky = {**COVER_PATTERN, "answers": {"de": {"ok": "x{% endif %}{{ 7*7 }}", "none": "In ROOM \" + 1"}}}
+    speech = P.pattern_speech(sneaky, ["de"])["de"]
+    assert "7*7" not in speech and _say(speech, raum="Bad") == "In ROOM gibt es dafür keine Geräte.".replace("ROOM", "Bad")
+    assert P.check_item(_item({**COVER_PATTERN, "map": {'Bad"': ["cover.bad"]}})) == "invalid room value"
+
+
+def test_script_commands_keep_a_plain_answer():
+    pattern = {"id": "script_room", "slot": "licht_raum", "script": "licht_nur_an_aendern",
+               "room_arg": "ziel", "constants": {"helligkeit": 100}, "answers": {"de": {"ok": "Volle Helligkeit"}}}
+    assert P.pattern_speech(pattern, ["de"]) == {"de": "Volle Helligkeit"}

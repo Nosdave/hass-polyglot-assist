@@ -207,6 +207,16 @@ def fingerprint(group: dict[str, Any]) -> str:
 
 # ── the AI's reply ───────────────────────────────────────────────────────────
 
+ROOM = "ROOM"  # marker for the room in the "none" answer
+ANSWER_FORBIDDEN = "{}%#<>\"\\"
+
+
+def plain_answer(text: Any) -> bool:
+    """Short plain text that may be put into a server-built template as it is."""
+    return isinstance(text, str) and bool(text.strip()) and len(text) <= 120 and not any(
+        ch in text for ch in ANSWER_FORBIDDEN)
+
+
 _PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
 
 
@@ -251,11 +261,18 @@ def parse_reply(text: str, *, languages: list[str], lists: list[str]) -> dict[st
             sentences[lang] = list(dict.fromkeys(good))
     if not sentences:
         return "no usable sentences"
-    speech: dict[str, str] = {}
+    # per language: what to say when it worked ("ok") and when the room has no such devices ("none",
+    # with the word ROOM where the room goes) — plain text; Polyglot builds the template itself
+    speech: dict[str, dict[str, str]] = {}
     for lang, said in (data.get("speech") or {}).items() if isinstance(data.get("speech"), dict) else []:
-        if lang in sentences and isinstance(said, str) and said.strip() and len(said) <= 120 \
-                and not any(ch in said for ch in "{}%#<>"):
-            speech[lang] = said.strip()
+        if lang not in sentences:
+            continue
+        parts = {"ok": said} if isinstance(said, str) else said if isinstance(said, dict) else {}
+        clean = {k: parts[k].strip() for k in ("ok", "none") if plain_answer(parts.get(k))}
+        if "none" in clean and clean["none"].count(ROOM) != 1:
+            clean.pop("none")
+        if clean:
+            speech[lang] = clean
     description = data.get("description")
     description = " ".join(description.split())[:160] if isinstance(description, str) else ""
     return {"name": name, "list": lst, "description": description, "sentences": sentences, "speech": speech}

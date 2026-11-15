@@ -873,7 +873,7 @@ def _action_learner(hass: HomeAssistant, data: dict, builtin_match, ai_task: str
     from .monitor import _template_matches  # noqa: PLC0415
     from .proposals import (  # noqa: PLC0415
         PATTERN_SERVICES, bounded_samples, check_item, check_proposal, clean_alternatives, parse_rules,
-        pattern_action,
+        pattern_action, pattern_speech,
     )
     from .safety import action_target_reason, sensitive_entities  # noqa: PLC0415
     from .translate import async_propose_action_command, command_context  # noqa: PLC0415
@@ -1049,11 +1049,11 @@ def _action_learner(hass: HomeAssistant, data: dict, builtin_match, ai_task: str
             if not bound:
                 skip("misses_evidence", "; ".join(r["text"] for r in group["runs"][:3]))
                 continue
+            # the AI's plain answers; the template (honest "no such devices in <room>") is built by Polyglot
+            pattern["answers"] = {lang: said for lang, said in parsed["speech"].items() if lang in good}
             intent_cfg = {"description": parsed["description"] or what, "category": OTHER_CATEGORY, "kind": "command",
-                          "action": pattern_action(pattern), "sentences": good}
-            speech = {lang: said for lang, said in parsed["speech"].items() if lang in good}
-            if speech:
-                intent_cfg["speech"] = speech
+                          "action": pattern_action(pattern), "sentences": good,
+                          "speech": pattern_speech(pattern, sorted(good))}
             no_devices = sorted(t for t, _v in _list_values(slot_lists.get(parsed["list"]))
                                 if pattern.get("map") is not None and _v not in pattern["map"])
             item = {
@@ -1067,7 +1067,7 @@ def _action_learner(hass: HomeAssistant, data: dict, builtin_match, ai_task: str
                     f"learned from {group['count']} AI actions on {group['days']} day(s) — check the rooms and devices before accepting",
                     "fixed devices per room — new devices are not added automatically" if pattern.get("map") is not None
                     else "the room is passed to the script as it is",
-                    *([f"rooms without such devices do nothing: {', '.join(no_devices[:6])}"] if no_devices else []),
+                    *([f"rooms without such devices do nothing and say so: {', '.join(no_devices[:6])}"] if no_devices else []),
                     *notes[:3]]},
                 "pattern": pattern,
                 "fp": fingerprint(group),
