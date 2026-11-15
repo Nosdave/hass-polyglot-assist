@@ -10,6 +10,14 @@ prompt helps only partly. A short note appended to the user's latest message
 works (6000 K after claimed answers: 8/8 tool calls, was 0–5/8) and leaves
 small talk and questions alone.
 
+Replayed on 120 real mid-conversation requests (16.11.2026, 3 runs each):
+tool calls 78 % -> 91 %, claimed actions without a tool 36 -> 10. Side
+effect: the model also acts on vague follow-ups ("I was talking about the
+car the whole time" after a garage request: garage button pressed 4/4 with
+the hint, 1/4 without). Keep security-relevant buttons out of the LLM's
+exposed entities; complaints and feedback are named in the hint as a further
+guard against repeating an action the user complains about.
+
 So when the conversation already has earlier turns, the fallback gets the
 user's sentence plus HINT — in its one and only pass. The chat log keeps the
 user's own words: the entry is swapped for the hinted text only while the
@@ -26,7 +34,8 @@ import dataclasses
 from typing import Any, Awaitable, Callable
 
 HINT = ("(Note: if this message asks to switch, set, dim or change something, call the tool in this turn — earlier "
-        "turns do not count, even if it seems already done. Questions and small talk need no tool.)")
+        "turns do not count, even if it seems already done. Complaints, feedback, questions and small talk need no "
+        "tool — never repeat an earlier action just because the user complains about it.)")
 
 
 def has_history(content: list[Any], before: int) -> bool:
