@@ -331,6 +331,7 @@ Every Tier-1 match gets two extra slots in addition to the matched ones:
 | Translation proposals | – | AI Task entity for sentence/name proposals. |
 | Hits in conversation history | off | See above; the tools are read from the fallback agent's own settings. |
 | Fallback language hint | off | On a miss, if the utterance is clearly in another configured language (small de/en/fr word lists), a short "reply in <language>" note is appended to `extra_system_prompt` for the fallback agent. Pipelines run with one fixed language, so LLMs otherwise tend to answer in the language of (German) tool results. Otherwise the input is passed on unchanged. |
+| Check claimed actions | on | Inside a running conversation, if the fallback answers with text only (no tool call at all), its answer is held back (not spoken), removed from the chat log, and the fallback answers ONCE more with a short check note appended to the user's message for that pass only. Some models otherwise take a repeated or corrected request ("I said white") for already done and report success without switching anything. The chat log keeps the user's own words and only the second answer. Costs one extra model call in exactly these cases; text-only answers in running conversations start speaking only when complete. Panel → Settings. |
 
 ## Services
 

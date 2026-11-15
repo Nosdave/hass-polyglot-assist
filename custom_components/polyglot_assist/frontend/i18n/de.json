@@ -52,7 +52,8 @@
     "voicelearn": "Du kannst Vorschläge per Sprache besprechen: „Was hast du gelernt?“, „Erzähl mir mehr zum ersten“, „Übernimm ihn“ – Polyglot fragt nach und übernimmt erst nach deinem „Ja“. Per Sprache gehen nur neue Sätze und Namen für harmlose Befehle; alles Sicherheitsrelevante, neue Befehle und Schutzstufen bleiben im Panel. Höchstens 5 pro Stunde, nur auf den gewählten Geräten, und mit „Mach das rückgängig“ innerhalb von 24 Stunden zurücknehmbar.",
     "tonedesign": "So klingt die Quittung nach einem erfolgreichen Befehl. Klassisch ist der bisherige Ton. Gestalten: Anzahl, Verlauf, Art, Tonhöhe, Klang. Oder ein eigener Ton per Datei oder Aufnahme.",
     "monreview": "Sprachunabhängig: Die KI liest Gespräche, in denen du kurz nach einer Aktion nochmal etwas gesagt hast, und erkennt Korrekturen wie „Das stimmt nicht, das Bett ist auch aus“. Vorschläge daraus sind immer markiert und gehen nur im Panel – nie per Sprache.",
-    "answered": "Was gesprochen wird, wenn der Befehl erkannt wurde – je Sprache, aus Text und aktuellen Werten. Kommt die Antwort noch aus einer YAML-Datei, übernimmt Polyglot sie zum Bearbeiten."
+    "answered": "Was gesprochen wird, wenn der Befehl erkannt wurde – je Sprache, aus Text und aktuellen Werten. Kommt die Antwort noch aus einer YAML-Datei, übernimmt Polyglot sie zum Bearbeiten.",
+    "nudge": "Manche Modelle halten eine wiederholte oder korrigierte Bitte („ich sagte Weiß“) für schon erledigt und melden Erfolg, ohne etwas zu schalten. Antwortet der KI-Assistent in einem laufenden Gespräch ganz ohne Werkzeug, bekommt er die Bitte einmal mit einem kurzen Prüfhinweis noch einmal. Nur seine zweite Antwort zählt und bleibt im Verlauf. In diesen Fällen dauert die Antwort dadurch meist 1–3 Sekunden länger."
   },
   "kinds": {
     "new": "neu",
@@ -297,7 +298,10 @@
     "fallback_hint": "{agent} · ändern in Einstellungen → Geräte & Dienste → Polyglot Assist",
     "backup": "Sicherung",
     "backup_catalog": "Deine Befehle liegen in Home Assistant und werden mit seinen Backups gesichert.",
-    "backup_file": "Deine Befehle liegen in der Datei intents.yaml. Für das Bearbeiten im Panel auf „Katalog“ umstellen (die Datei bleibt als Sicherung) – in Einstellungen → Geräte & Dienste → Polyglot Assist → Konfigurieren → Quelle."
+    "backup_file": "Deine Befehle liegen in der Datei intents.yaml. Für das Bearbeiten im Panel auf „Katalog“ umstellen (die Datei bleibt als Sicherung) – in Einstellungen → Geräte & Dienste → Polyglot Assist → Konfigurieren → Quelle.",
+    "nudge": "Behauptete Aktionen prüfen",
+    "nudge_label": "Behauptete Aktionen prüfen",
+    "nudge_hint": "Antwortet dein KI-Assistent in einem laufenden Gespräch nur mit Worten, fragt Polyglot einmal nach."
   },
   "messages": {
     "saved": "Gespeichert.",

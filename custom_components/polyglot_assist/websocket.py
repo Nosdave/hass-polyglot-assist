@@ -24,6 +24,7 @@ from homeassistant.helpers import intent
 from .const import (
     CONF_BUILTIN,
     CONF_CHAT_LOG_TOOLS,
+    CONF_TOOL_NUDGE,
     CONF_CHIME_TONE,
     CONF_CHIME_TTS,
     CONF_FALLBACK_AGENT,
@@ -740,7 +741,7 @@ async def ws_names_set(hass: HomeAssistant, connection, msg) -> None:
 PANEL_OPTIONS = (
     CONF_LANGUAGES_ENABLED, CONF_RESPONSE_MODE, CONF_MONITOR, CONF_MONITOR_TIME,
     CONF_TRANSLATION_AI_TASK, CONF_CHAT_LOG_TOOLS, CONF_BUILTIN, CONF_CHIME_TTS,
-    CONF_VOICE_LEARN, CONF_VOICE_SATELLITES, CONF_CHIME_TONE, CONF_MONITOR_REVIEW,
+    CONF_VOICE_LEARN, CONF_VOICE_SATELLITES, CONF_CHIME_TONE, CONF_MONITOR_REVIEW, CONF_TOOL_NUDGE,
 )
 
 TONE_SCHEMA = vol.Schema({
@@ -766,6 +767,7 @@ TONE_SCHEMA = vol.Schema({
         vol.Optional(CONF_MONITOR_REVIEW): bool,
         vol.Optional(CONF_TRANSLATION_AI_TASK): vol.Any(None, vol.Match(r"^ai_task\.[a-z0-9_]+$")),
         vol.Optional(CONF_CHAT_LOG_TOOLS): bool,
+        vol.Optional(CONF_TOOL_NUDGE): bool,
         vol.Optional(CONF_BUILTIN): bool,
         vol.Optional(CONF_CHIME_TTS): vol.Any(None, vol.Match(r"^tts\.[a-z0-9_]+$")),
         vol.Optional(CONF_CHIME_TONE): TONE_SCHEMA,

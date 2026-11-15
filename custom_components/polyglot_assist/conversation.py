@@ -52,6 +52,7 @@ from .const import (
     CONF_CHAT_LOG_TOOLS,
     CONF_FALLBACK_AGENT,
     CONF_LANGUAGE_HINT,
+    CONF_TOOL_NUDGE,
     DOMAIN,
     EVENT_MATCH,
     EVENT_MISS_PROXIED,
@@ -59,6 +60,7 @@ from .const import (
     SLOT_UTTERANCE,
 )
 from .speech import say
+from . import nudge as _nudge
 from .fallback import IN_FALLBACK, is_polyglot_agent
 from .learn import get_learn
 from .builtin import (
@@ -219,7 +221,18 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         before = len(chat_log.content)
         # same conversation as ours, so the fallback continues THIS ChatLog
         user_input = dataclasses.replace(original_input, conversation_id=chat_log.conversation_id)
-        result = await self._proxy_to_fallback(user_input, t_miss_ms, chat_log, matcher.languages)
+        # the fallback may claim an action it never did — then ONE second pass with a check note (nudge.py)
+        result, nudged = await _nudge.async_answer(
+            chat_log, before, user_input.text,
+            lambda model_text: self._proxy_to_fallback(user_input, t_miss_ms, chat_log, matcher.languages,
+                                                       model_text=model_text),
+            enabled=bool(self._entry.options.get(CONF_TOOL_NUDGE, True)),
+            is_error=lambda r: r.response.response_type == intent.IntentResponseType.ERROR,
+            speech_of=lambda r: _speech(r.response),
+        )
+        if nudged is not None:
+            _LOGGER.debug("Polyglot: text-only fallback answer redone with a check note → %s tool call(s)",
+                          nudged["tools"])
         if monitor is not None:
             calls = [
                 {"tool": tc.tool_name, "args": tc.tool_args}
@@ -246,6 +259,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                 error=result.response.response_type == intent.IntentResponseType.ERROR,
                 device=user_input.device_id, satellite=user_input.satellite_id,
                 conversation=chat_log.conversation_id,
+                **({"nudged": True, "nudge_tools": nudged["tools"], "nudge_first": nudged["first"]} if nudged else {}),
             )
         return result
 
@@ -442,8 +456,13 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         miss_took_ms: float,
         chat_log: ChatLog,
         languages: list[str],
+        *,
+        model_text: str | None = None,
     ) -> ConversationResult:
         """Forward the ConversationInput to the configured fallback.
+
+        ``model_text`` replaces the text the fallback gets (the second pass of
+        nudge.py); the language hint and the events still use what was said.
 
         Unmodified, unless the opt-in language hint is enabled: then a short
         "reply in <detected language>" instruction is appended to
@@ -504,6 +523,8 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         # The base method sets up a fresh ChatLog session for the fallback.
         # Pass user_input otherwise UNCHANGED — preserves satellite_id,
         # extra_system_prompt and any future ConversationInput fields HA adds.
+        if model_text is not None:
+            user_input = dataclasses.replace(user_input, text=model_text)
         token = IN_FALLBACK.set(True)
         try:
             return await fallback_agent.async_process(user_input)
