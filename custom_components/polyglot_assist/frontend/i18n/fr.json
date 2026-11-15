@@ -66,7 +66,8 @@
     "translation": "Traduction",
     "manual": "À la main",
     "correction": "D'une correction",
-    "ai_answer": "Des réponses de l'IA"
+    "ai_answer": "Des réponses de l'IA",
+    "repeated_action": "Action IA répétée"
   },
   "safety": {
     "normal": "normal",
@@ -160,7 +161,10 @@
     "edit": "Modifier",
     "edit_title": "Modifier la suggestion : {name}",
     "edit_hint": "Modifie les phrases et la réponse – la suggestion est ensuite revérifiée. Elle n'est appliquée qu'avec « Accepter » dans la liste.",
-    "edited": "Suggestion modifiée et revérifiée : {status}"
+    "edited": "Suggestion modifiée et revérifiée : {status}",
+    "rooms_label": "Pièces et appareils :",
+    "runs_label": "Dit :",
+    "said_at": "« {text} » ({when})"
   },
   "groups": {
     "several_rooms": "Plusieurs pièces",

@@ -42,7 +42,7 @@ const OP_KIND = {
   add_intent: "new", add_sentences: "new", add_names: "new", set_list_value: "change",
   set_field: "change", remove_sentences: "remove", remove_names: "remove", remove_list_value: "remove",
 };
-const ORIGINS = ["new_devices", "starter", "monitor", "correction", "ai_answer", "translation", "manual"];
+const ORIGINS = ["new_devices", "starter", "monitor", "correction", "ai_answer", "repeated_action", "translation", "manual"];
 const SAFETY = ["normal", "sensitive", "disabled"];
 // The backend's "no category" value (corpus.OTHER_CATEGORY). It is stored data,
 // so it stays as is; only its label is translated.
@@ -761,6 +761,18 @@ class PolyglotAssistPanel extends HTMLElement {
       <button class="b" data-act="pedit" data-pid="${esc(item.id)}" style="margin-top:6px">${esc(this.t("proposals.edit"))}</button>`;
   }
 
+  // a command learned from repeated AI actions: what it does per room, and the runs it comes from
+  _patternLines(item) {
+    const pt = item.pattern || {};
+    const nm = (e) => this._hass?.states?.[e]?.attributes?.friendly_name || e;
+    const service = ((item.payload?.intent?.action || []).find((st) => st && st.action) || {}).action || "?";
+    const rooms = pt.map ? Object.entries(pt.map).map(([room, ids]) => `${room}: ${(ids || []).map(nm).join(", ")}`) : [];
+    const runs = (item.origin?.evidence || []).slice(-5).map((e) => this.t("proposals.said_at", { text: e.said || "", when: e.ts ? this._date(e.ts) : "–" }));
+    return `<div class="hint"><b>${esc(this.t("proposals.action_label"))}</b> ${esc(pt.id === "script_room" ? `${service} (${Object.keys(item.payload?.intent?.action?.[0]?.data || {}).join(", ")})` : service)} · {${esc(pt.slot || "")}}</div>
+      ${rooms.length ? `<div class="hint"><b>${esc(this.t("proposals.rooms_label"))}</b> ${esc(rooms.join(" · "))}</div>` : ""}
+      ${runs.length ? `<div class="hint"><b>${esc(this.t("proposals.runs_label"))}</b> ${esc(runs.join(" · "))}</div>` : ""}`;
+  }
+
   // what a NEW command would switch — shown before anyone accepts it
   _actionLine(action) {
     const steps = Array.isArray(action) ? action : action ? [action] : [];
@@ -944,7 +956,7 @@ class PolyglotAssistPanel extends HTMLElement {
         <div><span class="chip ${kind === "new" ? "ok" : kind === "remove" ? "warn" : "pri"}">${t("kinds." + kind)}</span> <b>${esc(i.title || i.op)}</b> <span class="chip ${st === "ok" ? "ok" : st === "warn" ? "warn" : "err"}">${stLabel}</span>
         <div class="hint"><b>${t("proposals.origin_label")}</b> ${esc(i.origin?.detail || this._origin(i.origin?.source))}</div>
         ${(i.check?.notes || []).length ? `<div class="hint">${esc(i.check.notes.join("; "))}</div>` : ""}
-        ${ex ? `<div class="ex">${esc(ex)}</div>` : ""}${this._actionLine(p.intent?.action)}${this._answerLines(i)}${i.origin?.wanted ? `<div class="hint"><b>${t("proposals.wanted_label")}</b> ${esc(i.origin.wanted)}</div>` : ""}</div><span class="chip pri">${esc(this._origin(i.origin?.source))}</span></div>`;
+        ${ex ? `<div class="ex">${esc(ex)}</div>` : ""}${i.pattern ? this._patternLines(i) : this._actionLine(p.intent?.action)}${this._answerLines(i)}${i.origin?.wanted ? `<div class="hint"><b>${t("proposals.wanted_label")}</b> ${esc(i.origin.wanted)}</div>` : ""}</div><span class="chip pri">${esc(this._origin(i.origin?.source))}</span></div>`;
     }).join("");
     return `<section class="grid">${this.s.propEdit ? this._proposalEditCard() : ""}<div class="card">
       <div class="row" style="justify-content:space-between"><h2 style="margin:0">${t("proposals.title")}${this._tip("proposals")}</h2>

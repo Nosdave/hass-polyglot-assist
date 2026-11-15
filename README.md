@@ -538,6 +538,36 @@ example: "How warm is it outside?" → the AI read the outdoor sensor and said
   edited suggestion is checked again.
 - **Cost:** no extra AI call is needed.
 
+## Learning from repeated AI actions
+
+When the AI keeps doing the same *kind* of thing for sentences Polyglot does not
+know, a command is missing — even if the words differ every time. Example:
+"Shutters in the bedroom up" and "Open the blinds in the living room" both made
+the AI open the window coverings of one room.
+
+- **Grouped by action, not by words.** The tool and its core arguments count
+  (domain, device class, area/script); the room is the placeholder.
+- **A habit, not one evening.** At least 2 runs within 7 days, on two different
+  days or in two different conversations. (Sentences for *existing* commands
+  use the same rule and window.)
+- **Known patterns only.** Window coverings of a room open/close, lights of a
+  room on/off, a script that gets the room plus fixed numbers. Locks, alarms,
+  gates, garage doors, vehicles and other protected devices never form a
+  group.
+- **Polyglot builds the action, the AI writes the words.** The AI task gets the
+  runs, the room lists with examples and the existing commands with all their
+  sentences, and answers with one JSON object: name, room list, sentences in
+  every enabled language and a short answer. The action is built by Polyglot
+  from the pattern, with the devices of every room frozen and checked
+  (exposed to Assist, not protected); on acceptance it is rebuilt and compared,
+  and every device is checked again.
+- **Checks:** corpus and collisions, HA's own commands, and the sentences must
+  recognise something that was really said. Nothing is proposed when an
+  existing command already understands the sentences. A rejected suggestion is
+  never proposed again.
+- **Shown as** *Repeated AI action*, with the rooms and devices and the
+  sentences that were said (with times). Accepting is done in the panel only.
+
 ## Learning from corrections (optional, off by default)
 
 People correct a voice assistant the way they would correct a person, in their

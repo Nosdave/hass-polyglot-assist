@@ -66,7 +66,8 @@
     "translation": "Translation",
     "manual": "Manual",
     "correction": "From a correction",
-    "ai_answer": "From AI answers"
+    "ai_answer": "From AI answers",
+    "repeated_action": "Repeated AI action"
   },
   "safety": {
     "normal": "normal",
@@ -160,7 +161,10 @@
     "edit": "Edit",
     "edit_title": "Edit suggestion: {name}",
     "edit_hint": "Change sentences and answer – the suggestion is checked again afterwards. It is only applied with “Accept” in the list.",
-    "edited": "Suggestion changed and checked again: {status}"
+    "edited": "Suggestion changed and checked again: {status}",
+    "rooms_label": "Rooms and devices:",
+    "runs_label": "Said:",
+    "said_at": "“{text}” ({when})"
   },
   "groups": {
     "several_rooms": "Several rooms",
