@@ -19,6 +19,8 @@ companion to one.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import dataclasses
 import logging
 import time
@@ -506,7 +508,17 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         # extra_system_prompt and any future ConversationInput fields HA adds.
         token = IN_FALLBACK.set(True)
         try:
-            return await fallback_agent.async_process(user_input)
+            result = await fallback_agent.async_process(user_input)
+            if (user_input.conversation_id and result.response.response_type == intent.IntentResponseType.ERROR
+                    and result.response.error_code == intent.IntentResponseErrorCode.UNKNOWN):
+                # The fallback failed inside a running conversation. The usual cause is a history that no longer
+                # fits the model's context (HA keeps the whole chat for 5 min; a few web searches are enough) ->
+                # "Error talking to API" for every following sentence. Retry ONCE in a fresh conversation.
+                _LOGGER.warning(
+                    "Polyglot fallback %s failed in conversation %s (%s) — retrying once without history",
+                    self._fallback_agent_id, user_input.conversation_id, _speech(result.response)[:120])
+                result = await fallback_agent.async_process(replace(user_input, conversation_id=None))
+            return result
         finally:
             IN_FALLBACK.reset(token)
 
