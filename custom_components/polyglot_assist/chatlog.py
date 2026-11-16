@@ -183,7 +183,8 @@ async def async_record_hit(
 
 @callback
 def async_close_hit_turn(
-    chat_log: ChatLog, agent_id: str | None, response: intent.IntentResponse, spoken: str | None
+    chat_log: ChatLog, agent_id: str | None, response: intent.IntentResponse, spoken: str | None,
+    *, command: bool,
 ) -> None:
     """Close a hit's turn in the ChatLog before the Assist pipeline does it with the spoken answer.
 
@@ -194,7 +195,8 @@ def async_close_hit_turn(
     try:
         if not chat_log.content or chat_log.content[-1].role != "user":
             return  # already answered (tool-call record, learning dialogue, …)
-        done = response.response_type == intent.IntentResponseType.ACTION_DONE
+        # intent_script answers questions with ACTION_DONE as well — only commands hide their text
+        done = command and response.response_type == intent.IntentResponseType.ACTION_DONE
         chat_log.async_add_assistant_content_without_tools(
             AssistantContent(agent_id=agent_id or DOMAIN, content=history_text(spoken, done))
         )
