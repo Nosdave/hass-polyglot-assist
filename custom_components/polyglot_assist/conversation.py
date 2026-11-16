@@ -40,7 +40,8 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import intent
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .chatlog import async_record_hit
+from .chatlog import async_close_hit_turn, async_record_hit
+from .hitnote import strip_marker
 from .const import (
     CHIME_MARKER,
     CONF_RESPONSE_MODE,
@@ -329,9 +330,10 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
             # stays in the response data (and in the ChatLog record).
             response.async_set_speech(CHIME_MARKER)
 
+        recorded = False
         if self._entry.options.get(CONF_CHAT_LOG_TOOLS, False):
             if intent_cfg:
-                await async_record_hit(
+                recorded = await async_record_hit(
                     self.hass,
                     user_input=user_input,
                     chat_log=chat_log,
@@ -341,6 +343,8 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                     fallback_agent_id=self._fallback_agent_id,
                     spoken=spoken,
                 )
+        if not recorded:
+            async_close_hit_turn(chat_log, user_input.agent_id, response, spoken)
 
         return ConversationResult(
             response=response,
@@ -403,14 +407,17 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                  "input": user_input.text, "took_ms": round(t_ms, 1), "builtin": True,
                  "matched_sentence": result.intent_sentence.text if result.intent_sentence else ""},
             )
+            recorded = False
             if self._entry.options.get(CONF_CHAT_LOG_TOOLS, False):
-                await async_record_hit(
+                recorded = await async_record_hit(
                     self.hass, user_input=user_input, chat_log=chat_log,
                     intent_cfg={"llm_equivalent": {"tool": result.intent.name, "args": {
                         k: str(v.text or v.value) for k, v in (result.entities or {}).items()
                         if k in ("name", "area", "domain", "floor")}}},
                     slots={}, response=response, fallback_agent_id=self._fallback_agent_id,
                 )
+            if not recorded:
+                async_close_hit_turn(chat_log, user_input.agent_id, response, _speech(response))
             if (monitor := runtime.get("monitor")) is not None:
                 monitor.async_record(
                     text=user_input.text, lang=lang, result="hit", intent=result.intent.name,
@@ -506,9 +513,29 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
         # extra_system_prompt and any future ConversationInput fields HA adds.
         token = IN_FALLBACK.set(True)
         try:
-            return await fallback_agent.async_process(user_input)
+            result = await fallback_agent.async_process(user_input)
         finally:
             IN_FALLBACK.reset(token)
+        _drop_copied_marker(result.response, user_input.text, languages, user_input.language)
+        return result
+
+
+def _drop_copied_marker(
+    response: intent.IntentResponse, text: str, languages: list[str], fallback_lang: str | None
+) -> None:
+    """A fallback answer must never play the success tone.
+
+    The assistant can copy ``[[polyglot:chime]]`` from an older history (HA 2026.11
+    pipelines wrote it there) and would confirm a command it never ran.
+    """
+    speech = response.speech.get("plain", {}).get("speech")
+    cleaned = strip_marker(speech)
+    if cleaned == speech:
+        return
+    _LOGGER.warning("Polyglot: fallback answered with the tone marker (%r) — not played", speech)
+    if cleaned is None:
+        cleaned = say("not_understood", guess_language(text, languages) or fallback_lang)
+    response.async_set_speech(cleaned)
 
 
 # ── what the monitor keeps about a request (for "what went wrong" reviews) ──
