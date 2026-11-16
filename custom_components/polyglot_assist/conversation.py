@@ -346,7 +346,8 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                     spoken=spoken,
                 )
         if not recorded:
-            async_close_hit_turn(chat_log, user_input.agent_id, response, spoken)
+            async_close_hit_turn(chat_log, user_input.agent_id, response, spoken,
+                                 command=intent_cfg.get("kind") == "command")
 
         return ConversationResult(
             response=response,
@@ -419,7 +420,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                     slots={}, response=response, fallback_agent_id=self._fallback_agent_id,
                 )
             if not recorded:
-                async_close_hit_turn(chat_log, user_input.agent_id, response, _speech(response))
+                async_close_hit_turn(chat_log, user_input.agent_id, response, _speech(response), command=True)
             if (monitor := runtime.get("monitor")) is not None:
                 monitor.async_record(
                     text=user_input.text, lang=lang, result="hit", intent=result.intent.name,

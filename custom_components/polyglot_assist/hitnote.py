@@ -14,7 +14,8 @@ the history, 3 runs each):
 * hit as "(no response)":   tool called 132/171, claimed 3
 * hit left out entirely:    tool called 128/171, claimed 9
 
-So Polyglot closes the turn itself: a successful command is recorded as
+So Polyglot closes the turn itself: a successful command (``kind: command``;
+intent_script reports ACTION_DONE for questions too) is recorded as
 "(no response)", an answer to a question (or an error) as its text, and the
 tone marker never reaches the assistant. Hits recorded as a tool call
 (``llm_equivalent``, chatlog.py) are left alone.
