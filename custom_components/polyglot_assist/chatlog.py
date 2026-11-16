@@ -41,6 +41,7 @@ from homeassistant.helpers import intent, llm
 from homeassistant.helpers.template import Template
 
 from .const import DOMAIN
+from .hitnote import history_text
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -178,3 +179,24 @@ async def async_record_hit(
     for content in contents:
         chat_log.async_add_assistant_content_without_tools(content)
     return True
+
+
+@callback
+def async_close_hit_turn(
+    chat_log: ChatLog, agent_id: str | None, response: intent.IntentResponse, spoken: str | None
+) -> None:
+    """Close a hit's turn in the ChatLog before the Assist pipeline does it with the spoken answer.
+
+    HA 2026.11 pipelines append the agent's speech when the turn is still open —
+    for a hit that teaches the assistant to confirm commands without a tool
+    (see hitnote.py). Never raises.
+    """
+    try:
+        if not chat_log.content or chat_log.content[-1].role != "user":
+            return  # already answered (tool-call record, learning dialogue, …)
+        done = response.response_type == intent.IntentResponseType.ACTION_DONE
+        chat_log.async_add_assistant_content_without_tools(
+            AssistantContent(agent_id=agent_id or DOMAIN, content=history_text(spoken, done))
+        )
+    except Exception:  # noqa: BLE001 — the log entry must never break a hit
+        _LOGGER.exception("Polyglot Assist: closing the hit turn in the ChatLog failed")

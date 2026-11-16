@@ -6,6 +6,8 @@ from __future__ import annotations
 
 SPEECH: dict[str, dict[str, str]] = {
     "done": {"de": "Erledigt.", "en": "Done.", "fr": "C'est fait.", "nl": "Gedaan.", "it": "Fatto.", "es": "Hecho."},
+    "not_understood": {"de": "Das habe ich nicht verstanden.", "en": "Sorry, I didn't get that.", "fr": "Désolé, je n'ai pas compris.",
+                       "nl": "Dat heb ik niet begrepen.", "it": "Scusa, non ho capito.", "es": "Perdona, no lo he entendido."},
     "error": {"de": "Das hat leider nicht geklappt.", "en": "Sorry, that did not work.", "fr": "Désolé, ça n'a pas marché.",
               "nl": "Sorry, dat is niet gelukt.", "it": "Mi dispiace, non ha funzionato.", "es": "Lo siento, no ha funcionado."},
     "handler_failed": {"de": "Der Befehl {name} ist fehlgeschlagen.", "en": "The command {name} failed.",
