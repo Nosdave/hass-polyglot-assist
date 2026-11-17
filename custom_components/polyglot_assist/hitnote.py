@@ -14,10 +14,20 @@ the history, 3 runs each):
 * hit as "(no response)":   tool called 132/171, claimed 3
 * hit left out entirely:    tool called 128/171, claimed 9
 
-So Polyglot closes the turn itself: a successful command (``kind: command``;
-intent_script reports ACTION_DONE for questions too) is recorded as
-"(no response)", an answer to a question (or an error) as its text, and the
-tone marker never reaches the assistant. Hits recorded as a tool call
+Answers to questions behave the same way. With "22,3 Grad" in the history,
+the follow-up "Und in der Küche?" is answered with an invented number instead
+of a tool call (fast lane, 4 question/follow-up pairs × 8 runs, 17.11.2026):
+
+* answer as its text:                      tool called 0/32
+* "(no response)":                         tool called 27–30/32
+* text marked as answered by the system:   tool called 10/32
+
+The price: "repeat what you said" cannot quote a hit's answer — the assistant
+then says it has no information, which is honest.
+
+So Polyglot closes the turn itself: every successful hit (command or question)
+is recorded as "(no response)", only an error keeps its text, and the tone
+marker never reaches the assistant. Hits recorded as a tool call
 (``llm_equivalent``, chatlog.py) are left alone.
 """
 from __future__ import annotations
@@ -26,9 +36,9 @@ NO_RESPONSE = "(no response)"
 CHIME_MARKER = "[[polyglot:chime]]"  # same value as const.CHIME_MARKER (kept HA-free for tests)
 
 
-def history_text(spoken: str | None, action_done: bool) -> str:
+def history_text(spoken: str | None, hide: bool) -> str:
     """Assistant text for the ChatLog after a hit that was not recorded as a tool call."""
-    if action_done:
+    if hide:
         return NO_RESPONSE
     text = (spoken or "").replace(CHIME_MARKER, "").strip()
     return text or NO_RESPONSE

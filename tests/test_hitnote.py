@@ -19,8 +19,12 @@ def test_successful_command_is_no_response():
     assert hitnote.history_text(hitnote.CHIME_MARKER, True) == "(no response)"
 
 
-def test_question_answer_and_error_keep_their_text():
-    assert hitnote.history_text("Die PV liefert 27 Watt.", False) == "Die PV liefert 27 Watt."
+def test_question_answer_is_no_response():
+    # "22,3 Grad" in the history → the follow-up "Und in der Küche?" gets an invented number
+    assert hitnote.history_text("22,3 Grad", True) == "(no response)"
+
+
+def test_error_keeps_its_text():
     assert hitnote.history_text("Das hat leider nicht geklappt.", False) == "Das hat leider nicht geklappt."
 
 
