@@ -31,7 +31,7 @@
           "reload": "Befehle neu laden (intents.yaml neu einlesen)",
           "chat_log": "Treffer im Gesprächsverlauf",
           "source": "Quelle der Befehle (YAML-Datei oder Katalog)",
-          "translation": "Übersetzungsvorschläge (KI-Aufgabe)",
+          "translation": "KI-Aufgaben (Vorschläge, Sprachprüfung)",
           "languages": "Sprachen",
           "answers": "Antwort auf Befehle (Sprache oder Ton)",
           "monitor": "Sprachanfragen beobachten"
@@ -103,10 +103,11 @@
         }
       },
       "translation": {
-        "title": "Übersetzungsvorschläge",
-        "description": "KI-Aufgaben-Entität, die Sätze und Namen für andere Sprachen vorschlägt. Vorschläge werden geprüft und nur übernommen, wenn du sie annimmst. KI-Aufgaben mit Werkzeugen (einer LLM-API) sind nicht erlaubt: Sätze und Gerätenamen sind für das Modell nicht vertrauenswürdiger Text. Sätze und Namen werden an diese KI-Aufgabe gesendet – bei einem Cloud-Anbieter verlassen sie dein Zuhause.",
+        "title": "KI-Aufgaben",
+        "description": "Zwei getrennte KI-Aufgaben-Entitäten. **Vorschläge und Übersetzungen**: schreibt Sätze, Namen und neue Befehle (am besten ein starkes Modell). **Sprachprüfung**: sollte das Modell sein, das in deinem Sprachassistenten ANTWORTET (Polyglots KI-Assistent für alles Übrige) – bleibt das Feld leer, wird die werkzeuglose KI-Aufgabe aus derselben Integration wie dieser Assistent genommen. Vorschläge werden geprüft und nur übernommen, wenn du sie annimmst. KI-Aufgaben mit Werkzeugen (einer LLM-API) sind nicht erlaubt: Sätze und Gerätenamen sind für das Modell nicht vertrauenswürdiger Text. Bei einem Cloud-Anbieter verlassen sie dein Zuhause.",
         "data": {
-          "translation_ai_task": "KI-Aufgaben-Entität"
+          "translation_ai_task": "KI für Vorschläge und Übersetzungen",
+          "check_ai_task": "KI für die Sprachprüfung (die antwortende KI)"
         }
       },
       "languages": {

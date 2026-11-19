@@ -19,6 +19,10 @@ CONF_LANGUAGE_HINT: Final = "fallback_language_hint"
 CONF_CHAT_LOG_TOOLS: Final = "chat_log_tools"
 # AI Task entity used for translation/name PROPOSALS (pick one without tools)
 CONF_TRANSLATION_AI_TASK: Final = "translation_ai_task"
+# AI Task entity the language check asks — it should be the model that ANSWERS on the
+# pipeline (Polyglot's fallback agent), not the one that writes proposals. Unset → the
+# tool-less AI task of the fallback agent's own integration entry (same model), if any.
+CONF_CHECK_AI_TASK: Final = "check_ai_task"
 
 # Intents source: YAML file (default) or catalog in .storage
 CONF_SOURCE: Final = "source"

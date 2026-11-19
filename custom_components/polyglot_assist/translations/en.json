@@ -31,7 +31,7 @@
           "reload": "Reload matcher (re-read intents.yaml)",
           "chat_log": "Hits in conversation history",
           "source": "Intents source (YAML file or catalog)",
-          "translation": "Translation proposals (AI task)",
+          "translation": "AI tasks (proposals, language check)",
           "languages": "Languages",
           "answers": "Answer to commands (speech or tone)",
           "monitor": "Voice-flow monitoring"
@@ -103,10 +103,11 @@
         }
       },
       "translation": {
-        "title": "Translation proposals",
-        "description": "AI Task entity that proposes sentences and names for other languages. Proposals are checked and only applied when you accept them. AI tasks with tools (an LLM API) are not allowed: sentences and device names are untrusted text for the model. Sentences and names are sent to this AI task — with a cloud provider they leave your home.",
+        "title": "AI tasks",
+        "description": "Two separate AI Task entities. **Proposals and translations**: writes sentences, names and new commands (a capable model is best). **Language check**: should be the model that ANSWERS on your voice assistant (Polyglot's fallback agent) — if empty, the tool-less AI task of the fallback agent's own integration is used. Proposals are checked and only applied when you accept them. AI tasks with tools (an LLM API) are not allowed: sentences and device names are untrusted text for the model. With a cloud provider they leave your home.",
         "data": {
-          "translation_ai_task": "AI Task entity"
+          "translation_ai_task": "AI for proposals and translations",
+          "check_ai_task": "AI for the language check (the answering AI)"
         }
       },
       "languages": {

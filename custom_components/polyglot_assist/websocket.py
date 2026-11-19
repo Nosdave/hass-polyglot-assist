@@ -35,6 +35,7 @@ from .const import (
     CONF_MONITOR_REVIEW,
     CONF_RESPONSE_MODE,
     CONF_TRANSLATION_AI_TASK,
+    CONF_CHECK_AI_TASK,
     DOMAIN,
     SOURCE_CATALOG,
 )
@@ -255,6 +256,23 @@ async def ws_test(hass: HomeAssistant, connection, msg) -> None:
 def _ai_task_entity(hass: HomeAssistant, entry_id: str) -> str | None:
     entry = hass.config_entries.async_get_entry(entry_id)
     return entry.options.get(CONF_TRANSLATION_AI_TASK) if entry else None
+
+
+def _check_ai_task_option(hass: HomeAssistant, entry_id: str) -> str | None:
+    """The AI task chosen for the language check (None → derived from the answering agent)."""
+    entry = hass.config_entries.async_get_entry(entry_id)
+    return entry.options.get(CONF_CHECK_AI_TASK) if entry else None
+
+
+def _check_ai_task_effective(hass: HomeAssistant, entry_id: str) -> str | None:
+    """Chosen check AI task, or the tool-less AI task of Polyglot's fallback agent's entry."""
+    from .settings import default_check_ai_task  # noqa: PLC0415
+
+    chosen = _check_ai_task_option(hass, entry_id)
+    if chosen:
+        return chosen
+    runtime = hass.data.get(DOMAIN, {}).get(entry_id) or {}
+    return default_check_ai_task(hass, runtime.get("fallback_agent"))
 
 
 TOTAL_BUDGET = 180
@@ -520,9 +538,10 @@ async def ws_suggest_languages(hass: HomeAssistant, connection, msg) -> None:
     entry_id, runtime = _runtime(hass, connection, msg)
     if runtime is None:
         return
-    ai_task = _ai_task_entity(hass, entry_id)
+    # "which languages can you do?" is a question about the ANSWERING model, not the proposal one
+    ai_task = _check_ai_task_effective(hass, entry_id)
     if not ai_task:
-        connection.send_error(msg["id"], "not_configured", "choose an AI task for proposals in the options")
+        connection.send_error(msg["id"], "not_configured", "choose an AI task for the language check in the options")
         return
     try:
         async with asyncio.timeout(CALL_BUDGET):
@@ -669,6 +688,8 @@ def ws_overview(hass: HomeAssistant, connection, msg) -> None:
             "intents": intent_meta(hass, config, hits),
             "options": {k: v for k, v in entry.options.items() if k in PANEL_OPTIONS},
             "fallback_agent": runtime.get("fallback_agent"),
+            # the language check's AI when none is chosen: the fallback agent's own tool-less AI task
+            "check_ai_task_default": _check_ai_task_effective(hass, entry_id) if not entry.options.get(CONF_CHECK_AI_TASK) else None,
             "monitor": runtime.get("monitor") is not None,
         },
     )
@@ -740,7 +761,7 @@ async def ws_names_set(hass: HomeAssistant, connection, msg) -> None:
 PANEL_OPTIONS = (
     CONF_LANGUAGES_ENABLED, CONF_RESPONSE_MODE, CONF_MONITOR, CONF_MONITOR_TIME,
     CONF_TRANSLATION_AI_TASK, CONF_CHAT_LOG_TOOLS, CONF_BUILTIN, CONF_CHIME_TTS,
-    CONF_VOICE_LEARN, CONF_VOICE_SATELLITES, CONF_CHIME_TONE, CONF_MONITOR_REVIEW,
+    CONF_VOICE_LEARN, CONF_VOICE_SATELLITES, CONF_CHIME_TONE, CONF_MONITOR_REVIEW, CONF_CHECK_AI_TASK,
 )
 
 TONE_SCHEMA = vol.Schema({
@@ -765,6 +786,7 @@ TONE_SCHEMA = vol.Schema({
         vol.Optional(CONF_MONITOR_TIME): vol.Match(r"^\d{2}:\d{2}$"),
         vol.Optional(CONF_MONITOR_REVIEW): bool,
         vol.Optional(CONF_TRANSLATION_AI_TASK): vol.Any(None, vol.Match(r"^ai_task\.[a-z0-9_]+$")),
+        vol.Optional(CONF_CHECK_AI_TASK): vol.Any(None, vol.Match(r"^ai_task\.[a-z0-9_]+$")),
         vol.Optional(CONF_CHAT_LOG_TOOLS): bool,
         vol.Optional(CONF_BUILTIN): bool,
         vol.Optional(CONF_CHIME_TTS): vol.Any(None, vol.Match(r"^tts\.[a-z0-9_]+$")),
@@ -781,10 +803,10 @@ async def ws_options(hass: HomeAssistant, connection, msg) -> None:
         return
     entry = runtime["entry"]
     changes = {k: msg[k] for k in PANEL_OPTIONS if k in msg}
-    ai_task = changes.get(CONF_TRANSLATION_AI_TASK)
-    if ai_task and ai_task_has_tools(hass, ai_task):
-        connection.send_error(msg["id"], "ai_task_has_tools", "this AI task has tools — choose one without tools")
-        return
+    for key in (CONF_TRANSLATION_AI_TASK, CONF_CHECK_AI_TASK):
+        if changes.get(key) and ai_task_has_tools(hass, changes[key]):
+            connection.send_error(msg["id"], "ai_task_has_tools", "this AI task has tools — choose one without tools")
+            return
     if changes.get(CONF_CHIME_TTS):
         from .tts import inner_tts_error  # noqa: PLC0415
 
@@ -804,8 +826,9 @@ async def ws_options(hass: HomeAssistant, connection, msg) -> None:
             connection.send_error(msg["id"], "no_custom_tone", "upload or record your own tone first")
             return
     new_options = {**entry.options, **changes}
-    if CONF_TRANSLATION_AI_TASK in changes and not ai_task:
-        new_options.pop(CONF_TRANSLATION_AI_TASK, None)
+    for key in (CONF_TRANSLATION_AI_TASK, CONF_CHECK_AI_TASK):
+        if key in changes and not changes[key]:
+            new_options.pop(key, None)
     if CONF_CHIME_TTS in changes and not changes[CONF_CHIME_TTS]:
         new_options.pop(CONF_CHIME_TTS, None)
     hass.config_entries.async_update_entry(entry, options=new_options)
@@ -981,7 +1004,7 @@ async def ws_languages_check(hass: HomeAssistant, connection, msg) -> None:
         async with asyncio.timeout(LANG_CHECK_BUDGET):
             result = await async_language_check(
                 hass, pipeline_id=msg.get("pipeline_id"), languages=msg["languages"], polyglot=polyglot,
-                ai_task=_ai_task_entity(hass, entry_id) if msg["ai"] else None, context=connection.context(msg),
+                ai_task=_check_ai_task_option(hass, entry_id) if msg["ai"] else False, context=connection.context(msg),
             )
     except TimeoutError:
         connection.send_error(msg["id"], "timeout", "the check took too long")

@@ -52,7 +52,8 @@
     "voicelearn": "Tu peux parler des suggestions : « Qu’as-tu appris ? », « Dis-m’en plus sur la première », « Accepte-la » – Polyglot redemande et n’applique qu’après ton « Oui ». À la voix, seules de nouvelles phrases et de nouveaux noms pour des commandes inoffensives sont possibles ; tout ce qui touche à la sécurité, les nouvelles commandes et les niveaux de protection restent dans le panneau. 5 au plus par heure, uniquement sur les appareils choisis, et « Annule ça » revient en arrière pendant 24 heures.",
     "tonedesign": "Comment une commande réussie est confirmée. Classique est le son utilisé jusqu'ici. Créer : nombre, direction, style, hauteur, timbre. Ou ton propre son, par fichier ou enregistrement.",
     "monreview": "Indépendant de la langue : l'IA lit les conversations où tu as reparlé juste après une action et reconnaît des corrections comme « Ce n'est pas juste, le lit s'est éteint aussi ». Les suggestions qui en résultent sont toujours signalées et ne s'acceptent que dans le panneau – jamais à la voix.",
-    "answered": "Ce qui est dit quand la commande est reconnue – par langue, à partir de texte et de valeurs actuelles. Si la réponse vient encore d'un fichier YAML, Polyglot la reprend pour la modifier."
+    "answered": "Ce qui est dit quand la commande est reconnue – par langue, à partir de texte et de valeurs actuelles. Si la réponse vient encore d'un fichier YAML, Polyglot la reprend pour la modifier.",
+    "checkaitask": "La vérification des langues demande à cette tâche IA si elle maîtrise une langue. Ce doit être l’IA qui répond dans ton assistant vocal – pas l’IA des suggestions. Vide : la tâche IA sans outils de la même intégration (et du même modèle) que ton assistant IA de repli."
   },
   "kinds": {
     "new": "ajout",
@@ -285,7 +286,7 @@
     "ai_languages": "Ton IA indique : {languages}. Pour les nouvelles langues, « Traduire » dans une commande propose des phrases.",
     "confirmation": "Confirmation des commandes d'action",
     "confirmation_label": "Confirmation",
-    "ai_task": "IA pour les suggestions",
+    "ai_task": "IA pour les suggestions et traductions",
     "ai_task_label": "Tâche IA",
     "ai_task_none": "– aucune –",
     "builtin": "Commandes de base de Home Assistant dans toutes les langues",
@@ -297,7 +298,11 @@
     "fallback_hint": "{agent} · à modifier dans Paramètres → Appareils et services → Polyglot Assist",
     "backup": "Sauvegarde",
     "backup_catalog": "Tes commandes sont enregistrées dans Home Assistant et incluses dans ses sauvegardes.",
-    "backup_file": "Tes commandes sont dans le fichier intents.yaml. Pour les modifier dans le panneau, passe à « Catalogue » (le fichier est conservé comme sauvegarde) – dans Paramètres → Appareils et services → Polyglot Assist → Configurer → Source."
+    "backup_file": "Tes commandes sont dans le fichier intents.yaml. Pour les modifier dans le panneau, passe à « Catalogue » (le fichier est conservé comme sauvegarde) – dans Paramètres → Appareils et services → Polyglot Assist → Configurer → Source.",
+    "check_ai_task": "IA pour la vérification des langues (l’IA qui répond)",
+    "check_ai_task_auto": "– automatique : {name} –",
+    "check_ai_task_auto_none": "– automatique (aucune trouvée) –",
+    "check_ai_task_hint_none": "Ton assistant IA de repli n’a pas de tâche IA sans outils dans son intégration. Choisis-en une qui utilise le même modèle – sinon la vérification teste la mauvaise IA."
   },
   "messages": {
     "saved": "Enregistré.",
@@ -370,7 +375,7 @@
     "stop_waiting": "Ne plus attendre",
     "stopped": "Attente arrêtée. La demande à l’IA continue en arrière-plan jusqu’à sa limite de temps.",
     "done": "Vérifié. Les nouvelles langues sont en pointillés et pas encore choisies.",
-    "done_no_ai": "Vérifié – sans test de l’IA (aucune IA choisie pour les suggestions).",
+    "done_no_ai": "Vérifié – sans test de l’IA (aucune IA trouvée pour la vérification des langues).",
     "min_one": "Choisis au moins une langue.",
     "applying": "Application … Polyglot redémarre.",
     "applied": "Appliqué. Polyglot écoute maintenant : {languages}",
@@ -389,7 +394,10 @@
     "yes": "oui",
     "no": "non",
     "stt_skipped": "Non testées (8 langues au plus par passage) : {languages}.",
-    "apply_slow": "Enregistré. Polyglot redémarre encore – l’affichage se met à jour dans un instant."
+    "apply_slow": "Enregistré. Polyglot redémarre encore – l’affichage se met à jour dans un instant.",
+    "ai_checked": "Test IA avec {ai_task} ({from}) · Répond sur le pipeline : {agent}",
+    "ai_from_chosen": "choisie",
+    "ai_from_agent": "automatique, même modèle que l’assistant"
   },
   "uitexts": {
     "title": "Textes de l’interface",

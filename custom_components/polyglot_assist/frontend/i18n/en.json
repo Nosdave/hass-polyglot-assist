@@ -52,7 +52,8 @@
     "voicelearn": "You can talk about suggestions: “What have you learned?”, “Tell me more about the first one”, “Accept it” – Polyglot asks back and only applies it after your “Yes”. By voice, only new sentences and names for harmless commands are possible; anything security-related, new commands and protection levels stay in the panel. At most 5 per hour, only on the chosen devices, and “Undo that” takes it back within 24 hours.",
     "tonedesign": "How a successful command is confirmed. Classic is the tone used so far. Design: notes, direction, style, pitch, sound. Or your own tone from a file or a recording.",
     "monreview": "Language-independent: the AI reads conversations where you spoke again shortly after an action and recognises corrections such as “That's wrong, the bed light went off too”. Suggestions from them are always marked and can only be accepted in the panel – never by voice.",
-    "answered": "What is said when the command is recognised – per language, from text and current values. If the answer still comes from a YAML file, Polyglot takes it over for editing."
+    "answered": "What is said when the command is recognised – per language, from text and current values. If the answer still comes from a YAML file, Polyglot takes it over for editing.",
+    "checkaitask": "The language check asks this AI task whether it can handle a language. It should be the AI that answers in your voice assistant – not the AI for suggestions. Empty: the AI task without tools from the same integration (and with the same model) as your fallback AI assistant."
   },
   "kinds": {
     "new": "new",
@@ -285,7 +286,7 @@
     "ai_languages": "Your AI lists: {languages}. For new languages, “Translate” in a command suggests sentences.",
     "confirmation": "Confirmation for control commands",
     "confirmation_label": "Confirmation",
-    "ai_task": "AI for suggestions",
+    "ai_task": "AI for suggestions and translations",
     "ai_task_label": "AI task",
     "ai_task_none": "– none –",
     "builtin": "Home Assistant basic commands in all languages",
@@ -297,7 +298,11 @@
     "fallback_hint": "{agent} · change in Settings → Devices & services → Polyglot Assist",
     "backup": "Backup",
     "backup_catalog": "Your commands are stored in Home Assistant and are included in its backups.",
-    "backup_file": "Your commands are in the intents.yaml file. To edit them in the panel, switch to “Catalog” (the file is kept as a backup) – in Settings → Devices & services → Polyglot Assist → Configure → Source."
+    "backup_file": "Your commands are in the intents.yaml file. To edit them in the panel, switch to “Catalog” (the file is kept as a backup) – in Settings → Devices & services → Polyglot Assist → Configure → Source.",
+    "check_ai_task": "AI for the language check (the answering AI)",
+    "check_ai_task_auto": "– automatic: {name} –",
+    "check_ai_task_auto_none": "– automatic (none found) –",
+    "check_ai_task_hint_none": "Your fallback AI assistant has no AI task without tools in its integration. Choose one that uses the same model – otherwise the language check tests the wrong AI."
   },
   "messages": {
     "saved": "Saved.",
@@ -370,7 +375,7 @@
     "stop_waiting": "Stop waiting",
     "stopped": "Stopped waiting. The request to the AI keeps running in the background until its time limit.",
     "done": "Checked. New languages are dashed and not selected yet.",
-    "done_no_ai": "Checked – without the AI test (no AI for suggestions chosen).",
+    "done_no_ai": "Checked – without the AI test (no AI found for the language check).",
     "min_one": "Select at least one language.",
     "applying": "Applying … Polyglot is reloading.",
     "applied": "Applied. Polyglot now listens to: {languages}",
@@ -389,7 +394,10 @@
     "yes": "yes",
     "no": "no",
     "stt_skipped": "Not tested (at most 8 languages per run): {languages}.",
-    "apply_slow": "Saved. Polyglot is still reloading – the view updates in a moment."
+    "apply_slow": "Saved. Polyglot is still reloading – the view updates in a moment.",
+    "ai_checked": "AI test with {ai_task} ({from}) · Answers on the pipeline: {agent}",
+    "ai_from_chosen": "chosen",
+    "ai_from_agent": "automatic, same model as the assistant"
   },
   "uitexts": {
     "title": "Interface texts",

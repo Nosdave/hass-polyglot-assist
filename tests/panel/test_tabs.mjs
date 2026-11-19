@@ -4,7 +4,7 @@ import { setup } from "./common.mjs";
 const lang = process.argv[2] || "de";
 const { rawKey, tick } = await setup(lang);
 const X = '"><img src=x onerror=alert(1)>';
-const hass = { language: lang, locale: { language: lang }, areas: {}, states: { "ai_task.brain": { attributes: { friendly_name: "Brain" + X } }, "assist_satellite.k": { attributes: { friendly_name: "Küche" + X } } },
+const hass = { language: lang, locale: { language: lang }, areas: {}, states: { "ai_task.brain": { attributes: { friendly_name: "Brain" + X } }, "ai_task.fast_task": { attributes: { friendly_name: "Fast Task" + X } }, "conversation.fast": { attributes: { friendly_name: "Fast" + X } }, "assist_satellite.k": { attributes: { friendly_name: "Küche" + X } } },
   callWS: async (m) => {
     const ty = m.type.replace("polyglot_assist/", "");
     const r = {
@@ -12,10 +12,12 @@ const hass = { language: lang, locale: { language: lang }, areas: {}, states: { 
       overview: { entry_id: "E", title: "P", rev: "r1", source: "catalog", languages: ["de", "en", "fr"], builtin_languages: ["de"],
         summary: { intents: 1, active: 1, sentences: { de: 1 }, categories: {} }, problems: [], categories: ["Licht" + X],
         intents: { Licht: { description: "d" + X, category: "Licht" + X, safety: "normal", sentences: { de: 1 }, rooms: ["Küche" + X], devices: [], hits: 1 } },
-        options: { response_mode: "chime", monitor: true, translation_ai_task: "ai_task.brain", chime_tone: {} }, fallback_agent: "conversation.fast", monitor: true },
+        options: { response_mode: "chime", monitor: true, translation_ai_task: "ai_task.brain", chime_tone: {} }, fallback_agent: "conversation.fast", check_ai_task_default: "ai_task.fast_task", monitor: true },
       get: { rev: "r1", data: { intents: { Licht: { sentences: { de: ["licht an" + X] } } } } },
       "proposals/list": { items: [{ id: "p", op: "add_names", payload: { target: "light.a", lang: "en", names: ["x" + X] }, title: "t" + X, origin: { source: "starter" }, check: { status: "ok", notes: [] } }] },
       "monitor/status": { enabled: true, summary: { when: "2026-01-01T03:00:00Z", total: 1, hits: 1, assistant: 0, proposals: 0, repeated: [], corrections: [], insights: [{ kind: "wrong_device", went_wrong: "w" + X, wanted: "v" + X, said: ["s" + X], outcome: { result: "no_devices" } }] }, today: {}, log: [{ ts: "2026-01-01T01:00:00Z", text: "t" + X, result: "hit", ms: 5 }] },
+      "languages/check": { pipeline: { id: "p", name: "Voice" + X, language: "de", stt_engine: "stt.a", tts_engine: "tts.a" }, ai_task: "ai_task.fast_task", ai_task_from: "agent",
+        answering_agent: "conversation.fast", via_polyglot: true, ai_note: null, languages: [{ language: "de", stt: true, tts: true, ai: true, commands: 1, builtin: true }] },
       pipelines: { pipelines: [] }, "ui_texts/languages": { languages: [] },
     }[ty];
     if (r) return JSON.parse(JSON.stringify(r));
@@ -32,6 +34,18 @@ for (const v of ["start", "proposals", "commands", "test", "names", "monitor", "
   const vis = main.textContent + " " + [...main.innerHTML.matchAll(/(?:aria-label|placeholder|title|data-tip)="([^"]*)"/g)].map((m) => m[1]).join(" ");
   const rk = vis.match(rawKey); if (rk) errors.push("raw key in " + v + ": " + rk[0]);
   if (/undefined|\bNaN\b|\[object/.test(vis)) errors.push("undefined in " + v);
+  if (v === "settings") {
+    // two separate AI choices: proposals (chosen: Brain) and the language check (automatic: the answering model)
+    const sel = main.querySelector('select[data-act="aitask"]'), chk = main.querySelector('select[data-act="checkaitask"]');
+    if (!sel || !chk) errors.push("settings: both AI task selectors expected");
+    else {
+      if (sel.value !== "ai_task.brain") errors.push("settings: proposal AI task not selected");
+      if (chk.value !== "" || !chk.options[0].textContent.includes("Fast Task")) errors.push("settings: check AI task should default to the answering model");
+    }
+    await tick(200);
+    if (![...root.querySelectorAll("main p.hint")].some((h) => h.textContent.includes("Fast Task") && h.textContent.includes("Fast" + X)))
+      errors.push("settings: checked AI task and answering agent not shown in the language card");
+  }
 }
 console.log(`tabs [${lang}]`, errors.length ? "FAIL\n  " + errors.join("\n  ") : "OK");
 process.exit(errors.length ? 1 : 0);
