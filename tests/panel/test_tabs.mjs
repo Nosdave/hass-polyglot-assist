@@ -14,7 +14,13 @@ const hass = { language: lang, locale: { language: lang }, areas: {}, states: { 
         intents: { Licht: { description: "d" + X, category: "Licht" + X, safety: "normal", sentences: { de: 1 }, rooms: ["Küche" + X], devices: [], hits: 1 } },
         options: { response_mode: "chime", monitor: true, translation_ai_task: "ai_task.brain", chime_tone: {} }, fallback_agent: "conversation.fast", monitor: true },
       get: { rev: "r1", data: { intents: { Licht: { sentences: { de: ["licht an" + X] } } } } },
-      "proposals/list": { items: [{ id: "p", op: "add_names", payload: { target: "light.a", lang: "en", names: ["x" + X] }, title: "t" + X, origin: { source: "starter" }, check: { status: "ok", notes: [] } }] },
+      "proposals/list": { items: [{ id: "p", op: "add_names", payload: { target: "light.a", lang: "en", names: ["x" + X] }, title: "t" + X, origin: { source: "starter" }, check: { status: "ok", notes: [] } },
+        { id: "q", op: "add_intent", title: "RoomShutters" + X, check: { status: "warn", notes: ["n" + X] },
+          payload: { name: "RoomShutters", intent: { kind: "command", sentences: { de: ["rollläden {raum} auf" + X] },
+            action: [{ variables: { polyglot_targets: { ["Bad" + X]: ["cover.bad"] } } }, { condition: "template", value_template: "{{ raum in polyglot_targets }}" },
+              { action: "cover.open_cover", target: { entity_id: "{{ polyglot_targets[raum] }}" } }] } },
+          pattern: { id: "cover_area_open", slot: "raum", map: { ["Bad" + X]: ["cover.bad"] } },
+          origin: { source: "repeated_action", detail: "d" + X, evidence: [{ said: "Rollladen Bad auf" + X, ts: "2026-01-01T07:00:00Z", lang: "de" }] } }] },
       "monitor/status": { enabled: true, summary: { when: "2026-01-01T03:00:00Z", total: 1, hits: 1, assistant: 0, proposals: 0, repeated: [], corrections: [], insights: [{ kind: "wrong_device", went_wrong: "w" + X, wanted: "v" + X, said: ["s" + X], outcome: { result: "no_devices" } }] }, today: {}, log: [{ ts: "2026-01-01T01:00:00Z", text: "t" + X, result: "hit", ms: 5 }] },
       pipelines: { pipelines: [] }, "ui_texts/languages": { languages: [] },
     }[ty];
@@ -32,6 +38,8 @@ for (const v of ["start", "proposals", "commands", "test", "names", "monitor", "
   const vis = main.textContent + " " + [...main.innerHTML.matchAll(/(?:aria-label|placeholder|title|data-tip)="([^"]*)"/g)].map((m) => m[1]).join(" ");
   const rk = vis.match(rawKey); if (rk) errors.push("raw key in " + v + ": " + rk[0]);
   if (/undefined|\bNaN\b|\[object/.test(vis)) errors.push("undefined in " + v);
+  if (v === "proposals" && !(main.textContent.includes("cover.open_cover") && main.textContent.includes("Rollladen Bad auf" + X)))
+    errors.push("proposals: learned room command without its action or evidence");
 }
 console.log(`tabs [${lang}]`, errors.length ? "FAIL\n  " + errors.join("\n  ") : "OK");
 process.exit(errors.length ? 1 : 0);

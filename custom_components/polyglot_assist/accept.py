@@ -46,8 +46,8 @@ def dynamic_reason(hass: HomeAssistant, item: dict, sensitive: set[str], extra_n
 
         from .proposals import action_entity_reason  # noqa: PLC0415
 
-        # commands derived from a correction may only switch what Assist may switch
-        needs_exposure = (item.get("origin") or {}).get("source") == "correction"
+        # commands derived from a correction or from repeated AI actions may only switch what Assist may switch
+        needs_exposure = (item.get("origin") or {}).get("source") in ("correction", "repeated_action") or "pattern" in item
 
         def _reason(entity: str) -> str | None:
             reason = action_target_reason(hass, entity, sensitive=sensitive, extra_names=extra_names)
@@ -55,9 +55,16 @@ def dynamic_reason(hass: HomeAssistant, item: dict, sensitive: set[str], extra_n
                 return reason
             return f"{entity} is not exposed to Assist"
 
-        reason = action_entity_reason((p.get("intent") or {}).get("action") or [], _reason)
-        if reason:
-            return reason
+        if "pattern" in item:  # a learned room command: EVERY device of every room (check_item rebuilt the action)
+            from .proposals import pattern_entities  # noqa: PLC0415
+
+            for entity in pattern_entities(item["pattern"]):
+                if reason := _reason(entity):
+                    return reason
+        else:
+            reason = action_entity_reason((p.get("intent") or {}).get("action") or [], _reason)
+            if reason:
+                return reason
         # what an ANSWER reads must be readable by Assist too (and never a protected device)
         from .answer import AnswerError, blocks_entities  # noqa: PLC0415
 

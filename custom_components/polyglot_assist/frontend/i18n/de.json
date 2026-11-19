@@ -66,7 +66,8 @@
     "translation": "Übersetzung",
     "manual": "Von Hand",
     "correction": "Aus einer Korrektur",
-    "ai_answer": "Aus KI-Antworten"
+    "ai_answer": "Aus KI-Antworten",
+    "repeated_action": "Wiederholte KI-Handlung"
   },
   "safety": {
     "normal": "normal",
@@ -160,7 +161,10 @@
     "edit": "Bearbeiten",
     "edit_title": "Vorschlag bearbeiten: {name}",
     "edit_hint": "Sätze und Antwort ändern – danach wird der Vorschlag neu geprüft. Übernommen wird er erst mit „Übernehmen“ in der Liste.",
-    "edited": "Vorschlag geändert und neu geprüft: {status}"
+    "edited": "Vorschlag geändert und neu geprüft: {status}",
+    "rooms_label": "Räume und Geräte:",
+    "runs_label": "Gesagt:",
+    "said_at": "„{text}“ ({when})"
   },
   "groups": {
     "several_rooms": "Mehrere Räume",

@@ -503,7 +503,8 @@ async def async_run_monitor(hass: HomeAssistant, data: dict, budget_s: float = N
     if ai_task and entry.options.get(CONF_MONITOR_REVIEW):
         review, commands = _correction_review(hass, data, ai_task, deadline, _builtin_match)
     result = await monitor.async_evaluate(data, _propose, review, commands, add=_add,
-                                          learn=_ai_answer_learner(hass, data, _builtin_match))
+                                          learn=_ai_answer_learner(hass, data, _builtin_match),
+                                          actions=_action_learner(hass, data, _builtin_match, ai_task, deadline) if ai_task else None)
     return result["summary"]
 
 
@@ -825,6 +826,261 @@ def _ai_answer_learner(hass: HomeAssistant, data: dict, builtin_match):
             }
             if check_item(item) is None:
                 added += await add([item])
+        return added
+
+    return learn
+
+
+MAX_ROOM_EXAMPLES = 8
+ROOM_LIST_SHARE = 0.6  # a room list: at least this share of its values are rooms
+
+
+def _list_values(slot_list) -> list[tuple[str, str]]:
+    """(spoken text, value) pairs of a text list (other list kinds have none)."""
+    from hassil.intents import TextSlotList  # noqa: PLC0415
+
+    out = []
+    if isinstance(slot_list, TextSlotList):
+        for v in slot_list.values:
+            text = getattr(getattr(v, "text_in", None), "text", None)
+            value = getattr(v, "value_out", None)
+            if isinstance(text, str) and isinstance(value, str):
+                out.append((text, value))
+    return out
+
+
+def _action_learner(hass: HomeAssistant, data: dict, builtin_match, ai_task: str, deadline: float):
+    """What the AI keeps DOING → a NEW room command (see learn_actions.py for the pure part).
+
+    The model writes sentences and the answer and picks the room list; the action is built
+    from a fixed pattern (proposals.pattern_action) with the devices per room frozen and
+    checked here (exposed, not protected) — and again for every entity when accepting.
+    """
+    import time as _time  # noqa: PLC0415
+
+    from homeassistant.components.homeassistant.exposed_entities import async_should_expose  # noqa: PLC0415
+    from homeassistant.exceptions import HomeAssistantError  # noqa: PLC0415
+    from homeassistant.helpers import area_registry as ar  # noqa: PLC0415
+    from homeassistant.helpers import device_registry as dr  # noqa: PLC0415
+    from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+    from homeassistant.helpers import intent as ha_intent  # noqa: PLC0415
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
+
+    from .corpus import OTHER_CATEGORY, names_table, string_rules  # noqa: PLC0415
+    from .learn_actions import (  # noqa: PLC0415
+        PATTERNS, covered, evidence_lines, find_repeated_actions, fingerprint, parse_reply,
+    )
+    from .monitor import _template_matches  # noqa: PLC0415
+    from .proposals import (  # noqa: PLC0415
+        PATTERN_SERVICES, bounded_samples, check_item, check_proposal, clean_alternatives, parse_rules,
+        pattern_action, pattern_speech,
+    )
+    from .safety import action_target_reason, sensitive_entities  # noqa: PLC0415
+    from .translate import async_propose_action_command, command_context  # noqa: PLC0415
+
+    matcher = data["matcher"]
+
+    async def learn(entries: list, add, outcomes: list) -> int:
+        config = matcher.config
+        groups = find_repeated_actions(entries, now=dt_util.utcnow(), tz=dt_util.get_default_time_zone())
+        if not groups:
+            return 0
+        slot_lists = {**matcher.static_slot_lists(), **data["lists"].async_get()}
+        rules = string_rules(config)
+        languages = list(matcher.languages)
+        sensitive, extra = sensitive_entities(config), names_table(config)
+        ents, devs, areas_reg = er.async_get(hass), dr.async_get(hass), ar.async_get(hass)
+        registered = {h.intent_type for h in ha_intent.async_get(hass)} | set(config.get("intents") or {})
+
+        # every name a room goes by → its id (registry name, aliases, Polyglot's room names)
+        room_of: dict[str, str] = {}
+        for area in areas_reg.async_list_areas():
+            for n in (area.id, area.name, *(area.aliases or ())):
+                if isinstance(n, str) and n.strip():
+                    room_of[n.strip().casefold()] = area.id
+        for target, names in extra.items():
+            if str(target).startswith("area.") and areas_reg.async_get_area(target[5:]) is not None:
+                for n in names:
+                    if isinstance(n, str) and n.strip():
+                        room_of.setdefault(n.strip().casefold(), target[5:])
+
+        def area_of(entity_id: str) -> str | None:
+            entry = ents.async_get(entity_id)
+            if entry is None:
+                return None
+            if entry.area_id:
+                return entry.area_id
+            dev = devs.async_get(entry.device_id) if entry.device_id else None
+            return dev.area_id if dev else None
+
+        def allowed(entity_id: str) -> bool:
+            entry = ents.async_get(entity_id)
+            return (hass.states.get(entity_id) is not None and not (entry and entry.disabled_by)
+                    and async_should_expose(hass, "conversation", entity_id)
+                    and action_target_reason(hass, entity_id, sensitive=sensitive, extra_names=extra) is None)
+
+        def devices_in(area_id: str, domain: str) -> list[str]:
+            return sorted(st.entity_id for st in hass.states.async_all(domain)
+                          if area_of(st.entity_id) == area_id and allowed(st.entity_id))
+
+        def room_lists(group: dict) -> dict[str, dict]:
+            """Lists that can stand for the room of this group → {name: {map|values, examples}}."""
+            out: dict[str, dict] = {}
+            rooms = [r.casefold() for r in group["rooms"]]
+            for name, sl in slot_lists.items():
+                values = _list_values(sl)
+                if not values:
+                    continue
+                if group["pattern"] == "script_room":
+                    # the script gets the list VALUE: it must be what the AI passed
+                    outs = {v.casefold() for _t, v in values}
+                    if all(r in outs for r in rooms):
+                        out[name] = {"examples": [t for t, _v in values][:MAX_ROOM_EXAMPLES]}
+                    continue
+                resolved = {v: room_of.get(v.strip().casefold()) or room_of.get(t.strip().casefold()) for t, v in values}
+                share = sum(1 for a in resolved.values() if a) / len(resolved)
+                wanted = {room_of.get(r) for r in rooms}
+                if share < ROOM_LIST_SHARE or None in wanted or not wanted <= set(resolved.values()):
+                    continue
+                domain = PATTERN_SERVICES[group["pattern"]][1]
+                mapping = {v: devices_in(a, domain) for v, a in resolved.items() if a}
+                mapping = {v: e for v, e in mapping.items() if e}
+                if mapping:
+                    out[name] = {"map": mapping, "examples": [t for t, _v in values][:MAX_ROOM_EXAMPLES]}
+            return out
+
+        def left() -> float:
+            return deadline - _time.monotonic()
+
+        added = 0
+        for group in groups:
+            outcome = {"key": group["key"], "pattern": group["pattern"], "count": group["count"],
+                       "days": group["days"], "rooms": group["rooms"][:6],
+                       "said": [r["text"] for r in group["runs"]][-4:]}
+            outcomes.append(outcome)
+
+            def skip(result: str, detail: str = "", outcome=outcome) -> None:
+                outcome["outcome"] = {"result": result, **({"detail": detail[:160]} if detail else {})}
+
+            if left() < LOCAL_RESERVE_S * 2:
+                skip("no_time")
+                continue
+            # an existing command (Polyglot or HA's own) already recognises what was said → nothing missing
+            if (name := covered(group, lambda t, lang: matcher.match_all(t, lang, slot_lists))) is not None:
+                skip("exists", name)
+                continue
+            if (hit := covered(group, lambda t, lang: builtin_match(t, lang or "", True))) is not None:
+                skip("exists", hit)
+                continue
+            details = group["details"]
+            if group["pattern"] == "script_room":
+                script = f"script.{details['script']}"
+                if not allowed(script):
+                    skip("unsafe_action", script)
+                    continue
+            candidates = room_lists(group)
+            if not candidates:
+                skip("no_room_list")
+                continue
+            what = PATTERNS[group["pattern"]]  # fixed text; names from the installation only go inside the data fence
+            about: list[str] = []
+            if group["pattern"] == "script_room":
+                st = hass.states.get(f"script.{details['script']}")
+                about.append(f"script: {st.name if st else details['script']} (script.{details['script']}), "
+                             f"{details['room_arg']} = the room" + (f", fixed: {json.dumps(details['constants'])}"
+                                                                     if details.get("constants") else ""))
+            try:
+                answer = await async_propose_action_command(
+                    hass, ai_task_entity=ai_task, what=what, about=about, evidence=evidence_lines(group),
+                    lists=[f"{n}: {', '.join(c['examples'])}" for n, c in candidates.items()],
+                    languages=languages, commands=command_context(config, languages), deadline=deadline)
+            except TimeoutError:
+                skip("no_time")
+                continue
+            except HomeAssistantError as err:  # one failing call must not lose the other groups
+                skip("failed", str(err))
+                continue
+            parsed = parse_reply(answer, languages=languages, lists=list(candidates))
+            if isinstance(parsed, str):
+                skip("ai_none" if parsed.startswith("ai_none") else "invalid", parsed)
+                continue
+            if parsed["name"] in registered:
+                skip("name_exists", parsed["name"])
+                continue
+            chosen = candidates[parsed["list"]]
+            if group["pattern"] == "script_room":
+                pattern = {"id": "script_room", "slot": parsed["list"], "script": details["script"],
+                           "room_arg": details["room_arg"], "constants": details.get("constants") or {}}
+            else:
+                pattern = {"id": group["pattern"], "slot": parsed["list"], "map": chosen["map"]}
+
+            def _check(parsed=parsed, group=group):
+                good: dict[str, list[str]] = {}
+                notes: list[str] = []
+                from hassil.parse_expression import parse_sentence  # noqa: PLC0415
+
+                for lang, templates in parsed["sentences"].items():
+                    for t in templates:
+                        r = check_proposal(parsed["name"], clean_alternatives(t), [],
+                                           lambda x, lang=lang: matcher.match_all(x, lang, slot_lists),
+                                           slot_lists, rules, lang)
+                        if r["status"] != "error":
+                            try:
+                                samples = bounded_samples(parse_sentence(r["sentence"]), slot_lists, parse_rules(rules), lang)
+                            except Exception:  # noqa: BLE001
+                                samples = None
+                            hit = None if samples is None else next(
+                                (f"{h} ← „{x}“" for x in samples if (h := builtin_match(x, lang, True))), None)
+                            if samples is None or hit:
+                                r = {**r, "status": "error", "notes": [f"HA already handles it: {hit}" if hit else "not parsable"]}
+                        if r["status"] == "error":
+                            notes += (r.get("notes") or ["rejected"])[:1]
+                        else:
+                            good.setdefault(lang, []).append(r["sentence"])
+                # bound to the evidence: in a language that was spoken, a sentence really said must be recognised
+                hits = [r for r in group["runs"] if r.get("lang") in good
+                        and any(_template_matches(t, r["lang"], r["text"], slot_lists, rules) for t in good[r["lang"]])]
+                return good, notes, bool(hits)
+
+            good, notes, bound = await hass.async_add_executor_job(_check)
+            if not good:
+                skip("sentences_rejected", "; ".join(notes[:2]))
+                continue
+            if not bound:
+                skip("misses_evidence", "; ".join(r["text"] for r in group["runs"][:3]))
+                continue
+            # the AI's plain answers; the template (honest "no such devices in <room>") is built by Polyglot
+            pattern["answers"] = {lang: said for lang, said in parsed["speech"].items() if lang in good}
+            intent_cfg = {"description": parsed["description"] or what, "category": OTHER_CATEGORY, "kind": "command",
+                          "action": pattern_action(pattern), "sentences": good,
+                          "speech": pattern_speech(pattern, sorted(good))}
+            no_devices = sorted(t for t, _v in _list_values(slot_lists.get(parsed["list"]))
+                                if pattern.get("map") is not None and _v not in pattern["map"])
+            item = {
+                "op": "add_intent",
+                "payload": {"name": parsed["name"], "intent": intent_cfg},
+                "title": f"{parsed['name']} ({', '.join(sorted(good))})",
+                "origin": {"source": "repeated_action",
+                           "detail": " · ".join(f"„{r['text']}“" for r in group["runs"][-3:]),
+                           "evidence": [{"said": r["text"], "ts": r["ts"], "lang": r.get("lang")} for r in group["runs"]]},
+                "check": {"status": "warn", "notes": [
+                    f"learned from {group['count']} AI actions on {group['days']} day(s) — check the rooms and devices before accepting",
+                    "fixed devices per room — new devices are not added automatically" if pattern.get("map") is not None
+                    else "the room is passed to the script as it is",
+                    *([f"rooms without such devices do nothing and say so: {', '.join(no_devices[:6])}"] if no_devices else []),
+                    *notes[:3]]},
+                "pattern": pattern,
+                "fp": fingerprint(group),
+            }
+            if reason := check_item(item):
+                skip("invalid", reason)
+                continue
+            if await add([item]):
+                added += 1
+                registered.add(parsed["name"])
+                skip("proposed", parsed["name"])
+            else:
+                skip("already_known", parsed["name"])
         return added
 
     return learn

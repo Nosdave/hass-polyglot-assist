@@ -412,7 +412,7 @@ OPS = (
     "add_names", "remove_names", "set_list_value", "remove_list_value",
 )
 SETTABLE_FIELDS = ("category", "kind", "safety", "response_mode", "description", "llm_equivalent")
-ORIGINS = ("new_devices", "starter", "monitor", "correction", "ai_answer", "translation", "manual")
+ORIGINS = ("new_devices", "starter", "monitor", "correction", "ai_answer", "repeated_action", "translation", "manual")
 
 
 class QueueError(Exception):
@@ -637,6 +637,138 @@ def check_action_safe(action: Any) -> str | None:
 _LANG = re.compile(r"^[a-z]{2,3}(-[a-z]{2,4})?$")
 
 
+# ── commands learned from repeated AI actions (learn_actions.py) ───────────
+# Their action needs the room placeholder, so it cannot be a plain step. It is
+# BUILT here from a fixed pattern — never written by the AI — and checked by
+# rebuilding it: an item's action must be exactly pattern_action(item["pattern"]).
+# The devices per room are frozen when proposing (and re-checked per entity on accept).
+PATTERN_SERVICES = {
+    "cover_area_open": ("cover.open_cover", "cover"),
+    "cover_area_close": ("cover.close_cover", "cover"),
+    "light_area_on": ("light.turn_on", "light"),
+    "light_area_off": ("light.turn_off", "light"),
+}
+SLOT_RE = re.compile(r"^[a-z_][a-z0-9_]{0,40}$")
+MAP_VAR = "polyglot_targets"
+MAX_PATTERN_ENTITIES = 60
+
+
+def pattern_action(pattern: dict[str, Any]) -> list[dict[str, Any]]:
+    """The action of a learned room command (raises QueueError on a malformed pattern)."""
+    if not isinstance(pattern, dict) or not SLOT_RE.match(str(pattern.get("slot", ""))):
+        raise QueueError("malformed pattern")
+    slot, kind = pattern["slot"], pattern.get("id")
+    if kind in PATTERN_SERVICES:
+        service, _domain = PATTERN_SERVICES[kind]
+        mapping = pattern.get("map")
+        if not isinstance(mapping, dict) or not mapping:
+            raise QueueError("malformed pattern")
+        return [
+            {"variables": {MAP_VAR: {str(k): sorted(v) for k, v in mapping.items()}}},
+            # a room without such devices does nothing (and never switches "everything")
+            {"condition": "template", "value_template": "{{ " + slot + " in " + MAP_VAR + " }}"},
+            {"action": service, "target": {"entity_id": "{{ " + MAP_VAR + "[" + slot + "] }}"}},
+        ]
+    if kind == "script_room":
+        script, arg = pattern.get("script"), pattern.get("room_arg")
+        consts = pattern.get("constants") or {}
+        if not (isinstance(script, str) and SLOT_RE.match(script) and isinstance(arg, str) and SLOT_RE.match(arg)
+                and isinstance(consts, dict)):
+            raise QueueError("malformed pattern")
+        return [{"action": f"script.{script}", "data": {arg: "{{ " + slot + " }}", **consts}}]
+    raise QueueError("unknown pattern")
+
+
+# answers when the AI gave none for a language (other languages: English)
+PATTERN_DEFAULT_ANSWERS = {
+    "de": {"ok": "Erledigt.", "none": "In ROOM gibt es dafür keine Geräte."},
+    "en": {"ok": "Done.", "none": "There are no such devices in ROOM."},
+    "fr": {"ok": "C'est fait.", "none": "Il n'y a pas d'appareils de ce type dans ROOM."},
+}
+_ANSWER_BAD = set('{}%#<>"\\')
+
+
+def _plain(text: Any) -> bool:
+    return isinstance(text, str) and bool(text.strip()) and len(text) <= 120 and not (set(text) & _ANSWER_BAD)
+
+
+def pattern_speech(pattern: dict[str, Any], languages: list[str]) -> dict[str, str]:
+    """The spoken answer per language, BUILT here (the AI only gave plain texts).
+
+    Room commands with a device map answer honestly: the "none" text when the room said
+    has no such devices (the action does nothing then). The plain texts contain none of
+    {}%#<>"\\, so they cannot change the template they are put into.
+    """
+    answers = pattern.get("answers") or {}
+    if not isinstance(answers, dict):
+        raise QueueError("malformed pattern")
+    slot = pattern["slot"]
+    out: dict[str, str] = {}
+    for lang in languages:
+        given = answers.get(lang) or {}
+        if not isinstance(given, dict):
+            raise QueueError("malformed pattern")
+        default = PATTERN_DEFAULT_ANSWERS.get(lang.split("-")[0], PATTERN_DEFAULT_ANSWERS["en"])
+        ok = given.get("ok") if _plain(given.get("ok")) else default["ok"]
+        if pattern.get("id") not in PATTERN_SERVICES:
+            out[lang] = ok
+            continue
+        none = given.get("none") if _plain(given.get("none")) and given["none"].count("ROOM") == 1 else default["none"]
+        rooms = ", ".join(json.dumps(k, ensure_ascii=False) for k in sorted(pattern["map"]))
+        out[lang] = ("{% if " + slot + " in [" + rooms + "] %}" + ok + "{% else %}"
+                     + none.replace("ROOM", "{{ " + slot + " }}") + "{% endif %}")
+    return out
+
+
+def pattern_entities(pattern: dict[str, Any]) -> list[str]:
+    """Every entity a learned room command can switch (for the per-entity checks)."""
+    if pattern.get("id") == "script_room":
+        return [f"script.{pattern.get('script')}"]
+    return sorted({e for v in (pattern.get("map") or {}).values() if isinstance(v, list) for e in v})
+
+
+def check_pattern(pattern: Any, action: Any) -> str | None:
+    """Static check of a learned room command: shape, devices, and action == the built one."""
+    if not isinstance(pattern, dict):
+        return "malformed pattern"
+    try:
+        built = pattern_action(pattern)
+    except QueueError as err:
+        return str(err)
+    if action != built:
+        return "the action differs from the one built for this pattern"
+    kind = pattern["id"]
+    if kind in PATTERN_SERVICES:
+        domain = PATTERN_SERVICES[kind][1]
+        entities = []
+        for key, value in pattern["map"].items():
+            if not isinstance(key, str) or not key.strip() or len(key) > 60 or set(key) & _ANSWER_BAD:
+                return "invalid room value"
+            if not isinstance(value, list) or not value or len(set(value)) != len(value):
+                return "every room needs its devices"
+            entities += value
+        if len(entities) > MAX_PATTERN_ENTITIES:
+            return f"a learned room command switches at most {MAX_PATTERN_ENTITIES} devices"
+        for entity in entities:
+            if not isinstance(entity, str) or not ENTITY_RE.match(entity) or entity.split(".", 1)[0] != domain:
+                return "every target must be an entity of the action's domain"
+            if looks_protected(entity):
+                return f"{entity} looks security-relevant — add it by hand"
+        return None
+    consts = pattern.get("constants") or {}
+    if looks_protected(pattern["script"]):
+        return f"script.{pattern['script']} looks security-relevant — add it by hand"
+    if pattern["room_arg"] in consts or len(consts) > 4:
+        return "malformed pattern"
+    for key, value in consts.items():
+        if not SLOT_RE.match(str(key)) or isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not -100000 <= value <= 100000:
+            return "a learned script command passes only numbers besides the room"
+    return None
+
+
+
+
 def _answer_module():
     """answer.py — as a package import, or loaded from its file (stand-alone use, tests)."""
     try:
@@ -669,14 +801,25 @@ def check_item(item: dict[str, Any]) -> str | None:
                 return "invalid language code"
     if item.get("op") == "add_intent":
         intent = (item.get("payload") or {}).get("intent") or {}
-        if "action" in intent:
+        if "pattern" in item:  # learned room command: action AND answer are the ones built from the pattern
+            reason = check_pattern(item["pattern"], intent.get("action"))
+            if reason:
+                return reason
+            try:
+                built = pattern_speech(item["pattern"], sorted((intent.get("sentences") or {}).keys()))
+            except (QueueError, KeyError, TypeError, AttributeError):
+                return "malformed pattern"
+            if (intent.get("speech") or {}) != built:
+                return "the answer differs from the one built for this pattern"
+        elif "action" in intent:
             reason = check_action_safe(intent["action"])
             if reason:
                 return reason
         if intent.get("safety") not in (None, "normal", "sensitive", "disabled"):
             return "invalid safety level"
         # a proposal never carries Jinja: plain text, or answer blocks the server compiles itself
-        for text in (intent.get("speech") or {}).values():
+        # (a learned room command's answer is server-built and was compared above)
+        for text in ([] if "pattern" in item else (intent.get("speech") or {}).values()):
             if not isinstance(text, str) or len(text) > 200 or any(ch in text for ch in "{}%#"):
                 return "answers in proposals must be short plain text (values only as answer blocks)"
         if intent.get("owned"):

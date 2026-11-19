@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
@@ -34,6 +34,7 @@ from .proposals import bounded_samples, check_proposal, norm, parse_rules
 _LOGGER = logging.getLogger(__name__)
 
 MAX_LOG = 500
+REPEAT_DAYS = 7  # repetitions are counted over a week (500 entries are enough for that)
 CORRECTION_WINDOW = timedelta(seconds=90)
 CORRECTION_RE = re.compile(
     r"^(nein|falsch|ich hab(e)? (doch )?gesagt|ich meinte|nicht (das|den|die)|"
@@ -128,7 +129,8 @@ class Monitor:
 
     @staticmethod
     def find_repeated(entries: list[dict[str, Any]], min_count: int = 2) -> list[dict[str, Any]]:
-        """Assistant-handled sentences that led to a device action, ≥ min_count times."""
+        """Assistant-handled sentences that led to a device action, ≥ min_count times,
+        on two different days or in two different conversations."""
         groups: dict[str, list[dict[str, Any]]] = {}
         for e in entries:
             if e.get("result") == "assistant" and e.get("targets"):
@@ -138,6 +140,10 @@ class Monitor:
             if not key or len(items) < min_count:
                 continue
             times = [t for t in (dt_util.parse_datetime(i["ts"]) for i in items) if t]
+            # a habit, not one chatty evening: two different days or two different conversations
+            days = {dt_util.as_local(t).date() for t in times}
+            if len(days) < 2 and len({i.get("conversation") for i in items if i.get("conversation")}) < 2:
+                continue
             out.append({
                 "text": items[-1]["text"], "count": len(items), "targets": items[-1]["targets"],
                 "lang": items[-1].get("lang"), "times": [i["ts"] for i in items][-5:],
@@ -161,18 +167,21 @@ class Monitor:
         }
 
     async def async_evaluate(self, runtime: dict[str, Any], propose, review=None, commands=None, *, add=None,
-                             learn=None) -> dict[str, Any]:
-        """Evaluate the last 24 h.
+                             learn=None, actions=None) -> dict[str, Any]:
+        """Evaluate the log: corrections over the last 24 h, repetitions over REPEAT_DAYS.
 
         Order (one shared time budget — whatever finished is kept, even on a timeout):
         1. ``review(entries)`` → insights "what went wrong" (AI task, optional);
         2. ``propose(repeated)`` → sentences for existing commands;
-        3. ``commands(insights, add)`` → new commands derived from corrections (optional).
+        3. ``actions(week, add)`` → NEW commands for what the AI keeps doing (learn_actions.py);
+        4. ``commands(insights, add)`` → new commands derived from corrections (optional).
         ``add(items)`` puts proposals into the queue right away and returns how many
         were new; ``proposals`` in the summary counts only those.
         """
         entries = self.window(24)
-        repeated = self.find_repeated(entries)
+        week = self.window(24 * REPEAT_DAYS)
+        repeated = self.find_repeated(week)
+        learned_actions: list[dict[str, Any]] = []
         corrections = self.find_corrections(entries)
         items: list[dict[str, Any]] = []
         added = 0
@@ -200,6 +209,12 @@ class Monitor:
                 except Exception as err:  # noqa: BLE001
                     errors.append(f"ai answers: {str(err)[:150]}")
                     _LOGGER.warning("Polyglot Assist: learning from AI answers failed: %s", err)
+            if actions is not None and add is not None:
+                try:  # what the AI keeps DOING (grouped by action, not by words) → new room commands
+                    added += await actions(week, add, learned_actions)
+                except Exception as err:  # noqa: BLE001
+                    errors.append(f"actions: {str(err)[:150]}")
+                    _LOGGER.warning("Polyglot Assist: learning from repeated AI actions failed: %s", err)
             if commands is not None and insights and add is not None:
                 try:
                     added += await commands(insights, add)
@@ -213,6 +228,7 @@ class Monitor:
                 "repeated": repeated[:10],
                 "corrections": corrections[:10],
                 "insights": insights[:10],
+                "repeated_actions": learned_actions[:10],
                 "proposals": added if add is not None else len(items),
                 **({"error": "; ".join(errors)[:300]} if errors else {}),
             }

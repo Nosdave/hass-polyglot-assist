@@ -239,7 +239,7 @@ class PolyglotAssistAgent(ConversationEntity, AbstractConversationAgent):
                 result="assistant",
                 targets=[{"tool": c["tool"], "args": str(c["args"])[:200],
                           # target fields kept whole (the text above may be cut) — for the target check
-                          "target": {k: c["args"][k] for k in ("name", "entity_id", "domain", "area", "floor")
+                          "target": {k: c["args"][k] for k in ("name", "entity_id", "domain", "device_class", "area", "floor")
                                      if isinstance(c["args"], dict) and isinstance(c["args"].get(k), (str, list))}}
                          for c in calls[:5]],
                 speech=speech[:600], speech_cut=len(speech) > 600, switched=switched, read=read,
