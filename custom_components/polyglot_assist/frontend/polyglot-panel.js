@@ -1123,6 +1123,8 @@ class PolyglotAssistPanel extends HTMLElement {
         ${(opts.voice_learn_satellites || []).length ? "" : `<div class="hint">${t("voicelearn.choose")}</div>`}</div><span></span></div>` : ""}
       <div class="set"><div><div class="t">${t("settings.followup")}${this._tip("followup")}</div></div>
         <button class="switch" role="switch" data-act="opt" data-k="chat_log_tools" aria-checked="${opts.chat_log_tools ? "true" : "false"}" aria-label="${t("settings.followup_label")}"></button></div>
+      <div class="set"><div><div class="t">${t("settings.nudge")}${this._tip("nudge")}</div><div class="hint">${t("settings.nudge_hint")}</div></div>
+        <button class="switch" role="switch" data-act="opt" data-k="fallback_tool_nudge" aria-checked="${opts.fallback_tool_nudge === false ? "false" : "true"}" aria-label="${t("settings.nudge_label")}"></button></div>
       ${this._msg("set")}</div>
       <div class="card"><h2>${t("settings.backup")}</h2>
         <p class="hint">${o.source === "catalog" ? t("settings.backup_catalog") : t("settings.backup_file")}</p>

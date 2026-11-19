@@ -15,6 +15,7 @@ CONF_INTENTS_FILE: Final = "intents_file"
 CONF_LANGUAGES: Final = "languages"
 # Options (opt-in, default off)
 CONF_LANGUAGE_HINT: Final = "fallback_language_hint"
+CONF_TOOL_NUDGE: Final = "fallback_tool_nudge"  # hint against claimed actions in running conversations (default on)
 # Record hits in the ChatLog as tool calls (needs llm_equivalent per intent)
 CONF_CHAT_LOG_TOOLS: Final = "chat_log_tools"
 # AI Task entity used for translation/name PROPOSALS (pick one without tools)

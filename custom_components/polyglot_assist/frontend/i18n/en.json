@@ -52,7 +52,8 @@
     "voicelearn": "You can talk about suggestions: “What have you learned?”, “Tell me more about the first one”, “Accept it” – Polyglot asks back and only applies it after your “Yes”. By voice, only new sentences and names for harmless commands are possible; anything security-related, new commands and protection levels stay in the panel. At most 5 per hour, only on the chosen devices, and “Undo that” takes it back within 24 hours.",
     "tonedesign": "How a successful command is confirmed. Classic is the tone used so far. Design: notes, direction, style, pitch, sound. Or your own tone from a file or a recording.",
     "monreview": "Language-independent: the AI reads conversations where you spoke again shortly after an action and recognises corrections such as “That's wrong, the bed light went off too”. Suggestions from them are always marked and can only be accepted in the panel – never by voice.",
-    "answered": "What is said when the command is recognised – per language, from text and current values. If the answer still comes from a YAML file, Polyglot takes it over for editing."
+    "answered": "What is said when the command is recognised – per language, from text and current values. If the answer still comes from a YAML file, Polyglot takes it over for editing.",
+    "nudge": "Some models take a repeated or corrected request (“I said white”) for already done and report success without switching anything. If the conversation already has earlier sentences, the AI assistant gets a short note with your sentence: switching requests always need a tool, questions and small talk do not. The history keeps only your own sentence. Costs about 40 tokens, no noticeable time."
   },
   "kinds": {
     "new": "new",
@@ -297,7 +298,10 @@
     "fallback_hint": "{agent} · change in Settings → Devices & services → Polyglot Assist",
     "backup": "Backup",
     "backup_catalog": "Your commands are stored in Home Assistant and are included in its backups.",
-    "backup_file": "Your commands are in the intents.yaml file. To edit them in the panel, switch to “Catalog” (the file is kept as a backup) – in Settings → Devices & services → Polyglot Assist → Configure → Source."
+    "backup_file": "Your commands are in the intents.yaml file. To edit them in the panel, switch to “Catalog” (the file is kept as a backup) – in Settings → Devices & services → Polyglot Assist → Configure → Source.",
+    "nudge": "Hint against claimed actions",
+    "nudge_label": "Hint against claimed actions",
+    "nudge_hint": "In running conversations Polyglot reminds the AI to carry out switching requests with a tool (no extra time)."
   },
   "messages": {
     "saved": "Saved.",
