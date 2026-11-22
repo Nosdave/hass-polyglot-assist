@@ -331,6 +331,7 @@ Every Tier-1 match gets two extra slots in addition to the matched ones:
 | Translation proposals | – | AI Task entity for sentence/name proposals. |
 | Hits in conversation history | off | See above; the tools are read from the fallback agent's own settings. |
 | Fallback language hint | off | On a miss, if the utterance is clearly in another configured language (small de/en/fr word lists), a short "reply in <language>" note is appended to `extra_system_prompt` for the fallback agent. Pipelines run with one fixed language, so LLMs otherwise tend to answer in the language of (German) tool results. Otherwise the input is passed on unchanged. |
+| Hint against claimed actions | on | Inside a running conversation (earlier turns exist) the fallback gets the user's sentence plus a short note: a request to switch, set, dim or change something needs a tool call in this turn, even if it seems already done; questions and small talk need none. Some models otherwise take a repeated or corrected request ("I said white") for already done and report success without switching anything. One pass only, streaming untouched (~40 input tokens). The chat log keeps the user's own words; the monitor records `hinted` / `hinted_tools`. Panel → Settings. |
 
 ## Services
 
