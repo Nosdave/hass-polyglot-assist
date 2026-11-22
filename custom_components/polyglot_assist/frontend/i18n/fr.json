@@ -160,7 +160,9 @@
     "edit": "Modifier",
     "edit_title": "Modifier la suggestion : {name}",
     "edit_hint": "Modifie les phrases et la réponse – la suggestion est ensuite revérifiée. Elle n'est appliquée qu'avec « Accepter » dans la liste.",
-    "edited": "Suggestion modifiée et revérifiée : {status}"
+    "edited": "Suggestion modifiée et revérifiée : {status}",
+    "select_reject": "Sélectionner pour refuser",
+    "reject_only": "La vérification a échoué – cette proposition peut seulement être refusée."
   },
   "groups": {
     "several_rooms": "Plusieurs pièces",
@@ -336,7 +338,8 @@
     "analysed": "Analyse terminée.",
     "time_saved": "Heure enregistrée.",
     "ai_task_has_tools": "Cette tâche IA a des outils. Choisis-en une sans outils.",
-    "need_catalog": "Pour modifier, choisis la source « Catalogue » dans les paramètres."
+    "need_catalog": "Pour modifier, choisis la source « Catalogue » dans les paramètres.",
+    "failed_reject_only": "{count} en échec peuvent seulement être refusées"
   },
   "fallback": {
     "label": "Transmettre à",
@@ -568,5 +571,31 @@
     "yaml_title": "Cette réponse se trouve dans un fichier YAML (intent_script).",
     "yaml_vars": "Elle utilise des valeurs que Polyglot ne connaît pas : {vars}.",
     "convert_failed": "La conversion en modèle n'a pas fonctionné – les blocs restent inchangés. Réessaie."
+  },
+  "checks": {
+    "empty": "vide",
+    "too_long": "plus de {max} caractères",
+    "too_many_groups": "trop d’alternatives ou de parties optionnelles",
+    "placeholder_twice": "un espace réservé apparaît deux fois",
+    "unknown_placeholder": "espace réservé inconnu {name}",
+    "needs_literal": "il faut au moins un mot fixe (pas seulement des parties optionnelles ou des espaces réservés)",
+    "too_many_variants": "trop de variantes",
+    "no_samples": "non vérifié (aucun exemple)",
+    "collides": "entre en conflit avec d’autres commandes",
+    "covered": "déjà couvert par des phrases existantes",
+    "optional_skipped": "vérifié sans les mots optionnels (grand modèle)",
+    "list_empty": "la liste {list} est vide – vérifié avec un espace réservé",
+    "not_parsable": "illisible",
+    "free_text": "les espaces réservés de texte libre sont interdits dans les phrases apprises",
+    "no_said_match": "ne correspond à aucune des phrases réellement dites",
+    "takes_over_builtin": "reprendrait une commande de Home Assistant ({hit}) pour « {sample} »",
+    "switches_other": "cette commande commute autre chose que l’assistant ({entities})",
+    "action_unknown": "on ne sait pas ce que commute cette commande (intent_script) – à vérifier",
+    "targets_unverifiable": "les cibles de la commande ne peuvent pas être entièrement vérifiées (template, script, étapes imbriquées ou cibles pièce/appareil) – à vérifier",
+    "no_device": "la commande ne nomme aucun appareil (p. ex. elle lance un script) – à vérifier",
+    "whole_area": "l’assistant a commuté toute une pièce ou un étage – vérifiez de quels appareils il s’agit",
+    "calls_unreadable": "ce que l’assistant a commuté n’est pas entièrement lisible – à vérifier",
+    "device_with_area": "l’assistant a nommé l’appareil avec une pièce – vérifiez que c’est bien celui-ci",
+    "no_target_named": "les appels d’outils de l’assistant ne nomment aucune cible – à vérifier"
   }
 }

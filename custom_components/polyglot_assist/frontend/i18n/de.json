@@ -160,7 +160,9 @@
     "edit": "Bearbeiten",
     "edit_title": "Vorschlag bearbeiten: {name}",
     "edit_hint": "Sätze und Antwort ändern – danach wird der Vorschlag neu geprüft. Übernommen wird er erst mit „Übernehmen“ in der Liste.",
-    "edited": "Vorschlag geändert und neu geprüft: {status}"
+    "edited": "Vorschlag geändert und neu geprüft: {status}",
+    "select_reject": "Zum Ablehnen auswählen",
+    "reject_only": "Die Prüfung ist fehlgeschlagen – dieser Vorschlag kann nur abgelehnt werden."
   },
   "groups": {
     "several_rooms": "Mehrere Räume",
@@ -336,7 +338,8 @@
     "analysed": "Auswertung fertig.",
     "time_saved": "Uhrzeit gespeichert.",
     "ai_task_has_tools": "Diese KI-Aufgabe hat Werkzeuge. Bitte eine ohne Werkzeuge wählen.",
-    "need_catalog": "Zum Ändern bitte unter Einstellungen die Quelle „Katalog“ wählen."
+    "need_catalog": "Zum Ändern bitte unter Einstellungen die Quelle „Katalog“ wählen.",
+    "failed_reject_only": "{count} fehlgeschlagene können nur abgelehnt werden"
   },
   "fallback": {
     "label": "Weitergeben an",
@@ -568,5 +571,31 @@
     "yaml_title": "Diese Antwort steht in einer YAML-Datei (intent_script).",
     "yaml_vars": "Sie nutzt Werte, die Polyglot nicht kennt: {vars}.",
     "convert_failed": "Umwandeln in eine Vorlage ging gerade nicht – die Bausteine bleiben unverändert. Bitte nochmal versuchen."
+  },
+  "checks": {
+    "empty": "leer",
+    "too_long": "länger als {max} Zeichen",
+    "too_many_groups": "zu viele Alternativen oder optionale Teile",
+    "placeholder_twice": "ein Platzhalter kommt doppelt vor",
+    "unknown_placeholder": "unbekannter Platzhalter {name}",
+    "needs_literal": "braucht mindestens ein festes Wort (nicht nur optionale Teile oder Platzhalter)",
+    "too_many_variants": "zu viele Varianten",
+    "no_samples": "nicht geprüft (keine Beispielsätze)",
+    "collides": "kollidiert mit anderen Befehlen",
+    "covered": "schon von vorhandenen Sätzen abgedeckt",
+    "optional_skipped": "ohne optionale Wörter geprüft (große Vorlage)",
+    "list_empty": "Liste {list} ist leer – mit einem Platzhalter geprüft",
+    "not_parsable": "nicht lesbar",
+    "free_text": "Freitext-Platzhalter sind in gelernten Sätzen nicht erlaubt",
+    "no_said_match": "passt zu keinem der Sätze, die wirklich gesagt wurden",
+    "takes_over_builtin": "würde einen Home-Assistant-Befehl übernehmen ({hit}) für „{sample}“",
+    "switches_other": "dieser Befehl schaltet etwas anderes als der Assistent damals ({entities})",
+    "action_unknown": "unbekannt, was dieser Befehl schaltet (intent_script) – bitte prüfen",
+    "targets_unverifiable": "die Ziele des Befehls lassen sich nicht vollständig prüfen (Template, Skript, verschachtelte Schritte oder Bereichs-/Geräteziele) – bitte prüfen",
+    "no_device": "der Befehl nennt kein Gerät (z. B. startet er ein Skript) – bitte prüfen",
+    "whole_area": "der Assistent hat einen ganzen Bereich oder ein Stockwerk geschaltet – bitte prüfen, welche Geräte gemeint sind",
+    "calls_unreadable": "was der Assistent geschaltet hat, ist nicht vollständig lesbar – bitte prüfen",
+    "device_with_area": "der Assistent hat das Gerät zusammen mit einem Bereich genannt – bitte prüfen, ob es dieses ist",
+    "no_target_named": "die Werkzeugaufrufe des Assistenten nennen kein Ziel – bitte prüfen"
   }
 }

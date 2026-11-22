@@ -323,13 +323,15 @@ async def ws_translate(hass: HomeAssistant, connection, msg) -> None:
         return
     queued = 0
     if msg.get("to_queue"):
+        from .proposals import check_for_queue  # noqa: PLC0415
+
         items = [
             {
                 "op": "add_sentences",
                 "payload": {"intent": msg["name"], "lang": lang, "sentences": [r["sentence"]]},
                 "title": f"{msg['name']} ({lang}): {r['sentence']}",
                 "origin": {"source": "translation", "detail": f"Übersetzung von {msg['name']} nach {lang}"},
-                "check": {"status": r["status"], "notes": r["notes"]},
+                "check": check_for_queue(r),
             }
             for lang, results in proposals.items()
             if isinstance(results, list)

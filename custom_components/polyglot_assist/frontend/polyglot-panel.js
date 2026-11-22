@@ -930,6 +930,13 @@ class PolyglotAssistPanel extends HTMLElement {
     this._setMsg("pedit", this.t("proposals.edited", { status: this.t({ ok: "proposals.status_ok", warn: "proposals.status_warn", error: "proposals.status_error" }[r.check?.status] || "proposals.status_ok") }), r.check?.status === "error" ? "err" : "ok");
   }
 
+  /** A check note in the panel's language (``checks.<key>``), else the backend's English text. */
+  _checkNote(check, note) {
+    const c = check?.i18n?.[note];
+    const key = c && typeof c.key === "string" ? "checks." + c.key : null;
+    return key && this._tx[key] != null ? this.t(key, c.params || {}) : String(note);
+  }
+
   _v_proposals() {
     const t = (k, v) => esc(this.t(k, v));
     const items = (this.s.proposals || []).filter((i) => (!this.s.propFilter || i.origin?.source === this.s.propFilter) && (!this.s.kindFilter || OP_KIND[i.op] === this.s.kindFilter));
@@ -940,10 +947,13 @@ class PolyglotAssistPanel extends HTMLElement {
       const kind = OP_KIND[i.op] || "change";
       const p = i.payload || {};
       const ex = p.sentences ? p.sentences.join(" · ") : p.names ? p.names.join(" · ") : p.intent?.sentences ? Object.values(p.intent.sentences).flat().slice(0, 3).join(" · ") : p.field ? `${p.field} = ${JSON.stringify(p.value)}` : p.in ? `${p.in} → ${p.out ?? "–"}` : "";
-      return `<div class="qrow"><input type="checkbox" data-pid="${esc(i.id)}" ${st === "err" || st === "error" ? "disabled" : ""} aria-label="${t("proposals.select")}">
+      const failed = st === "err" || st === "error";
+      // a failed proposal can never be accepted, but it stays selectable so it can be rejected
+      return `<div class="qrow"><input type="checkbox" data-pid="${esc(i.id)}" ${failed ? 'data-failed="1"' : ""} aria-label="${failed ? t("proposals.select_reject") : t("proposals.select")}">
         <div><span class="chip ${kind === "new" ? "ok" : kind === "remove" ? "warn" : "pri"}">${t("kinds." + kind)}</span> <b>${esc(i.title || i.op)}</b> <span class="chip ${st === "ok" ? "ok" : st === "warn" ? "warn" : "err"}">${stLabel}</span>
         <div class="hint"><b>${t("proposals.origin_label")}</b> ${esc(i.origin?.detail || this._origin(i.origin?.source))}</div>
-        ${(i.check?.notes || []).length ? `<div class="hint">${esc(i.check.notes.join("; "))}</div>` : ""}
+        ${(i.check?.notes || []).length ? `<div class="hint">${esc(i.check.notes.map((n) => this._checkNote(i.check, n)).join("; "))}</div>` : ""}
+        ${failed ? `<div class="hint">${t("proposals.reject_only")}</div>` : ""}
         ${ex ? `<div class="ex">${esc(ex)}</div>` : ""}${this._actionLine(p.intent?.action)}${this._answerLines(i)}${i.origin?.wanted ? `<div class="hint"><b>${t("proposals.wanted_label")}</b> ${esc(i.origin.wanted)}</div>` : ""}</div><span class="chip pri">${esc(this._origin(i.origin?.source))}</span></div>`;
     }).join("");
     return `<section class="grid">${this.s.propEdit ? this._proposalEditCard() : ""}<div class="card">
@@ -1371,14 +1381,18 @@ class PolyglotAssistPanel extends HTMLElement {
       else if (a === "tab") { this.s.view = el.dataset.v; history.replaceState(null, "", "#" + el.dataset.v); if (el.dataset.v === "monitor" || el.dataset.v === "start") await this._reload(["monitor", "overview"]); else this._render(); }
       else if (a === "pall") this.shadowRoot.querySelectorAll("[data-pid]").forEach((c) => { const it = this.s.proposals.find((i) => i.id === c.dataset.pid); c.checked = !c.disabled && it?.check?.status === "ok"; });
       else if (a === "paccept" || a === "preject") {
-        const ids = [...this.shadowRoot.querySelectorAll("[data-pid]:checked")].map((c) => c.dataset.pid);
-        if (!ids.length) return this._setMsg("prop", t("messages.nothing_selected"));
+        const checked = [...this.shadowRoot.querySelectorAll("[data-pid]:checked")];
+        // failed proposals can only be rejected — accepting leaves them out (the server refuses them too)
+        const failed = a === "paccept" ? checked.filter((c) => c.dataset.failed).length : 0;
+        const ids = checked.filter((c) => a === "preject" || !c.dataset.failed).map((c) => c.dataset.pid);
+        if (!ids.length) return this._setMsg("prop", failed ? t("messages.failed_reject_only", { count: failed }) : t("messages.nothing_selected"), failed ? "err" : undefined);
         this._setMsg("prop", a === "paccept" ? t("messages.accepting") : t("messages.removing"));
         if (a === "preject") { const r = await this.ws("proposals/reject", { ids }); this._setMsg("prop", t("messages.rejected", { count: r.removed })); }
         else {
           const r = await this.ws("proposals/accept", { ids });
           const refused = Object.keys(r.refused || {}).length;
-          if (r.saved) this._setMsg("prop", t("messages.accepted", { count: r.applied.length, status: this._corpusStatus(r), details: refused ? " · " + t("messages.refused", { count: refused }) : "" }), "ok");
+          const skipped = failed ? " · " + t("messages.failed_reject_only", { count: failed }) : "";
+          if (r.saved) this._setMsg("prop", t("messages.accepted", { count: r.applied.length, status: this._corpusStatus(r), details: (refused ? " · " + t("messages.refused", { count: refused }) : "") + skipped }), "ok");
           else this._setMsg("prop", t("messages.not_accepted", { reason: r.message || r.code, details: this._regressions(r) + this._problems(r) }), "err");
         }
         await this._reload();

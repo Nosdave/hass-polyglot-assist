@@ -160,7 +160,9 @@
     "edit": "Edit",
     "edit_title": "Edit suggestion: {name}",
     "edit_hint": "Change sentences and answer – the suggestion is checked again afterwards. It is only applied with “Accept” in the list.",
-    "edited": "Suggestion changed and checked again: {status}"
+    "edited": "Suggestion changed and checked again: {status}",
+    "select_reject": "Select to reject",
+    "reject_only": "The check failed – this proposal can only be rejected."
   },
   "groups": {
     "several_rooms": "Several rooms",
@@ -336,7 +338,8 @@
     "analysed": "Analysis done.",
     "time_saved": "Time saved.",
     "ai_task_has_tools": "This AI task has tools. Please choose one without tools.",
-    "need_catalog": "To make changes, please choose the source “Catalog” in the settings."
+    "need_catalog": "To make changes, please choose the source “Catalog” in the settings.",
+    "failed_reject_only": "{count} failed ones can only be rejected"
   },
   "fallback": {
     "label": "Hand over to",
@@ -568,5 +571,31 @@
     "yaml_title": "This answer lives in a YAML file (intent_script).",
     "yaml_vars": "It uses values Polyglot does not know: {vars}.",
     "convert_failed": "Converting to a template did not work just now – the blocks stay unchanged. Please try again."
+  },
+  "checks": {
+    "empty": "empty",
+    "too_long": "longer than {max} characters",
+    "too_many_groups": "too many alternatives/optional parts",
+    "placeholder_twice": "a placeholder appears twice",
+    "unknown_placeholder": "unknown placeholder {name}",
+    "needs_literal": "needs at least one fixed word (not only optional parts or placeholders)",
+    "too_many_variants": "too many variants",
+    "no_samples": "not verified (no samples)",
+    "collides": "collides with other commands",
+    "covered": "already covered by existing sentences",
+    "optional_skipped": "checked without optional words (large template)",
+    "list_empty": "list {list} is empty – checked with a placeholder",
+    "not_parsable": "not parsable",
+    "free_text": "free-text placeholders are not allowed in learned sentences",
+    "no_said_match": "does not match the sentences that were actually said",
+    "takes_over_builtin": "would take over a Home Assistant command ({hit}) for “{sample}”",
+    "switches_other": "this command switches something else than the assistant did ({entities})",
+    "action_unknown": "what this command switches is not known (intent_script) – review it",
+    "targets_unverifiable": "the command's targets cannot be fully checked (template, script, nested steps or area/device targets) – review it",
+    "no_device": "the command names no device (e.g. it runs a script) – review it",
+    "whole_area": "the assistant switched a whole area or floor – review which devices it means",
+    "calls_unreadable": "what the assistant switched cannot be read completely – review it",
+    "device_with_area": "the assistant named the device together with an area – review that it is this one",
+    "no_target_named": "the assistant's tool calls name no target – review it"
   }
 }

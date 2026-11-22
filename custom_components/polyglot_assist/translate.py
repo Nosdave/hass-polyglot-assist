@@ -429,6 +429,8 @@ async def async_propose_from_monitor(
                 "handled them and performed the listed tool calls. For each sentence that clearly "
                 "belongs to one of the EXISTING commands, write a template that would match it.",
                 "Answer lines in the form: COMMAND | LANGUAGE_CODE | TEMPLATE. Skip sentences that fit no command.",
+                "LANGUAGE_CODE is the language of the sentences the template is for; build each template only "
+                "from sentences in that language. Group sentences only if the AI did the same thing for them.",
                 _FENCE,
                 "<data>",
                 "sentences (with what the AI did):",
