@@ -40,6 +40,28 @@ MAX_NAME_WORDS = 4
 _NAME_FORBIDDEN = re.compile(r"[{}<>\[\]()|;:]")
 
 
+def coded_note(check: dict[str, Any], key: str, text: str, **params: Any) -> str:
+    """Register a stable translation key for a check note and return the note.
+
+    ``notes`` stay plain English (the fallback, and what logs and the accept
+    refusal show); ``check["i18n"]`` maps each such note to ``{"key", "params"}``
+    so the panel can show it in its own language (``checks.<key>``). Keyed by the
+    text, so slicing or reordering ``notes`` never attaches the wrong translation.
+    """
+    check.setdefault("i18n", {})[text] = {"key": key, **({"params": {k: str(v) for k, v in params.items()}} if params else {})}
+    return text
+
+
+def check_for_queue(check: dict[str, Any]) -> dict[str, Any]:
+    """status + notes (+ the translation keys of exactly those notes) for a queue item."""
+    notes = list(check.get("notes") or [])
+    out: dict[str, Any] = {"status": check.get("status", "ok"), "notes": notes}
+    i18n = {n: v for n, v in (check.get("i18n") or {}).items() if n in notes}
+    if i18n:
+        out["i18n"] = i18n
+    return out
+
+
 def norm(text: str) -> str:
     """Normalisation used for every equality check (like the runtime)."""
     return " ".join(remove_punctuation(text).casefold().split())
@@ -278,28 +300,31 @@ def check_proposal(
     def _err(note: str) -> dict[str, Any]:
         return {**result, "status": "error", "notes": [note]}
 
+    def _coded(key: str, text: str, **params: Any) -> str:
+        return coded_note(result, key, text, **params)
+
     if not isinstance(sentence, str) or not sentence.strip():
-        return _err("empty")
+        return _err(_coded("empty", "empty"))
     if len(sentence) > MAX_SENTENCE_CHARS:
-        return _err(f"longer than {MAX_SENTENCE_CHARS} characters")
+        return _err(_coded("too_long", f"longer than {MAX_SENTENCE_CHARS} characters", max=MAX_SENTENCE_CHARS))
     if sentence.count("(") + sentence.count("[") + sentence.count(";") > MAX_GROUPS:
-        return _err("too many alternatives/optional parts")
+        return _err(_coded("too_many_groups", "too many alternatives/optional parts"))
     try:
         parsed = parse_sentence(sentence)
     except Exception as err:  # noqa: BLE001
         return _err(f"not parsable: {err}")
     refs = _list_refs(parsed)
     if len(refs) != len(set(refs)):
-        return _err("a placeholder appears twice")
+        return _err(_coded("placeholder_twice", "a placeholder appears twice"))
     missing = [r for r in refs if r not in slot_lists]
     if missing:
-        return _err(f"unknown placeholder {{{missing[0]}}}")
+        return _err(_coded("unknown_placeholder", f"unknown placeholder {{{missing[0]}}}", name=f"{{{missing[0]}}}"))
     parsed_rules = parse_rules(rules or {})
     unknown_rules = sorted(r for r in _rule_refs(parsed) if r not in parsed_rules)
     if unknown_rules:  # also catches markup like <b> or <script>, which hassil reads as rules
         return _err(f"unknown rule <{unknown_rules[0]}>")
     if not _has_required_literal(parsed, rules=parsed_rules):
-        return _err("needs at least one fixed word (not only optional parts or placeholders)")
+        return _err(_coded("needs_literal", "needs at least one fixed word (not only optional parts or placeholders)"))
 
     wanted = slot_paths(parsed, parsed_rules)
     source_paths: set[frozenset[tuple[str, str]]] = set()
@@ -316,7 +341,7 @@ def check_proposal(
     try:
         samples, skipped, empty = bounded_samples_info(parsed, slot_lists, parsed_rules, language)
     except ValueError:
-        return _err("too many variants")
+        return _err(_coded("too_many_variants", "too many variants"))
     except Exception as err:  # noqa: BLE001
         result["status"] = "warn"
         result["notes"].append(f"not verifiable: {err}")
@@ -324,7 +349,7 @@ def check_proposal(
     result["checked"] = len(samples)
     if not samples:
         result["status"] = "warn"
-        result["notes"].append("not verified (no samples)")
+        result["notes"].append(_coded("no_samples", "not verified (no samples)"))
         return result
 
     collisions: list[dict[str, str]] = []
@@ -363,17 +388,18 @@ def check_proposal(
     used_empty = sorted(empty & set(refs))
     if collisions:
         result["status"] = "error"
-        result["notes"].append("collides with other commands")
+        result["notes"].append(_coded("collides", "collides with other commands"))
         result["collisions"] = collisions[:5]
     elif same == len(samples):
         result["status"] = "warn"
-        result["notes"].append("already covered by existing sentences")
+        result["notes"].append(_coded("covered", "already covered by existing sentences"))
     elif skipped or used_empty:
         result["status"] = "warn"
         if skipped:
-            result["notes"].append("checked without optional words (large template)")
+            result["notes"].append(_coded("optional_skipped", "checked without optional words (large template)"))
         if used_empty:
-            result["notes"].append(f"list {used_empty[0]} is empty — checked with a placeholder")
+            result["notes"].append(_coded("list_empty", f"list {used_empty[0]} is empty — checked with a placeholder",
+                                          list=used_empty[0]))
     return result
 
 

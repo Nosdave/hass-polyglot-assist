@@ -29,7 +29,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .corpus import bucket_by_language, string_rules
-from .proposals import bounded_samples, check_proposal, norm, parse_rules
+from .proposals import bounded_samples, check_for_queue, check_proposal, coded_note, norm, parse_rules
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +40,16 @@ CORRECTION_RE = re.compile(
     r"no[,!]|wrong|i said|i meant|non[,!]|pas (ça|celui)|je voulais dire)",
     re.I,
 )
+# a short follow-up that only makes sense after the previous turn ("Und in der Küche?",
+# "and in the bedroom?", "et dans le salon ?"): what it means depends on the question
+# before it, so it never becomes a fixed sentence of one command
+FOLLOW_UP_RE = re.compile(r"^(und|and|et|also|what about|how about|und was ist mit|et pour)\b", re.I)
+FOLLOW_UP_MAX_WORDS = 5
+
+
+def is_follow_up(text: str) -> bool:
+    words = norm(text or "").split()
+    return bool(words) and len(words) <= FOLLOW_UP_MAX_WORDS and bool(FOLLOW_UP_RE.match(" ".join(words)))
 
 
 class Monitor:
@@ -128,10 +138,14 @@ class Monitor:
 
     @staticmethod
     def find_repeated(entries: list[dict[str, Any]], min_count: int = 2) -> list[dict[str, Any]]:
-        """Assistant-handled sentences that led to a device action, ≥ min_count times."""
+        """Assistant-handled sentences that led to a device action, ≥ min_count times.
+
+        Context-dependent follow-ups ("Und in der Küche?") are left out: the same words
+        mean something else after every question, so they are no evidence for any command.
+        """
         groups: dict[str, list[dict[str, Any]]] = {}
         for e in entries:
-            if e.get("result") == "assistant" and e.get("targets"):
+            if e.get("result") == "assistant" and e.get("targets") and not is_follow_up(e.get("text", "")):
                 groups.setdefault(norm(e.get("text", "")), []).append(e)
         out = []
         for key, items in groups.items():
@@ -284,13 +298,29 @@ def _template_matches(template: str, lang: str, text: str, slot_lists: dict, rul
         return False
 
 
+def in_language(samples: list[dict[str, Any]], lang: str) -> list[dict[str, Any]]:
+    """Samples said in ``lang`` (or of unknown language) — a sentence of another
+    language is never evidence for this language's template."""
+    return [r for r in samples if (r.get("lang") or lang) == lang]
+
+
+def supporting_evidence(template: str, lang: str, samples: list[dict[str, Any]], slot_lists: dict,
+                        rules: dict[str, str]) -> list[dict[str, Any]]:
+    """The samples that really support this template: same language, recognised by it."""
+    return [e for e in in_language(samples, lang)
+            if e.get("text") and _template_matches(template, lang, e["text"], slot_lists, rules)]
+
+
 def _harden(check: dict[str, Any], *, name: str, cfg: dict[str, Any], template: str, lang: str, evidence: list[dict[str, Any]],
             slot_lists: dict, rules: dict[str, str], builtin_match, names_of) -> dict[str, Any]:
     """Extra rules for proposals that come from strangers' sentences (monitoring)."""
     from hassil.intents import WildcardSlotList  # noqa: PLC0415
     from hassil.parse_expression import parse_sentence  # noqa: PLC0415
 
-    def fail(note: str) -> dict[str, Any]:
+    check = {**check, "i18n": dict(check.get("i18n") or {})}
+
+    def fail(key: str, note: str, **params: Any) -> dict[str, Any]:
+        coded_note(check, key, note, **params)
         return {**check, "status": "error", "notes": [*check.get("notes", []), note]}
 
     if check.get("status") == "error":
@@ -298,40 +328,42 @@ def _harden(check: dict[str, Any], *, name: str, cfg: dict[str, Any], template: 
     try:
         parsed = parse_sentence(template)
     except Exception:  # noqa: BLE001
-        return fail("not parsable")
+        return fail("not_parsable", "not parsable")
     if any(isinstance(slot_lists.get(r), WildcardSlotList) for r in _all_list_refs(parsed, parse_rules(rules), slot_lists)):
-        return fail("free-text placeholders are not allowed in learned sentences")
+        return fail("free_text", "free-text placeholders are not allowed in learned sentences")
     # bound to the evidence: the template must recognise a sentence that was really said,
     # and only THOSE sentences count for the target check below
-    evidence = [e for e in evidence if e.get("text") and _template_matches(template, lang, e["text"], slot_lists, rules)]
+    evidence = supporting_evidence(template, lang, evidence, slot_lists, rules)
     if not evidence:
-        return fail("does not match the sentences that were actually said")
+        return fail("no_said_match", "does not match the sentences that were actually said")
     # must not take over Home Assistant's built-in commands
     if builtin_match is not None:
         for sample in bounded_samples(parsed, slot_lists, parse_rules(rules), lang):  # same sample set as the normal check
             if (hit := builtin_match(sample, lang)) is not None:
-                return fail(f"would take over a Home Assistant command ({hit}) for “{sample}”")
+                return fail("takes_over_builtin", f"would take over a Home Assistant command ({hit}) for “{sample}”",
+                            hit=hit, sample=sample)
     # the command must switch what the assistant switched back then
-    def warn(note: str) -> dict[str, Any]:
+    def warn(key: str, note: str) -> dict[str, Any]:
+        coded_note(check, key, note)
         return {**check, "status": "warn" if check.get("status") == "ok" else check.get("status"),
                 "notes": [*check.get("notes", []), note]}
 
     if not cfg.get("action"):
-        return warn("what this command switches is not known (intent_script) — review it")
+        return warn("action_unknown", "what this command switches is not known (intent_script) — review it")
     entities = _action_entities(cfg.get("action"))
     if entities is None:
-        return warn("the command's targets cannot be fully checked (template, script, nested steps or area/device targets) — review it")
+        return warn("targets_unverifiable", "the command's targets cannot be fully checked (template, script, nested steps or area/device targets) — review it")
     if not entities:
-        return warn("the command names no device (e.g. it runs a script) — review it")
+        return warn("no_device", "the command names no device (e.g. it runs a script) — review it")
     calls = [t.get("target") if isinstance(t.get("target"), dict) else t.get("args")
              for e in evidence for t in (e.get("targets") or [])]
     if any(_area_only(args) for args in calls):
-        return warn("the assistant switched a whole area or floor — review which devices it means")
+        return warn("whole_area", "the assistant switched a whole area or floor — review which devices it means")
     # per sentence: each sentence the template recognises must have switched ALL targets itself
     per_sentence = [[_call_target(t.get("target") if isinstance(t.get("target"), dict) else t.get("args"))
                      for t in (e.get("targets") or [])] for e in evidence]
     if any(c.get("unreadable") for one in per_sentence for c in one):
-        return warn("what the assistant switched cannot be read completely — review it")
+        return warn("calls_unreadable", "what the assistant switched cannot be read completely — review it")
     said = {n for one in per_sentence for call in one for n in call["names"]}
     if entities and said and names_of is not None:
         # EVERY target of the command must be one the assistant switched for these sentences
@@ -343,11 +375,12 @@ def _harden(check: dict[str, Any], *, name: str, cfg: dict[str, Any], template: 
 
         extra = [e for e in entities if any(not any(covers(c, e) for c in one) for one in per_sentence)]
         if not extra and any(c["area"] for one in per_sentence for c in one if any(covers(c, e) for e in entities)):
-            return warn("the assistant named the device together with an area — review that it is this one")
+            return warn("device_with_area", "the assistant named the device together with an area — review that it is this one")
         if extra:
-            return fail(f"this command switches something else than the assistant did ({', '.join(extra[:3])})")
+            return fail("switches_other", f"this command switches something else than the assistant did ({', '.join(extra[:3])})",
+                        entities=", ".join(extra[:3]))
     elif entities and not said:
-        return warn("the assistant's tool calls name no target — review it")
+        return warn("no_target_named", "the assistant's tool calls name no target — review it")
     return check
 
 
@@ -455,7 +488,6 @@ def build_monitor_items(
     """
     intents = config.get("intents") or {}
     rules = string_rules(config)  # the user's <rules> are known, unknown ones are refused
-    evidence = "; ".join(f"„{r['text']}“ {r['count']}×" for r in repeated[:5])
     items: list[dict[str, Any]] = []
     for line in suggestions[:20]:
         parts = [p.strip() for p in line.split("|", 2)]  # the template may contain |
@@ -472,15 +504,20 @@ def build_monitor_items(
         parsed_rules = parse_rules(rules)
         check = check_proposal(name, template, source, lambda t, lang=lang: matches(t, lang), slot_lists, rules, lang,
                                _other_samples(config, slot_lists, parsed_rules, lang, name))
-        mine = [r for r in repeated if (r.get("lang") or lang) == lang] or repeated
+        mine = in_language(repeated, lang)  # never the other languages' sentences
         check = _harden(check, name=name, cfg=cfg, template=template, lang=lang, evidence=mine,
                         slot_lists=slot_lists, rules=rules, builtin_match=builtin_match, names_of=names_of)
+        # "where from" lists only the sentences THIS template recognises (not every sentence
+        # the assistant handled that night); none at all when it recognises none of them
+        support = supporting_evidence(template, lang, mine, slot_lists, rules)
+        evidence = "; ".join(f"„{r['text']}“ {r['count']}×" for r in support[:5])
         items.append({
             "op": "add_sentences",
             "payload": {"intent": name, "lang": lang, "sentences": [template]},
             "title": f"{name} ({lang}): {template}",
-            "origin": {"source": "monitor", "detail": f"ging wiederholt an den Assistenten: {evidence}",
-                       "evidence": repeated[:5]},
-            "check": {"status": check["status"], "notes": check["notes"]},
+            "origin": {"source": "monitor",
+                       "detail": f"ging wiederholt an den Assistenten: {evidence}" if evidence else "ging wiederholt an den Assistenten",
+                       "evidence": support[:5]},
+            "check": check_for_queue(check),
         })
     return items
