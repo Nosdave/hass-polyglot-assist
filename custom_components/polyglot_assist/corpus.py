@@ -147,8 +147,7 @@ def bucket_by_language(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
             continue
         for lang, sent_list in sentences.items():
             if not isinstance(lang, str) or not LANG_CODE_RE.match(lang):
-                problems.append(f"{name}: invalid language code {lang!r}")
-                continue
+                continue  # validate() reports it; must not crash the whole catalog
             if isinstance(sent_list, str):
                 continue  # list("abc") would split into letters; validate() reports it
             per_lang.setdefault(lang, {})[intent_name] = {
