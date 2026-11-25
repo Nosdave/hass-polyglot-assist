@@ -31,7 +31,7 @@
           "reload": "Recharger les commandes (relire intents.yaml)",
           "chat_log": "Commandes reconnues dans l'historique de conversation",
           "source": "Source des commandes (fichier YAML ou catalogue)",
-          "translation": "Suggestions de traduction (tâche IA)",
+          "translation": "Tâches IA (suggestions, vérification des langues)",
           "languages": "Langues",
           "answers": "Réponse aux commandes (voix ou son)",
           "monitor": "Suivi des demandes vocales"
@@ -103,10 +103,11 @@
         }
       },
       "translation": {
-        "title": "Suggestions de traduction",
-        "description": "Entité de tâche IA qui propose des phrases et des noms pour d'autres langues. Les suggestions sont vérifiées et appliquées uniquement si tu les acceptes. Les tâches IA avec outils (une API LLM) ne sont pas autorisées : les phrases et les noms d'appareils sont du texte non fiable pour le modèle. Les phrases et les noms sont envoyés à cette tâche IA – avec un fournisseur cloud, ils quittent ta maison.",
+        "title": "Tâches IA",
+        "description": "Deux entités de tâche IA distinctes. **Suggestions et traductions** : écrit des phrases, des noms et de nouvelles commandes (un modèle performant de préférence). **Vérification des langues** : devrait être le modèle qui RÉPOND dans ton assistant vocal (l'agent de repli de Polyglot) – si le champ est vide, la tâche IA sans outils de la même intégration que cet agent est utilisée. Les suggestions sont vérifiées et appliquées uniquement si tu les acceptes. Les tâches IA avec outils (une API LLM) ne sont pas autorisées : les phrases et les noms d'appareils sont du texte non fiable pour le modèle. Avec un fournisseur cloud, ils quittent ta maison.",
         "data": {
-          "translation_ai_task": "Entité de tâche IA"
+          "translation_ai_task": "IA pour les suggestions et traductions",
+          "check_ai_task": "IA pour la vérification des langues (l'IA qui répond)"
         }
       },
       "languages": {

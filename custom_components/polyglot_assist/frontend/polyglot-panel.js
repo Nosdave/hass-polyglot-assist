@@ -1124,6 +1124,8 @@ class PolyglotAssistPanel extends HTMLElement {
         <select data-act="chimetts" aria-label="${t("tone.inner")}"><option value="">${t("tone.none")}</option>${Object.keys(this._hass.states).filter((e) => e.startsWith("tts.") && !(o.polyglot_tts || []).includes(e)).map((e) => `<option value="${esc(e)}" ${opts.chime_tts === e ? "selected" : ""}>${esc(this._hass.states[e]?.attributes?.friendly_name || e)}</option>`).join("")}</select></div>` : ""}
       <div class="set"><div><div class="t">${t("settings.ai_task")}${this._tip("aitask")}</div></div>
         <select data-act="aitask" aria-label="${t("settings.ai_task_label")}"><option value="">${t("settings.ai_task_none")}</option>${aiTasks.map((e) => `<option value="${esc(e)}" ${opts.translation_ai_task === e ? "selected" : ""}>${esc(this._hass.states[e]?.attributes?.friendly_name || e)}</option>`).join("")}</select></div>
+      <div class="set"><div><div class="t">${t("settings.check_ai_task")}${this._tip("checkaitask")}</div>${!opts.check_ai_task && !o.check_ai_task_default ? `<div class="hint">${t("settings.check_ai_task_hint_none")}</div>` : ""}</div>
+        <select data-act="checkaitask" aria-label="${t("settings.check_ai_task")}"><option value="">${o.check_ai_task_default ? t("settings.check_ai_task_auto", { name: this._hass.states[o.check_ai_task_default]?.attributes?.friendly_name || o.check_ai_task_default }) : t("settings.check_ai_task_auto_none")}</option>${aiTasks.map((e) => `<option value="${esc(e)}" ${opts.check_ai_task === e ? "selected" : ""}>${esc(this._hass.states[e]?.attributes?.friendly_name || e)}</option>`).join("")}</select></div>
       <div class="set"><div><div class="t">${t("settings.builtin")}${this._tip("builtin")}</div><div class="hint">${t("settings.builtin_hint")}</div></div>
         <button class="switch" role="switch" data-act="opt" data-k="builtin_commands" aria-checked="${opts.builtin_commands === false ? "false" : "true"}" aria-label="${t("settings.builtin_label")}"></button></div>
       <div class="set"><div><div class="t">${t("voicelearn.title")}${this._tip("voicelearn")}</div><div class="hint">${t("voicelearn.hint")}</div></div>
@@ -1225,6 +1227,7 @@ class PolyglotAssistPanel extends HTMLElement {
       <div class="tbl"><table><thead><tr><th>${t("langs.language")}</th><th>${t("langs.stt")}</th><th>${t("langs.ai")}</th><th>${t("langs.commands")}</th><th>${t("langs.tts")}</th></tr></thead><tbody>
       ${all.map((l) => { const r = byLang[l] || {}; return `<tr><td>${esc(this._ln(l))}</td><td>${amp(r.stt)}${stt && stt[l] ? ` <span class="hint">${stt[l].ok === true ? "✓" : stt[l].ok === false ? "✕" : "?"} ${esc(stt[l].heard || stt[l].error || "")}</span>` : ""}</td><td>${amp(r.ai)}</td><td>${r.commands > 0 || r.builtin ? amp(true) : amp(r.language ? false : null)}${r.language ? ` <span class="hint">${esc(String(r.commands || 0))}${r.builtin ? " + HA" : ""}</span>` : ""}</td><td>${amp(r.tts)}</td></tr>`; }).join("")}
       </tbody></table></div>
+      ${check && check.ai_task ? `<p class="hint">${t("langs.ai_checked", { ai_task: this._hass.states[check.ai_task]?.attributes?.friendly_name || check.ai_task, from: this.t(check.ai_task_from === "chosen" ? "langs.ai_from_chosen" : "langs.ai_from_agent"), agent: this._hass.states[check.answering_agent]?.attributes?.friendly_name || check.answering_agent || "–" })}</p>` : ""}
       ${check && check.pipeline ? `<p class="hint">${t("langs.source", { assistant: check.pipeline.name, stt: check.pipeline.stt_engine || "–", tts: check.pipeline.tts_engine || "–", language: this._ln(check.pipeline.language) })}</p>` : ""}
       <div class="row"><button class="b" data-act="stttest" ${this.s.sttBusy ? 'disabled aria-busy="true"' : ""}>${this.s.sttBusy ? `<span class="spin"></span>` : ""}${t("langs.stt_test")}</button>${this.s.sttTest ? `<span class="hint">${t("langs.stt_hint")}${(this.s.sttTest.skipped || []).length ? " " + t("langs.stt_skipped", { languages: this.s.sttTest.skipped.map((l) => this._ln(l)).join(", ") }) : ""}</span>` : ""}</div>${this._msg("stt")}</div>`;
   }
@@ -1622,8 +1625,9 @@ class PolyglotAssistPanel extends HTMLElement {
     }
     if (el.dataset.cat !== undefined) { this.s.catEdit[+el.dataset.cat].to = el.value.trim() || this.s.catEdit[+el.dataset.cat].to; return; }
     if (el.dataset.act === "safety") { await this._patchIntent(el.dataset.name, { safety: el.value === "normal" ? undefined : el.value }, "cmd"); return; }
-    if (el.dataset.act === "aitask") {
-      try { await this.ws("options", { translation_ai_task: el.value || null }); this._setMsg("set", this.t("messages.saved"), "ok"); await this._reload(["overview"]); }
+    if (el.dataset.act === "aitask" || el.dataset.act === "checkaitask") {
+      const key = el.dataset.act === "aitask" ? "translation_ai_task" : "check_ai_task";
+      try { await this.ws("options", { [key]: el.value || null }); this._setMsg("set", this.t("messages.saved"), "ok"); await this._reload(["overview"]); }
       catch (err) { this._setMsg("set", err.code === "ai_task_has_tools" ? this.t("messages.ai_task_has_tools") : this.t("messages.error", { error: err.message }), "err"); await this._reload(["overview"]); }
       return;
     }
